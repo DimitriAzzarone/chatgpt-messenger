@@ -1,82 +1,578 @@
 package com.dimitriazzarone.chatgptmessenger;
 
 import android.Manifest;
-import android.app.*;
-import android.content.*;
+import android.app.Activity;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
-import android.os.*;
-import android.view.*;
-import android.webkit.*;
-import android.widget.*;
+import android.os.Bundle;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.view.Gravity;
+import android.view.View;
+import android.webkit.CookieManager;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+import android.widget.ToggleButton;
+
+import java.util.ArrayList;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final String HOME="https://chatgpt.com/", CHANNEL_ID="chatgpt_responses";
-    private static final int REQ_AUDIO=2001, REQ_NOTIFICATIONS=2002;
-    private WebView webView; private FrameLayout webContainer; private ProgressBar progressBar;
-    private ToggleButton autoReadButton; private boolean autoReadEnabled=true; private String lastUrl=HOME;
-    private PermissionRequest pendingWebPermission;
 
-    @Override public void onCreate(Bundle b){ super.onCreate(b); createNotificationChannel(); requestNotificationPermissionIfNeeded(); buildInterface(); createWebView(); webView.loadUrl(HOME); }
+    private static final String HOME = "https://chatgpt.com/";
+    private static final int REQ_AUDIO = 3001;
 
-    private void buildInterface(){
-        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(Color.rgb(11,20,26));
-        LinearLayout top=new LinearLayout(this); top.setGravity(Gravity.CENTER_VERTICAL); top.setPadding(dp(8),dp(4),dp(8),dp(4)); top.setBackgroundColor(Color.rgb(32,44,51));
-        TextView logo=new TextView(this); logo.setText("AI"); logo.setGravity(Gravity.CENTER); logo.setTextColor(Color.rgb(6,44,37)); logo.setBackgroundColor(Color.rgb(0,168,132));
-        TextView title=new TextView(this); title.setText("  ChatGPT"); title.setTextColor(Color.WHITE); title.setTextSize(17);
-        Button back=button("‹"), reload=button("↻");
-        top.addView(logo,new LinearLayout.LayoutParams(dp(38),dp(38))); top.addView(title,new LinearLayout.LayoutParams(0,dp(44),1)); top.addView(back,new LinearLayout.LayoutParams(dp(44),dp(44))); top.addView(reload,new LinearLayout.LayoutParams(dp(44),dp(44)));
-        progressBar=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal); progressBar.setMax(100); progressBar.setVisibility(View.GONE);
-        webContainer=new FrameLayout(this);
-        LinearLayout bottom=new LinearLayout(this); bottom.setGravity(Gravity.CENTER_VERTICAL); bottom.setPadding(dp(8),dp(4),dp(8),dp(4)); bottom.setBackgroundColor(Color.rgb(32,44,51));
-        TextView hint=new TextView(this); hint.setText("Enter = invia"); hint.setTextColor(Color.LTGRAY); hint.setTextSize(11);
-        autoReadButton=new ToggleButton(this); autoReadButton.setTextOff("VOCE OFF"); autoReadButton.setTextOn("VOCE ON"); autoReadButton.setChecked(true);
-        bottom.addView(hint,new LinearLayout.LayoutParams(0,dp(46),1)); bottom.addView(autoReadButton,new LinearLayout.LayoutParams(dp(108),dp(46)));
-        root.addView(top); root.addView(progressBar,new LinearLayout.LayoutParams(-1,dp(3))); root.addView(webContainer,new LinearLayout.LayoutParams(-1,0,1)); root.addView(bottom,new LinearLayout.LayoutParams(-1,dp(54))); setContentView(root);
-        back.setOnClickListener(v->{if(webView.canGoBack())webView.goBack();}); reload.setOnClickListener(v->webView.reload()); autoReadButton.setOnCheckedChangeListener((btt,c)->{autoReadEnabled=c; updateAutoReadSetting();});
+    private WebView webView;
+    private FrameLayout webContainer;
+    private ProgressBar progressBar;
+    private Button talkButton;
+    private ToggleButton autoReadButton;
+    private TextView statusText;
+
+    private SpeechRecognizer speechRecognizer;
+    private Intent speechIntent;
+    private boolean listening = false;
+    private boolean autoReadEnabled = true;
+    private String lastUrl = HOME;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        buildInterface();
+        createSpeechRecognizer();
+        createWebView();
+
+        webView.loadUrl(HOME);
     }
-    private Button button(String t){ Button b=new Button(this); b.setText(t); b.setTextColor(Color.WHITE); b.setTextSize(21); b.setBackgroundColor(Color.TRANSPARENT); return b; }
 
-    private void createWebView(){
-        webView=new WebView(this); webContainer.addView(webView,new FrameLayout.LayoutParams(-1,-1)); webView.addJavascriptInterface(new NativeBridge(),"AndroidMessenger");
-        WebSettings s=webView.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setDatabaseEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(true); s.setMediaPlaybackRequiresUserGesture(false); s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        CookieManager c=CookieManager.getInstance(); c.setAcceptCookie(true); c.setAcceptThirdPartyCookies(webView,true);
-        webView.setWebChromeClient(new WebChromeClient(){
-            @Override public void onProgressChanged(WebView v,int p){progressBar.setProgress(p); progressBar.setVisibility(p>=100?View.GONE:View.VISIBLE);} 
-            @Override public void onPermissionRequest(PermissionRequest r){ runOnUiThread(()->handleWebPermissionRequest(r)); }
+    private void buildInterface() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.rgb(11, 20, 26));
+
+        LinearLayout topBar = new LinearLayout(this);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        topBar.setPadding(dp(8), dp(4), dp(8), dp(4));
+        topBar.setBackgroundColor(Color.rgb(32, 44, 51));
+
+        TextView logo = new TextView(this);
+        logo.setText("AI");
+        logo.setTextColor(Color.rgb(6, 44, 37));
+        logo.setTextSize(15);
+        logo.setGravity(Gravity.CENTER);
+        logo.setBackgroundColor(Color.rgb(0, 168, 132));
+
+        TextView title = new TextView(this);
+        title.setText("  ChatGPT Radio");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(17);
+
+        Button back = makeButton("‹");
+        Button reload = makeButton("↻");
+
+        topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
+        topBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        topBar.addView(reload, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        progressBar.setMax(100);
+        progressBar.setVisibility(View.GONE);
+
+        webContainer = new FrameLayout(this);
+
+        LinearLayout bottomBar = new LinearLayout(this);
+        bottomBar.setOrientation(LinearLayout.VERTICAL);
+        bottomBar.setGravity(Gravity.CENTER);
+        bottomBar.setPadding(dp(8), dp(6), dp(8), dp(8));
+        bottomBar.setBackgroundColor(Color.rgb(32, 44, 51));
+
+        statusText = new TextView(this);
+        statusText.setText("Pronto");
+        statusText.setTextColor(Color.LTGRAY);
+        statusText.setTextSize(12);
+        statusText.setGravity(Gravity.CENTER);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER);
+
+        talkButton = new Button(this);
+        talkButton.setText("🎙  PARLA");
+        talkButton.setTextSize(18);
+
+        autoReadButton = new ToggleButton(this);
+        autoReadButton.setTextOff("VOCE OFF");
+        autoReadButton.setTextOn("VOCE ON");
+        autoReadButton.setChecked(true);
+
+        controls.addView(talkButton, new LinearLayout.LayoutParams(0, dp(56), 2));
+        controls.addView(autoReadButton, new LinearLayout.LayoutParams(0, dp(56), 1));
+
+        bottomBar.addView(statusText, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(24)));
+        bottomBar.addView(controls, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
+
+        root.addView(topBar);
+        root.addView(progressBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(3)));
+        root.addView(webContainer, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        root.addView(bottomBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(90)));
+
+        setContentView(root);
+
+        back.setOnClickListener(v -> {
+            if (webView != null && webView.canGoBack()) {
+                webView.goBack();
+            }
         });
-        webView.setWebViewClient(new WebViewClient(){
-            @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){return false;}
-            @Override public void onPageStarted(WebView v,String u,android.graphics.Bitmap f){lastUrl=u;}
-            @Override public void onPageFinished(WebView v,String u){lastUrl=u; injectEnhancements();}
-            @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail d){String u=lastUrl; webContainer.removeView(webView); webView.destroy(); createWebView(); webView.loadUrl(u); return true;}
+
+        reload.setOnClickListener(v -> {
+            if (webView != null) {
+                webView.reload();
+            }
+        });
+
+        talkButton.setOnClickListener(v -> toggleSpeechRecognition());
+
+        autoReadButton.setOnCheckedChangeListener((buttonView, checked) -> {
+            autoReadEnabled = checked;
+            updateAutoReadSetting();
         });
     }
 
-    private void handleWebPermissionRequest(PermissionRequest r){
-        boolean audio=false; for(String x:r.getResources()) if(PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(x)) audio=true;
-        if(!audio){r.deny();return;}
-        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED) r.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-        else { pendingWebPermission=r; requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_AUDIO); }
+    private Button makeButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextColor(Color.WHITE);
+        button.setTextSize(21);
+        button.setBackgroundColor(Color.TRANSPARENT);
+        return button;
     }
-    @Override public void onRequestPermissionsResult(int rc,String[] p,int[] g){ super.onRequestPermissionsResult(rc,p,g); if(rc==REQ_AUDIO&&pendingWebPermission!=null){ if(g.length>0&&g[0]==PackageManager.PERMISSION_GRANTED) pendingWebPermission.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE}); else pendingWebPermission.deny(); pendingWebPermission=null; } }
 
-    private void createNotificationChannel(){ if(Build.VERSION.SDK_INT>=26){ NotificationChannel ch=new NotificationChannel(CHANNEL_ID,"Risposte ChatGPT",NotificationManager.IMPORTANCE_DEFAULT); getSystemService(NotificationManager.class).createNotificationChannel(ch); } }
-    private void requestNotificationPermissionIfNeeded(){ if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},REQ_NOTIFICATIONS); }
-    private void showResponseNotification(String preview){
-        if(Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)return;
-        String body=(preview==null||preview.trim().isEmpty())?"Nuova risposta disponibile":preview.trim(); if(body.length()>140)body=body.substring(0,140)+"…";
-        Intent i=new Intent(this,MainActivity.class); PendingIntent pi=PendingIntent.getActivity(this,0,i,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL_ID):new Notification.Builder(this); b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("ChatGPT ha risposto").setContentText(body).setAutoCancel(true).setContentIntent(pi); ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify((int)(System.currentTimeMillis()%Integer.MAX_VALUE),b.build());
-    }
-    private class NativeBridge { @JavascriptInterface public void notifyResponse(String p){ runOnUiThread(()->showResponseNotification(p)); } }
+    private void createSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(
+                    this,
+                    "Riconoscimento vocale Android non disponibile",
+                    Toast.LENGTH_LONG
+            ).show();
+            talkButton.setEnabled(false);
+            return;
+        }
 
-    private void injectEnhancements(){
-        String js="(function(){if(window.__cgptMessengerInstalled){window.__cgptMessengerAutoRead="+(autoReadEnabled?"true":"false")+";return;}window.__cgptMessengerInstalled=true;window.__cgptMessengerAutoRead="+(autoReadEnabled?"true":"false")+";function n(s){return(s||'').toLowerCase().trim();}function msgs(){return Array.from(document.querySelectorAll(\"[data-message-author-role='assistant']\"));}function rb(e){if(!e||e.tagName!=='BUTTON')return false;const a=n((e.getAttribute('aria-label')||'')+' '+(e.getAttribute('title')||'')+' '+(e.innerText||''));return a.includes('read aloud')||a.includes('leggi ad alta voce')||a.includes('lettura ad alta voce');}function reads(){return Array.from(document.querySelectorAll('button')).filter(rb);}function gen(){return Array.from(document.querySelectorAll('button')).some(b=>{const x=n((b.getAttribute('aria-label')||'')+' '+(b.innerText||''));return x.includes('stop generating')||x.includes('interrompi generazione')||x.includes('stop streaming');});}let km=msgs().length,kr=reads().length,t=null;function go(){clearTimeout(t);t=setTimeout(()=>{if(gen()){go();return;}const m=msgs(),txt=m.length?(m[m.length-1].innerText||'').trim():'';try{AndroidMessenger.notifyResponse(txt);}catch(e){}if(!window.__cgptMessengerAutoRead)return;const bs=reads();if(!bs.length)return;const b=bs[bs.length-1];if(b.dataset.cgptMessengerRead==='1')return;b.dataset.cgptMessengerRead='1';b.click();},1500);}new MutationObserver(()=>{const mc=msgs().length,rc=reads().length;if(mc>km||rc>kr){km=mc;kr=rc;go();}else if(gen())clearTimeout(t);}).observe(document.documentElement,{childList:true,subtree:true,attributes:true});document.addEventListener('keydown',e=>{if(e.key!=='Enter'||e.shiftKey||e.isComposing)return;const x=e.target;if(!x)return;const ed=x.tagName==='TEXTAREA'||x.isContentEditable||x.getAttribute('contenteditable')==='true';if(!ed)return;const send=document.querySelector(\"button[data-testid='send-button']\")||Array.from(document.querySelectorAll('button')).find(b=>{const a=n((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||''));return a.includes('send')||a.includes('invia');});if(send&&!send.disabled){e.preventDefault();e.stopImmediatePropagation();send.click();}},true);})();";
-        webView.evaluateJavascript(js,null);
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+
+        speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        speechIntent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+        );
+        speechIntent.putExtra(
+                RecognizerIntent.EXTRA_LANGUAGE,
+                Locale.getDefault().toLanguageTag()
+        );
+        speechIntent.putExtra(
+                RecognizerIntent.EXTRA_PARTIAL_RESULTS,
+                false
+        );
+        speechIntent.putExtra(
+                RecognizerIntent.EXTRA_MAX_RESULTS,
+                1
+        );
+
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override
+            public void onReadyForSpeech(Bundle params) {
+                listening = true;
+                talkButton.setText("■  STOP");
+                statusText.setText("Ti ascolto…");
+            }
+
+            @Override
+            public void onBeginningOfSpeech() {
+                statusText.setText("Parla…");
+            }
+
+            @Override
+            public void onRmsChanged(float rmsdB) {}
+
+            @Override
+            public void onBufferReceived(byte[] buffer) {}
+
+            @Override
+            public void onEndOfSpeech() {
+                statusText.setText("Trascrivo…");
+            }
+
+            @Override
+            public void onError(int error) {
+                listening = false;
+                talkButton.setText("🎙  PARLA");
+
+                String msg;
+                switch (error) {
+                    case SpeechRecognizer.ERROR_NO_MATCH:
+                        msg = "Non ho capito. Riprova.";
+                        break;
+                    case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                        msg = "Non ho sentito parlare.";
+                        break;
+                    case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                        msg = "Permesso microfono mancante.";
+                        break;
+                    default:
+                        msg = "Errore riconoscimento vocale: " + error;
+                }
+
+                statusText.setText(msg);
+            }
+
+            @Override
+            public void onResults(Bundle results) {
+                listening = false;
+                talkButton.setText("🎙  PARLA");
+
+                ArrayList<String> matches =
+                        results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+
+                if (matches == null || matches.isEmpty()) {
+                    statusText.setText("Nessun testo riconosciuto");
+                    return;
+                }
+
+                String text = matches.get(0).trim();
+
+                if (text.isEmpty()) {
+                    statusText.setText("Nessun testo riconosciuto");
+                    return;
+                }
+
+                statusText.setText("Invio a ChatGPT…");
+                injectTextAndSend(text);
+            }
+
+            @Override
+            public void onPartialResults(Bundle partialResults) {}
+
+            @Override
+            public void onEvent(int eventType, Bundle params) {}
+        });
     }
-    private void updateAutoReadSetting(){ if(webView!=null) webView.evaluateJavascript("window.__cgptMessengerAutoRead="+(autoReadEnabled?"true":"false")+";",null); }
-    @Override public void onBackPressed(){ if(webView!=null&&webView.canGoBack())webView.goBack(); else super.onBackPressed(); }
-    @Override protected void onDestroy(){ if(webView!=null)webView.destroy(); super.onDestroy(); }
-    private int dp(int v){ return Math.round(v*getResources().getDisplayMetrics().density); }
+
+    private void toggleSpeechRecognition() {
+        if (speechRecognizer == null) {
+            return;
+        }
+
+        if (listening) {
+            speechRecognizer.stopListening();
+            return;
+        }
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQ_AUDIO
+            );
+            return;
+        }
+
+        startListening();
+    }
+
+    private void startListening() {
+        try {
+            speechRecognizer.startListening(speechIntent);
+        } catch (Exception e) {
+            statusText.setText("Impossibile avviare il microfono");
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode,
+            String[] permissions,
+            int[] grantResults
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == REQ_AUDIO) {
+            if (grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startListening();
+            } else {
+                statusText.setText("Microfono non autorizzato");
+            }
+        }
+    }
+
+    private void createWebView() {
+        webView = new WebView(this);
+        webView.setBackgroundColor(Color.rgb(11, 20, 26));
+
+        webContainer.addView(
+                webView,
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                )
+        );
+
+        WebSettings settings = webView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(true);
+        settings.setSupportMultipleWindows(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setMediaPlaybackRequiresUserGesture(false);
+        settings.setBuiltInZoomControls(false);
+        settings.setDisplayZoomControls(false);
+        settings.setLoadWithOverviewMode(false);
+        settings.setUseWideViewPort(false);
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(webView, true);
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onProgressChanged(WebView view, int progress) {
+                progressBar.setProgress(progress);
+                progressBar.setVisibility(
+                        progress >= 100 ? View.GONE : View.VISIBLE
+                );
+            }
+        });
+
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(
+                    WebView view,
+                    WebResourceRequest request
+            ) {
+                return false;
+            }
+
+            @Override
+            public void onPageStarted(
+                    WebView view,
+                    String url,
+                    android.graphics.Bitmap favicon
+            ) {
+                lastUrl = url;
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                lastUrl = url;
+                injectAutoReadObserver();
+            }
+
+            @Override
+            public boolean onRenderProcessGone(
+                    WebView view,
+                    RenderProcessGoneDetail detail
+            ) {
+                String restoreUrl = lastUrl;
+
+                webContainer.removeView(webView);
+                webView.destroy();
+                createWebView();
+                webView.loadUrl(restoreUrl);
+
+                Toast.makeText(
+                        MainActivity.this,
+                        "Pagina ripristinata",
+                        Toast.LENGTH_SHORT
+                ).show();
+
+                return true;
+            }
+        });
+    }
+
+    private void injectTextAndSend(String text) {
+        if (webView == null) {
+            return;
+        }
+
+        String escaped = text
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "");
+
+        String script =
+                "(function(){" +
+                " const text='" + escaped + "';" +
+                " function findEditor(){" +
+                "  return document.querySelector('#prompt-textarea') ||" +
+                "         document.querySelector(\"textarea[data-testid='prompt-textarea']\") ||" +
+                "         document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\") ||" +
+                "         document.querySelector(\"div[contenteditable='true']\");" +
+                " }" +
+                " function findSend(){" +
+                "  return document.querySelector(\"button[data-testid='send-button']\") ||" +
+                "         Array.from(document.querySelectorAll('button')).find(b=>{" +
+                "          const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
+                "          return a.includes('send')||a.includes('invia');" +
+                "         });" +
+                " }" +
+                " const editor=findEditor();" +
+                " if(!editor)return 'NO_EDITOR';" +
+                " editor.focus();" +
+                " if(editor.tagName==='TEXTAREA'||editor.tagName==='INPUT'){" +
+                "  const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(editor),'value')?.set;" +
+                "  if(setter)setter.call(editor,text);else editor.value=text;" +
+                " }else{" +
+                "  editor.innerHTML='';" +
+                "  editor.textContent=text;" +
+                " }" +
+                " editor.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));" +
+                " editor.dispatchEvent(new Event('change',{bubbles:true}));" +
+                " setTimeout(()=>{" +
+                "  const send=findSend();" +
+                "  if(send&&!send.disabled)send.click();" +
+                " },350);" +
+                " return 'OK';" +
+                "})();";
+
+        webView.evaluateJavascript(script, value -> runOnUiThread(() -> {
+            if (value != null && value.contains("NO_EDITOR")) {
+                statusText.setText("Casella ChatGPT non trovata");
+            } else {
+                statusText.setText("Attendo la risposta…");
+            }
+        }));
+    }
+
+    private void injectAutoReadObserver() {
+        if (webView == null) {
+            return;
+        }
+
+        String script =
+                "(function(){" +
+                " if(window.__radioInstalled){" +
+                "  window.__radioAutoRead=" + (autoReadEnabled ? "true" : "false") + ";" +
+                "  return;" +
+                " }" +
+                " window.__radioInstalled=true;" +
+                " window.__radioAutoRead=" + (autoReadEnabled ? "true" : "false") + ";" +
+
+                " function norm(s){return(s||'').toLowerCase().trim();}" +
+
+                " function readButtons(){" +
+                "  return Array.from(document.querySelectorAll('button')).filter(b=>{" +
+                "   const a=norm((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.innerText||''));" +
+                "   return a.includes('read aloud')||a.includes('leggi ad alta voce')||a.includes('lettura ad alta voce');" +
+                "  });" +
+                " }" +
+
+                " function generating(){" +
+                "  return Array.from(document.querySelectorAll('button')).some(b=>{" +
+                "   const a=norm((b.getAttribute('aria-label')||'')+' '+(b.innerText||''));" +
+                "   return a.includes('stop generating')||a.includes('interrompi generazione')||a.includes('stop streaming');" +
+                "  });" +
+                " }" +
+
+                " let known=readButtons().length;" +
+                " let timer=null;" +
+
+                " function tryRead(){" +
+                "  clearTimeout(timer);" +
+                "  timer=setTimeout(()=>{" +
+                "   if(!window.__radioAutoRead)return;" +
+                "   if(generating()){tryRead();return;}" +
+                "   const bs=readButtons();" +
+                "   if(!bs.length)return;" +
+                "   const b=bs[bs.length-1];" +
+                "   if(b.dataset.radioRead==='1')return;" +
+                "   b.dataset.radioRead='1';" +
+                "   b.click();" +
+                "  },1500);" +
+                " }" +
+
+                " new MutationObserver(()=>{" +
+                "  const c=readButtons().length;" +
+                "  if(c>known){" +
+                "   known=c;" +
+                "   tryRead();" +
+                "  }else if(generating()){" +
+                "   clearTimeout(timer);" +
+                "  }" +
+                " }).observe(document.documentElement,{" +
+                "  childList:true,subtree:true,attributes:true" +
+                " });" +
+                "})();";
+
+        webView.evaluateJavascript(script, null);
+    }
+
+    private void updateAutoReadSetting() {
+        if (webView != null) {
+            webView.evaluateJavascript(
+                    "window.__radioAutoRead=" +
+                    (autoReadEnabled ? "true" : "false") +
+                    ";",
+                    null
+            );
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (webView != null && webView.canGoBack()) {
+            webView.goBack();
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (speechRecognizer != null) {
+            speechRecognizer.destroy();
+            speechRecognizer = null;
+        }
+
+        if (webView != null) {
+            webContainer.removeView(webView);
+            webView.stopLoading();
+            webView.loadUrl("about:blank");
+            webView.clearHistory();
+            webView.removeAllViews();
+            webView.destroy();
+            webView = null;
+        }
+
+        super.onDestroy();
+    }
+
+    private int dp(int value) {
+        float density = getResources().getDisplayMetrics().density;
+        return Math.round(value * density);
+    }
 }
