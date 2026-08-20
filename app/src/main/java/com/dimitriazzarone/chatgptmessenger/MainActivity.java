@@ -1,5 +1,9 @@
 package com.dimitriazzarone.chatgptmessenger;
 
+import android.app.DownloadManager;
+import android.content.Context;
+import android.os.Environment;
+import android.webkit.URLUtil;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -49,6 +53,9 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final String PREFS = "radio_prefs";
     private static final String PREF_TTS_VOICE = "tts_voice";
+    private static final String PREF_TTS_MODE = "tts_mode";
+    private static final String MODE_NORMAL = "normal";
+    private static final String MODE_SAGE = "sage";
 
     private WebView webView;
     private FrameLayout webContainer;
@@ -241,6 +248,16 @@ public class MainActivity extends Activity {
         if (tts == null) return;
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String mode = prefs.getString(PREF_TTS_MODE, MODE_NORMAL);
+
+        if (MODE_SAGE.equals(mode)) {
+            applySageVoice(false);
+            return;
+        }
+
+        tts.setPitch(1.0f);
+        tts.setSpeechRate(1.0f);
+
         String savedName = prefs.getString(PREF_TTS_VOICE, null);
         if (savedName == null) return;
 
@@ -252,6 +269,75 @@ public class MainActivity extends Activity {
                 tts.setVoice(voice);
                 return;
             }
+        }
+    }
+
+    private Voice findPreferredSageVoice() {
+        if (tts == null) return null;
+
+        Set<Voice> set = tts.getVoices();
+        if (set == null || set.isEmpty()) return tts.getVoice();
+
+        String currentLanguage = Locale.getDefault().getLanguage();
+        List<Voice> candidates = new ArrayList<>();
+
+        for (Voice voice : set) {
+            if (voice.getLocale() != null
+                    && currentLanguage.equals(voice.getLocale().getLanguage())) {
+                candidates.add(voice);
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            candidates.addAll(set);
+        }
+
+        // Android non espone in modo standard il genere della voce.
+        // Proviamo quindi a preferire nomi che il motore identifica chiaramente
+        // come maschili; altrimenti usiamo una voce locale italiana disponibile.
+        for (Voice voice : candidates) {
+            String n = voice.getName().toLowerCase(Locale.ROOT);
+            if (n.contains("male")
+                    || n.contains("uomo")
+                    || n.contains("man")
+                    || n.contains("masch")) {
+                return voice;
+            }
+        }
+
+        for (Voice voice : candidates) {
+            if (!voice.isNetworkConnectionRequired()) {
+                return voice;
+            }
+        }
+
+        return candidates.get(0);
+    }
+
+    private void applySageVoice(boolean preview) {
+        if (tts == null) return;
+
+        Voice sage = findPreferredSageVoice();
+        if (sage != null) {
+            tts.setVoice(sage);
+        }
+
+        // Profilo caldo e calmo: leggermente più grave e più lento.
+        tts.setPitch(0.86f);
+        tts.setSpeechRate(0.82f);
+
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_TTS_MODE, MODE_SAGE)
+                .apply();
+
+        if (preview) {
+            tts.speak(
+                    "Questa è la modalità Saggio, più calma e riflessiva.",
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "sage_preview"
+            );
         }
     }
 
@@ -272,7 +358,6 @@ public class MainActivity extends Activity {
         }
 
         List<Voice> voices = new ArrayList<>();
-
         String currentLanguage = Locale.getDefault().getLanguage();
 
         for (Voice voice : set) {
@@ -288,9 +373,14 @@ public class MainActivity extends Activity {
 
         Collections.sort(voices, Comparator.comparing(Voice::getName));
 
-        String[] labels = new String[voices.size()];
-        int checked = -1;
-        Voice currentVoice = tts.getVoice();
+        String[] labels = new String[voices.size() + 1];
+        labels[0] = "🧔 Saggio – caldo e calmo";
+
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String savedMode = prefs.getString(PREF_TTS_MODE, MODE_NORMAL);
+        String savedVoice = prefs.getString(PREF_TTS_VOICE, null);
+
+        int checked = MODE_SAGE.equals(savedMode) ? 0 : -1;
 
         for (int i = 0; i < voices.size(); i++) {
             Voice voice = voices.get(i);
@@ -303,13 +393,14 @@ public class MainActivity extends Activity {
                     ? "online"
                     : "locale";
 
-            labels[i] = voice.getName()
+            labels[i + 1] = voice.getName()
                     + (localeLabel.isEmpty() ? "" : " — " + localeLabel)
                     + " (" + type + ")";
 
-            if (currentVoice != null
-                    && currentVoice.getName().equals(voice.getName())) {
-                checked = i;
+            if (!MODE_SAGE.equals(savedMode)
+                    && savedVoice != null
+                    && savedVoice.equals(voice.getName())) {
+                checked = i + 1;
             }
         }
 
@@ -318,12 +409,22 @@ public class MainActivity extends Activity {
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Scegli la voce")
                 .setSingleChoiceItems(labels, checked, (d, which) -> {
-                    Voice selected = finalVoices.get(which);
+                    if (which == 0) {
+                        applySageVoice(true);
+                        return;
+                    }
+
+                    Voice selected = finalVoices.get(which - 1);
+
+                    tts.setPitch(1.0f);
+                    tts.setSpeechRate(1.0f);
+
                     int result = tts.setVoice(selected);
 
                     if (result == TextToSpeech.SUCCESS) {
                         getSharedPreferences(PREFS, MODE_PRIVATE)
                                 .edit()
+                                .putString(PREF_TTS_MODE, MODE_NORMAL)
                                 .putString(PREF_TTS_VOICE, selected.getName())
                                 .apply();
 
@@ -549,6 +650,89 @@ public class MainActivity extends Activity {
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, true);
+
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+            if (url == null || url.trim().isEmpty()) {
+                Toast.makeText(
+                        MainActivity.this,
+                        "Download non disponibile",
+                        Toast.LENGTH_SHORT
+                ).show();
+                return;
+            }
+
+            if (url.startsWith("blob:")) {
+                Toast.makeText(
+                        MainActivity.this,
+                        "Questo file usa un collegamento temporaneo blob. Se non parte, dimmelo e lo adattiamo.",
+                        Toast.LENGTH_LONG
+                ).show();
+                return;
+            }
+
+            try {
+                DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+
+                String cookie = CookieManager.getInstance().getCookie(url);
+                if (cookie != null && !cookie.isEmpty()) {
+                    request.addRequestHeader("Cookie", cookie);
+                }
+
+                if (userAgent != null && !userAgent.isEmpty()) {
+                    request.addRequestHeader("User-Agent", userAgent);
+                }
+
+                String filename = URLUtil.guessFileName(
+                        url,
+                        contentDisposition,
+                        mimetype
+                );
+
+                request.setTitle(filename);
+                request.setDescription("Download da ChatGPT Radio");
+                request.setNotificationVisibility(
+                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                );
+                request.setAllowedOverMetered(true);
+                request.setAllowedOverRoaming(true);
+
+                if (mimetype != null && !mimetype.isEmpty()) {
+                    request.setMimeType(mimetype);
+                }
+
+                request.setDestinationInExternalPublicDir(
+                        Environment.DIRECTORY_DOWNLOADS,
+                        filename
+                );
+
+                DownloadManager manager =
+                        (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+
+                if (manager == null) {
+                    Toast.makeText(
+                            MainActivity.this,
+                            "Gestore download Android non disponibile",
+                            Toast.LENGTH_LONG
+                    ).show();
+                    return;
+                }
+
+                manager.enqueue(request);
+
+                Toast.makeText(
+                        MainActivity.this,
+                        "Download avviato: " + filename,
+                        Toast.LENGTH_LONG
+                ).show();
+
+            } catch (Exception e) {
+                Toast.makeText(
+                        MainActivity.this,
+                        "Impossibile avviare il download",
+                        Toast.LENGTH_LONG
+                ).show();
+            }
+        });
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
