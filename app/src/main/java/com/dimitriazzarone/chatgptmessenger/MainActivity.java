@@ -56,6 +56,7 @@ public class MainActivity extends Activity {
     private static final String PREF_TTS_MODE = "tts_mode";
     private static final String MODE_NORMAL = "normal";
     private static final String MODE_SAGE = "sage";
+    private static final String PREF_SAGE_BASE_VOICE = "sage_base_voice";
 
     private WebView webView;
     private FrameLayout webContainer;
@@ -251,7 +252,15 @@ public class MainActivity extends Activity {
         String mode = prefs.getString(PREF_TTS_MODE, MODE_NORMAL);
 
         if (MODE_SAGE.equals(mode)) {
-            applySageVoice(false);
+            String sageVoiceName = prefs.getString(PREF_SAGE_BASE_VOICE, null);
+            if (sageVoiceName != null) {
+                Voice sageVoice = findVoiceByName(sageVoiceName);
+                if (sageVoice != null) {
+                    tts.setVoice(sageVoice);
+                }
+            }
+            tts.setPitch(0.84f);
+            tts.setSpeechRate(0.80f);
             return;
         }
 
@@ -261,79 +270,76 @@ public class MainActivity extends Activity {
         String savedName = prefs.getString(PREF_TTS_VOICE, null);
         if (savedName == null) return;
 
-        Set<Voice> voices = tts.getVoices();
-        if (voices == null) return;
-
-        for (Voice voice : voices) {
-            if (savedName.equals(voice.getName())) {
-                tts.setVoice(voice);
-                return;
-            }
+        Voice saved = findVoiceByName(savedName);
+        if (saved != null) {
+            tts.setVoice(saved);
         }
     }
 
-    private Voice findPreferredSageVoice() {
-        if (tts == null) return null;
+    private Voice findVoiceByName(String name) {
+        if (tts == null || name == null) return null;
 
-        Set<Voice> set = tts.getVoices();
-        if (set == null || set.isEmpty()) return tts.getVoice();
+        Set<Voice> voices = tts.getVoices();
+        if (voices == null) return null;
 
-        String currentLanguage = Locale.getDefault().getLanguage();
-        List<Voice> candidates = new ArrayList<>();
-
-        for (Voice voice : set) {
-            if (voice.getLocale() != null
-                    && currentLanguage.equals(voice.getLocale().getLanguage())) {
-                candidates.add(voice);
-            }
-        }
-
-        if (candidates.isEmpty()) {
-            candidates.addAll(set);
-        }
-
-        // Android non espone in modo standard il genere della voce.
-        // Proviamo quindi a preferire nomi che il motore identifica chiaramente
-        // come maschili; altrimenti usiamo una voce locale italiana disponibile.
-        for (Voice voice : candidates) {
-            String n = voice.getName().toLowerCase(Locale.ROOT);
-            if (n.contains("male")
-                    || n.contains("uomo")
-                    || n.contains("man")
-                    || n.contains("masch")) {
+        for (Voice voice : voices) {
+            if (name.equals(voice.getName())) {
                 return voice;
             }
         }
+        return null;
+    }
 
-        for (Voice voice : candidates) {
-            if (!voice.isNetworkConnectionRequired()) {
-                return voice;
-            }
-        }
+    private boolean explicitlyMasculineName(Voice voice) {
+        if (voice == null || voice.getName() == null) return false;
 
-        return candidates.get(0);
+        String n = voice.getName().toLowerCase(Locale.ROOT);
+
+        return n.contains("male")
+                || n.contains("masch")
+                || n.contains("uomo")
+                || n.contains("man_")
+                || n.endsWith("_man")
+                || n.contains("-man-");
     }
 
     private void applySageVoice(boolean preview) {
         if (tts == null) return;
 
-        Voice sage = findPreferredSageVoice();
-        if (sage != null) {
-            tts.setVoice(sage);
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+
+        String baseVoiceName = prefs.getString(PREF_TTS_VOICE, null);
+        if (baseVoiceName == null) {
+            Toast.makeText(
+                    this,
+                    "Prima scegli una voce dall'elenco e ascolta l'anteprima.",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
         }
 
-        // Profilo caldo e calmo: leggermente più grave e più lento.
-        tts.setPitch(0.86f);
-        tts.setSpeechRate(0.82f);
+        Voice baseVoice = findVoiceByName(baseVoiceName);
+        if (baseVoice == null) {
+            Toast.makeText(
+                    this,
+                    "La voce scelta non è più disponibile.",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
 
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-                .edit()
+        tts.setVoice(baseVoice);
+        tts.setPitch(0.84f);
+        tts.setSpeechRate(0.80f);
+
+        prefs.edit()
                 .putString(PREF_TTS_MODE, MODE_SAGE)
+                .putString(PREF_SAGE_BASE_VOICE, baseVoice.getName())
                 .apply();
 
         if (preview) {
             tts.speak(
-                    "Questa è la modalità Saggio, più calma e riflessiva.",
+                    "Questa è la modalità Saggio. Più calma, più lenta e leggermente più profonda.",
                     TextToSpeech.QUEUE_FLUSH,
                     null,
                     "sage_preview"
@@ -371,10 +377,19 @@ public class MainActivity extends Activity {
             voices.addAll(set);
         }
 
-        Collections.sort(voices, Comparator.comparing(Voice::getName));
+        Collections.sort(voices, (a, b) -> {
+            boolean am = explicitlyMasculineName(a);
+            boolean bm = explicitlyMasculineName(b);
+
+            if (am != bm) {
+                return am ? -1 : 1;
+            }
+
+            return a.getName().compareToIgnoreCase(b.getName());
+        });
 
         String[] labels = new String[voices.size() + 1];
-        labels[0] = "🧔 Saggio – caldo e calmo";
+        labels[0] = "🧔 Saggio maschile – usa la voce scelta sotto";
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         String savedMode = prefs.getString(PREF_TTS_MODE, MODE_NORMAL);
@@ -393,7 +408,12 @@ public class MainActivity extends Activity {
                     ? "online"
                     : "locale";
 
-            labels[i + 1] = voice.getName()
+            String declared = explicitlyMasculineName(voice)
+                    ? " ♂"
+                    : "";
+
+            labels[i + 1] = declared
+                    + voice.getName()
                     + (localeLabel.isEmpty() ? "" : " — " + localeLabel)
                     + " (" + type + ")";
 
@@ -407,7 +427,7 @@ public class MainActivity extends Activity {
         final List<Voice> finalVoices = voices;
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Scegli la voce")
+                .setTitle("Scegli e ascolta la voce")
                 .setSingleChoiceItems(labels, checked, (d, which) -> {
                     if (which == 0) {
                         applySageVoice(true);
@@ -429,7 +449,7 @@ public class MainActivity extends Activity {
                                 .apply();
 
                         tts.speak(
-                                "Questa è la voce selezionata.",
+                                "Questa è la voce selezionata. Ascoltala e scegli solo se ti piace.",
                                 TextToSpeech.QUEUE_FLUSH,
                                 null,
                                 "voice_preview"
