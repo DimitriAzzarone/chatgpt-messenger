@@ -2,7 +2,9 @@ package com.dimitriazzarone.chatgptmessenger;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -12,6 +14,8 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
+import android.speech.tts.Voice;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -32,19 +36,26 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public class MainActivity extends Activity {
 
     private static final String HOME = "https://chatgpt.com/";
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_FILE_CHOOSER = 4001;
+    private static final String PREFS = "radio_prefs";
+    private static final String PREF_TTS_VOICE = "tts_voice";
 
     private WebView webView;
     private FrameLayout webContainer;
     private ProgressBar progressBar;
     private TextView statusText;
     private Button micButton;
+    private Button voiceButton;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
@@ -93,11 +104,15 @@ public class MainActivity extends Activity {
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
+        voiceButton = makeButton("🔊");
+        voiceButton.setTextSize(18);
+
         Button back = makeButton("‹");
         Button reload = makeButton("↻");
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
         topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
+        topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
         topBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(44), dp(44)));
 
@@ -150,6 +165,8 @@ public class MainActivity extends Activity {
             if (webView != null) webView.reload();
         });
 
+        voiceButton.setOnClickListener(v -> showVoiceChooser());
+
         micButton.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
                 case MotionEvent.ACTION_DOWN:
@@ -188,16 +205,151 @@ public class MainActivity extends Activity {
 
     private void createTextToSpeech() {
         tts = new TextToSpeech(this, status -> {
-            if (status == TextToSpeech.SUCCESS) {
-                int result = tts.setLanguage(Locale.getDefault());
-                ttsReady = result != TextToSpeech.LANG_MISSING_DATA
-                        && result != TextToSpeech.LANG_NOT_SUPPORTED;
+            if (status != TextToSpeech.SUCCESS) {
+                ttsReady = false;
+                return;
             }
+
+            int result = tts.setLanguage(Locale.getDefault());
+            ttsReady = result != TextToSpeech.LANG_MISSING_DATA
+                    && result != TextToSpeech.LANG_NOT_SUPPORTED;
+
+            restoreSavedVoice();
+
+            tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                @Override
+                public void onStart(String utteranceId) {
+                    runOnUiThread(() -> statusText.setText("🔊 Lettura risposta…"));
+                }
+
+                @Override
+                public void onDone(String utteranceId) {
+                    runOnUiThread(() -> statusText.setText(
+                            "Tieni premuto il microfono per parlare"));
+                }
+
+                @Override
+                public void onError(String utteranceId) {
+                    runOnUiThread(() -> statusText.setText(
+                            "Errore nella sintesi vocale"));
+                }
+            });
         });
+    }
+
+    private void restoreSavedVoice() {
+        if (tts == null) return;
+
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String savedName = prefs.getString(PREF_TTS_VOICE, null);
+        if (savedName == null) return;
+
+        Set<Voice> voices = tts.getVoices();
+        if (voices == null) return;
+
+        for (Voice voice : voices) {
+            if (savedName.equals(voice.getName())) {
+                tts.setVoice(voice);
+                return;
+            }
+        }
+    }
+
+    private void showVoiceChooser() {
+        if (!ttsReady || tts == null) {
+            Toast.makeText(this,
+                    "La sintesi vocale non è ancora pronta",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Set<Voice> set = tts.getVoices();
+        if (set == null || set.isEmpty()) {
+            Toast.makeText(this,
+                    "Nessuna voce disponibile",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        List<Voice> voices = new ArrayList<>();
+
+        String currentLanguage = Locale.getDefault().getLanguage();
+
+        for (Voice voice : set) {
+            if (voice.getLocale() != null
+                    && currentLanguage.equals(voice.getLocale().getLanguage())) {
+                voices.add(voice);
+            }
+        }
+
+        if (voices.isEmpty()) {
+            voices.addAll(set);
+        }
+
+        Collections.sort(voices, Comparator.comparing(Voice::getName));
+
+        String[] labels = new String[voices.size()];
+        int checked = -1;
+        Voice currentVoice = tts.getVoice();
+
+        for (int i = 0; i < voices.size(); i++) {
+            Voice voice = voices.get(i);
+
+            String localeLabel = voice.getLocale() != null
+                    ? voice.getLocale().getDisplayName()
+                    : "";
+
+            String type = voice.isNetworkConnectionRequired()
+                    ? "online"
+                    : "locale";
+
+            labels[i] = voice.getName()
+                    + (localeLabel.isEmpty() ? "" : " — " + localeLabel)
+                    + " (" + type + ")";
+
+            if (currentVoice != null
+                    && currentVoice.getName().equals(voice.getName())) {
+                checked = i;
+            }
+        }
+
+        final List<Voice> finalVoices = voices;
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Scegli la voce")
+                .setSingleChoiceItems(labels, checked, (d, which) -> {
+                    Voice selected = finalVoices.get(which);
+                    int result = tts.setVoice(selected);
+
+                    if (result == TextToSpeech.SUCCESS) {
+                        getSharedPreferences(PREFS, MODE_PRIVATE)
+                                .edit()
+                                .putString(PREF_TTS_VOICE, selected.getName())
+                                .apply();
+
+                        tts.speak(
+                                "Questa è la voce selezionata.",
+                                TextToSpeech.QUEUE_FLUSH,
+                                null,
+                                "voice_preview"
+                        );
+                    } else {
+                        Toast.makeText(
+                                MainActivity.this,
+                                "Impossibile usare questa voce",
+                                Toast.LENGTH_SHORT
+                        ).show();
+                    }
+                })
+                .setPositiveButton("OK", null)
+                .create();
+
+        dialog.show();
     }
 
     private void speakAssistantText(String text) {
         if (text == null) return;
+
         String cleaned = text.trim();
         if (cleaned.isEmpty() || cleaned.equals(lastSpokenText)) return;
 
@@ -209,8 +361,12 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            statusText.setText("🔊 Lettura risposta…");
-            tts.speak(cleaned, TextToSpeech.QUEUE_FLUSH, null, "chatgpt_response");
+            tts.speak(
+                    cleaned,
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "chatgpt_response"
+            );
         });
     }
 
@@ -459,7 +615,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 lastUrl = url;
-                injectAssistantObserver();
+                injectPageBehaviors();
             }
 
             @Override
@@ -566,6 +722,49 @@ public class MainActivity extends Activity {
         }));
     }
 
+    private void injectPageBehaviors() {
+        injectEnterToSend();
+        injectAssistantObserver();
+    }
+
+    private void injectEnterToSend() {
+        if (webView == null) return;
+
+        String script =
+                "(function(){" +
+                " if(window.__radioEnterInstalled)return;" +
+                " window.__radioEnterInstalled=true;" +
+
+                " function isEditor(el){" +
+                "  if(!el)return false;" +
+                "  if(el.id==='prompt-textarea')return true;" +
+                "  if(el.getAttribute&&el.getAttribute('data-testid')==='prompt-textarea')return true;" +
+                "  return !!(el.closest&&el.closest('#prompt-textarea,[data-testid=\"prompt-textarea\"]'));" +
+                " }" +
+
+                " function findSend(){" +
+                "  return document.querySelector(\"button[data-testid='send-button']\") ||" +
+                "   Array.from(document.querySelectorAll('button')).find(b=>{" +
+                "    const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
+                "    return a.includes('send')||a.includes('invia');" +
+                "   });" +
+                " }" +
+
+                " document.addEventListener('keydown',function(e){" +
+                "  if(e.key!=='Enter'||e.shiftKey||e.isComposing)return;" +
+                "  if(!isEditor(e.target))return;" +
+                "  e.preventDefault();" +
+                "  e.stopPropagation();" +
+                "  setTimeout(()=>{" +
+                "   const send=findSend();" +
+                "   if(send&&!send.disabled)send.click();" +
+                "  },0);" +
+                " },true);" +
+                "})();";
+
+        webView.evaluateJavascript(script, null);
+    }
+
     private void injectAssistantObserver() {
         if (webView == null) return;
 
@@ -573,7 +772,6 @@ public class MainActivity extends Activity {
                 "(function(){" +
                 " if(window.__radioTtsInstalled)return;" +
                 " window.__radioTtsInstalled=true;" +
-                " let lastSent='';" +
                 " let timer=null;" +
 
                 " function generating(){" +
@@ -590,6 +788,8 @@ public class MainActivity extends Activity {
                 "  if(!msgs.length)return '';" +
                 "  return (msgs[msgs.length-1].innerText||'').trim();" +
                 " }" +
+
+                " let lastSent=latestAssistantText();" +
 
                 " function scheduleCheck(){" +
                 "  clearTimeout(timer);" +
