@@ -1,18 +1,22 @@
-# ChatGPT Radio v0.3
+# ChatGPT Radio v0.5
 
-Versione telefono semplificata.
+Versione telefono con controllo vocale stile WhatsApp.
 
-Flusso:
-1. premi PARLA
-2. Android registra e trascrive
-3. il testo viene inserito nella casella di ChatGPT nella WebView
-4. viene premuto automaticamente INVIA
-5. ChatGPT genera la risposta
-6. quando compare "Leggi ad alta voce", l'app prova a premerlo automaticamente
+## Flusso
+1. Tieni premuto il pulsante microfono
+2. Parla
+3. Rilascia il pulsante
+4. Android termina l'ascolto e trascrive
+5. Il testo viene inserito nella casella di ChatGPT
+6. Viene inviato automaticamente
+7. ChatGPT genera la risposta
+8. Android legge la risposta con TextToSpeech
 
-Nessuna API OpenAI.
-Nessun server.
-Nessun Node.
-Il browser serve solo come ponte verso chatgpt.com.
-
-Nota: i selettori JavaScript dipendono dalla struttura corrente della pagina ChatGPT e potrebbero richiedere aggiornamenti se l'interfaccia web cambia.
+## Include
+- microfono nativo Android
+- pressione prolungata stile WhatsApp
+- TTS Android automatico
+- caricamento immagini e file dalla WebView
+- nessuna API OpenAI
+- nessun server
+- nessun Node

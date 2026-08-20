@@ -5,14 +5,20 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
@@ -24,7 +30,6 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ToggleButton;
 
 import java.util.ArrayList;
 import java.util.Locale;
@@ -33,25 +38,32 @@ public class MainActivity extends Activity {
 
     private static final String HOME = "https://chatgpt.com/";
     private static final int REQ_AUDIO = 3001;
+    private static final int REQ_FILE_CHOOSER = 4001;
 
     private WebView webView;
     private FrameLayout webContainer;
     private ProgressBar progressBar;
-    private Button talkButton;
-    private ToggleButton autoReadButton;
     private TextView statusText;
+    private Button micButton;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
     private boolean listening = false;
-    private boolean autoReadEnabled = true;
+    private boolean pressToTalkRequested = false;
     private String lastUrl = HOME;
+
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+    private String lastSpokenText = "";
+
+    private ValueCallback<Uri[]> filePathCallback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         buildInterface();
+        createTextToSpeech();
         createSpeechRecognizer();
         createWebView();
 
@@ -96,37 +108,29 @@ public class MainActivity extends Activity {
         webContainer = new FrameLayout(this);
 
         LinearLayout bottomBar = new LinearLayout(this);
-        bottomBar.setOrientation(LinearLayout.VERTICAL);
-        bottomBar.setGravity(Gravity.CENTER);
-        bottomBar.setPadding(dp(8), dp(6), dp(8), dp(8));
+        bottomBar.setOrientation(LinearLayout.HORIZONTAL);
+        bottomBar.setGravity(Gravity.CENTER_VERTICAL);
+        bottomBar.setPadding(dp(12), dp(6), dp(12), dp(8));
         bottomBar.setBackgroundColor(Color.rgb(32, 44, 51));
 
         statusText = new TextView(this);
-        statusText.setText("Pronto");
+        statusText.setText("Tieni premuto il microfono per parlare");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
-        statusText.setGravity(Gravity.CENTER);
+        statusText.setGravity(Gravity.CENTER_VERTICAL);
 
-        LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        controls.setGravity(Gravity.CENTER);
+        micButton = new Button(this);
+        micButton.setText("🎙");
+        micButton.setTextSize(25);
+        micButton.setTextColor(Color.WHITE);
+        micButton.setGravity(Gravity.CENTER);
+        applyMicStyle(false);
 
-        talkButton = new Button(this);
-        talkButton.setText("🎙  PARLA");
-        talkButton.setTextSize(18);
+        bottomBar.addView(statusText, new LinearLayout.LayoutParams(0, dp(58), 1));
 
-        autoReadButton = new ToggleButton(this);
-        autoReadButton.setTextOff("VOCE OFF");
-        autoReadButton.setTextOn("VOCE ON");
-        autoReadButton.setChecked(true);
-
-        controls.addView(talkButton, new LinearLayout.LayoutParams(0, dp(56), 2));
-        controls.addView(autoReadButton, new LinearLayout.LayoutParams(0, dp(56), 1));
-
-        bottomBar.addView(statusText, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(24)));
-        bottomBar.addView(controls, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(58)));
+        LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(dp(58), dp(58));
+        micParams.setMargins(dp(8), 0, 0, 0);
+        bottomBar.addView(micButton, micParams);
 
         root.addView(topBar);
         root.addView(progressBar, new LinearLayout.LayoutParams(
@@ -134,28 +138,43 @@ public class MainActivity extends Activity {
         root.addView(webContainer, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         root.addView(bottomBar, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(90)));
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(72)));
 
         setContentView(root);
 
         back.setOnClickListener(v -> {
-            if (webView != null && webView.canGoBack()) {
-                webView.goBack();
-            }
+            if (webView != null && webView.canGoBack()) webView.goBack();
         });
 
         reload.setOnClickListener(v -> {
-            if (webView != null) {
-                webView.reload();
+            if (webView != null) webView.reload();
+        });
+
+        micButton.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    pressToTalkRequested = true;
+                    startPressToTalk();
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    pressToTalkRequested = false;
+                    stopPressToTalk();
+                    v.performClick();
+                    return true;
             }
+            return false;
         });
+    }
 
-        talkButton.setOnClickListener(v -> toggleSpeechRecognition());
-
-        autoReadButton.setOnCheckedChangeListener((buttonView, checked) -> {
-            autoReadEnabled = checked;
-            updateAutoReadSetting();
-        });
+    private void applyMicStyle(boolean active) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(active
+                ? Color.rgb(239, 83, 80)
+                : Color.rgb(0, 168, 132));
+        micButton.setBackground(bg);
     }
 
     private Button makeButton(String text) {
@@ -167,14 +186,40 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private void createTextToSpeech() {
+        tts = new TextToSpeech(this, status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                int result = tts.setLanguage(Locale.getDefault());
+                ttsReady = result != TextToSpeech.LANG_MISSING_DATA
+                        && result != TextToSpeech.LANG_NOT_SUPPORTED;
+            }
+        });
+    }
+
+    private void speakAssistantText(String text) {
+        if (text == null) return;
+        String cleaned = text.trim();
+        if (cleaned.isEmpty() || cleaned.equals(lastSpokenText)) return;
+
+        lastSpokenText = cleaned;
+
+        runOnUiThread(() -> {
+            if (!ttsReady || tts == null) {
+                statusText.setText("Risposta pronta");
+                return;
+            }
+
+            statusText.setText("🔊 Lettura risposta…");
+            tts.speak(cleaned, TextToSpeech.QUEUE_FLUSH, null, "chatgpt_response");
+        });
+    }
+
     private void createSpeechRecognizer() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
-            Toast.makeText(
-                    this,
+            Toast.makeText(this,
                     "Riconoscimento vocale Android non disponibile",
-                    Toast.LENGTH_LONG
-            ).show();
-            talkButton.setEnabled(false);
+                    Toast.LENGTH_LONG).show();
+            micButton.setEnabled(false);
             return;
         }
 
@@ -183,39 +228,32 @@ public class MainActivity extends Activity {
         speechIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-        );
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE,
-                Locale.getDefault().toLanguageTag()
-        );
+                Locale.getDefault().toLanguageTag());
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                false
-        );
+                false);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_MAX_RESULTS,
-                1
-        );
+                1);
 
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
             @Override
             public void onReadyForSpeech(Bundle params) {
                 listening = true;
-                talkButton.setText("■  STOP");
-                statusText.setText("Ti ascolto…");
+                applyMicStyle(true);
+                statusText.setText("🎙 Ti ascolto… rilascia per inviare");
             }
 
             @Override
             public void onBeginningOfSpeech() {
-                statusText.setText("Parla…");
+                statusText.setText("🎙 Parla…");
             }
 
-            @Override
-            public void onRmsChanged(float rmsdB) {}
-
-            @Override
-            public void onBufferReceived(byte[] buffer) {}
+            @Override public void onRmsChanged(float rmsdB) {}
+            @Override public void onBufferReceived(byte[] buffer) {}
 
             @Override
             public void onEndOfSpeech() {
@@ -225,7 +263,7 @@ public class MainActivity extends Activity {
             @Override
             public void onError(int error) {
                 listening = false;
-                talkButton.setText("🎙  PARLA");
+                applyMicStyle(false);
 
                 String msg;
                 switch (error) {
@@ -248,7 +286,7 @@ public class MainActivity extends Activity {
             @Override
             public void onResults(Bundle results) {
                 listening = false;
-                talkButton.setText("🎙  PARLA");
+                applyMicStyle(false);
 
                 ArrayList<String> matches =
                         results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
@@ -269,30 +307,23 @@ public class MainActivity extends Activity {
                 injectTextAndSend(text);
             }
 
-            @Override
-            public void onPartialResults(Bundle partialResults) {}
-
-            @Override
-            public void onEvent(int eventType, Bundle params) {}
+            @Override public void onPartialResults(Bundle partialResults) {}
+            @Override public void onEvent(int eventType, Bundle params) {}
         });
     }
 
-    private void toggleSpeechRecognition() {
-        if (speechRecognizer == null) {
-            return;
-        }
+    private void startPressToTalk() {
+        if (speechRecognizer == null) return;
 
-        if (listening) {
-            speechRecognizer.stopListening();
-            return;
+        if (tts != null) {
+            tts.stop();
         }
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
                     new String[]{Manifest.permission.RECORD_AUDIO},
-                    REQ_AUDIO
-            );
+                    REQ_AUDIO);
             return;
         }
 
@@ -307,6 +338,14 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void stopPressToTalk() {
+        if (speechRecognizer != null && listening) {
+            statusText.setText("Trascrivo…");
+            speechRecognizer.stopListening();
+        }
+        applyMicStyle(false);
+    }
+
     @Override
     public void onRequestPermissionsResult(
             int requestCode,
@@ -318,7 +357,9 @@ public class MainActivity extends Activity {
         if (requestCode == REQ_AUDIO) {
             if (grantResults.length > 0
                     && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startListening();
+                if (pressToTalkRequested) {
+                    startListening();
+                }
             } else {
                 statusText.setText("Microfono non autorizzato");
             }
@@ -328,20 +369,17 @@ public class MainActivity extends Activity {
     private void createWebView() {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(11, 20, 26));
+        webView.addJavascriptInterface(new NativeBridge(), "AndroidRadio");
 
-        webContainer.addView(
-                webView,
-                new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                )
-        );
+        webContainer.addView(webView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
-        settings.setAllowFileAccess(false);
+        settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
         settings.setSupportMultipleWindows(false);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
@@ -361,8 +399,42 @@ public class MainActivity extends Activity {
             public void onProgressChanged(WebView view, int progress) {
                 progressBar.setProgress(progress);
                 progressBar.setVisibility(
-                        progress >= 100 ? View.GONE : View.VISIBLE
-                );
+                        progress >= 100 ? View.GONE : View.VISIBLE);
+            }
+
+            @Override
+            public boolean onShowFileChooser(
+                    WebView webView,
+                    ValueCallback<Uri[]> filePathCallback,
+                    FileChooserParams fileChooserParams
+            ) {
+                if (MainActivity.this.filePathCallback != null) {
+                    MainActivity.this.filePathCallback.onReceiveValue(null);
+                }
+
+                MainActivity.this.filePathCallback = filePathCallback;
+
+                Intent intent;
+                try {
+                    intent = fileChooserParams.createIntent();
+                } catch (Exception e) {
+                    intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    intent.setType("*/*");
+                }
+
+                try {
+                    startActivityForResult(intent, REQ_FILE_CHOOSER);
+                    return true;
+                } catch (Exception e) {
+                    MainActivity.this.filePathCallback = null;
+                    Toast.makeText(
+                            MainActivity.this,
+                            "Impossibile aprire il selettore file",
+                            Toast.LENGTH_LONG
+                    ).show();
+                    return false;
+                }
             }
         });
 
@@ -387,7 +459,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 lastUrl = url;
-                injectAutoReadObserver();
+                injectAssistantObserver();
             }
 
             @Override
@@ -413,10 +485,36 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void injectTextAndSend(String text) {
-        if (webView == null) {
-            return;
+    @Override
+    protected void onActivityResult(
+            int requestCode,
+            int resultCode,
+            Intent data
+    ) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_FILE_CHOOSER) {
+            if (filePathCallback == null) return;
+
+            Uri[] results = WebChromeClient.FileChooserParams.parseResult(
+                    resultCode,
+                    data
+            );
+
+            filePathCallback.onReceiveValue(results);
+            filePathCallback = null;
         }
+    }
+
+    private class NativeBridge {
+        @JavascriptInterface
+        public void assistantReady(String text) {
+            speakAssistantText(text);
+        }
+    }
+
+    private void injectTextAndSend(String text) {
+        if (webView == null) return;
 
         String escaped = text
                 .replace("\\", "\\\\")
@@ -468,78 +566,57 @@ public class MainActivity extends Activity {
         }));
     }
 
-    private void injectAutoReadObserver() {
-        if (webView == null) {
-            return;
-        }
+    private void injectAssistantObserver() {
+        if (webView == null) return;
 
         String script =
                 "(function(){" +
-                " if(window.__radioInstalled){" +
-                "  window.__radioAutoRead=" + (autoReadEnabled ? "true" : "false") + ";" +
-                "  return;" +
-                " }" +
-                " window.__radioInstalled=true;" +
-                " window.__radioAutoRead=" + (autoReadEnabled ? "true" : "false") + ";" +
-
-                " function norm(s){return(s||'').toLowerCase().trim();}" +
-
-                " function readButtons(){" +
-                "  return Array.from(document.querySelectorAll('button')).filter(b=>{" +
-                "   const a=norm((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.innerText||''));" +
-                "   return a.includes('read aloud')||a.includes('leggi ad alta voce')||a.includes('lettura ad alta voce');" +
-                "  });" +
-                " }" +
+                " if(window.__radioTtsInstalled)return;" +
+                " window.__radioTtsInstalled=true;" +
+                " let lastSent='';" +
+                " let timer=null;" +
 
                 " function generating(){" +
                 "  return Array.from(document.querySelectorAll('button')).some(b=>{" +
-                "   const a=norm((b.getAttribute('aria-label')||'')+' '+(b.innerText||''));" +
-                "   return a.includes('stop generating')||a.includes('interrompi generazione')||a.includes('stop streaming');" +
+                "   const a=((b.getAttribute('aria-label')||'')+' '+(b.innerText||'')).toLowerCase();" +
+                "   return a.includes('stop generating')||" +
+                "          a.includes('interrompi generazione')||" +
+                "          a.includes('stop streaming');" +
                 "  });" +
                 " }" +
 
-                " let known=readButtons().length;" +
-                " let timer=null;" +
+                " function latestAssistantText(){" +
+                "  const msgs=Array.from(document.querySelectorAll(\"[data-message-author-role='assistant']\"));" +
+                "  if(!msgs.length)return '';" +
+                "  return (msgs[msgs.length-1].innerText||'').trim();" +
+                " }" +
 
-                " function tryRead(){" +
+                " function scheduleCheck(){" +
                 "  clearTimeout(timer);" +
                 "  timer=setTimeout(()=>{" +
-                "   if(!window.__radioAutoRead)return;" +
-                "   if(generating()){tryRead();return;}" +
-                "   const bs=readButtons();" +
-                "   if(!bs.length)return;" +
-                "   const b=bs[bs.length-1];" +
-                "   if(b.dataset.radioRead==='1')return;" +
-                "   b.dataset.radioRead='1';" +
-                "   b.click();" +
-                "  },1500);" +
+                "   if(generating()){" +
+                "    scheduleCheck();" +
+                "    return;" +
+                "   }" +
+                "   const text=latestAssistantText();" +
+                "   if(!text||text===lastSent)return;" +
+                "   lastSent=text;" +
+                "   try{" +
+                "    if(window.AndroidRadio&&window.AndroidRadio.assistantReady){" +
+                "     window.AndroidRadio.assistantReady(text);" +
+                "    }" +
+                "   }catch(e){}" +
+                "  },1200);" +
                 " }" +
 
                 " new MutationObserver(()=>{" +
-                "  const c=readButtons().length;" +
-                "  if(c>known){" +
-                "   known=c;" +
-                "   tryRead();" +
-                "  }else if(generating()){" +
-                "   clearTimeout(timer);" +
-                "  }" +
+                "  scheduleCheck();" +
                 " }).observe(document.documentElement,{" +
-                "  childList:true,subtree:true,attributes:true" +
+                "  childList:true,subtree:true,characterData:true" +
                 " });" +
                 "})();";
 
         webView.evaluateJavascript(script, null);
-    }
-
-    private void updateAutoReadSetting() {
-        if (webView != null) {
-            webView.evaluateJavascript(
-                    "window.__radioAutoRead=" +
-                    (autoReadEnabled ? "true" : "false") +
-                    ";",
-                    null
-            );
-        }
     }
 
     @Override
@@ -556,6 +633,17 @@ public class MainActivity extends Activity {
         if (speechRecognizer != null) {
             speechRecognizer.destroy();
             speechRecognizer = null;
+        }
+
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+            tts = null;
+        }
+
+        if (filePathCallback != null) {
+            filePathCallback.onReceiveValue(null);
+            filePathCallback = null;
         }
 
         if (webView != null) {
