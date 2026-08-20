@@ -1,16 +1,7 @@
-# ChatGPT Messenger
+# ChatGPT Messenger v0.2
 
-Client Android sperimentale dedicato a ChatGPT, riutilizzando l'impostazione WebView di Luminex Browser.
+Versione mobile del client Android dedicato a ChatGPT.
 
-## v0.1
+Novità: microfono WebView, permessi runtime, notifiche locali su nuove risposte, Enter=invio, Shift+Enter=a capo, VOCE ON/OFF.
 
-- apre direttamente https://chatgpt.com/
-- nessuna API OpenAI
-- usa il normale login ChatGPT nella WebView
-- Enter invia
-- Shift+Enter va a capo
-- interruttore VOCE ON/OFF
-- tenta di premere automaticamente "Leggi ad alta voce" quando compare una nuova risposta
-- GitHub Actions genera l'APK debug
-
-Nota: l'automazione dipende dalla struttura HTML corrente di ChatGPT e può richiedere aggiornamenti se la pagina cambia.
+Nota: le notifiche locali dipendono dal rilevamento della risposta nella WebView e non equivalgono alle push native quando Android sospende completamente l'app.
