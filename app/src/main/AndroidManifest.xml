@@ -7,8 +7,10 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
     <application
+        android:icon="@drawable/ic_dan_launcher"
+        android:roundIcon="@drawable/ic_dan_launcher"
         android:allowBackup="true"
-        android:label="ChatGPT Radio"
+        android:label="Dan"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="false">

@@ -1,22 +1,28 @@
-# ChatGPT Radio v1.2
+# Dan v1.7
 
-## Novità
-- download migliorato
-- prova a conservare il nome del file mostrato nel link di ChatGPT
-- messaggio distinto tra download avviato, completato e fallito
-- la sintesi vocale non legge emoji/faccine
+Dan è l'evoluzione di ChatGPT Radio.
 
-## Funzioni mantenute
+## Identità
+- nome visibile dell'app: **Dan**
+- icona verde con simbolo **AI**
+- package invariato: `com.dimitriazzarone.chatgptmessenger`
+- continua quindi ad aggiornare la stessa app
+
+## Funzioni
 - microfono stile WhatsApp
-- registrazione vocale più lunga
-- modalità Saggio maschile profonda
-- invio automatico dopo il rilascio
+- scorri verso l'alto per bloccare la registrazione
+- tocca ■ per terminare e inviare
+- velocità voce: 1× / 1,5× / 2×
+- modalità Saggio profonda
 - lettura automatica TTS
-- scelta voce con anteprima
-- caricamento immagini e file
+- emoji escluse dalla lettura
+- caricamento immagini e documenti
+- selezione multipla quando possibile
 - download nella cartella Download
+- gestione migliorata dei nomi dei file
+- pulsante 📁 per i documenti
 - Enter = invia
 - Shift+Enter = nuova riga
-
-## Nota
-Alcuni link di ChatGPT vengono serviti con nomi generici dal server. La v1.2 intercetta il testo/nome del link nella pagina e lo usa come nome preferito quando possibile.
+- nessuna API OpenAI
+- nessun server
+- nessun Node

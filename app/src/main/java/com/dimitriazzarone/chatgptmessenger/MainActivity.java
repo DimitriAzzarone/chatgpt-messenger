@@ -4,6 +4,7 @@ import android.app.DownloadManager;
 import android.content.Context;
 import android.os.Environment;
 import android.webkit.URLUtil;
+import android.content.ClipData;
 import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
 import android.database.Cursor;
@@ -43,6 +44,8 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -61,6 +64,7 @@ public class MainActivity extends Activity {
     private static final String MODE_NORMAL = "normal";
     private static final String MODE_SAGE = "sage";
     private static final String PREF_SAGE_BASE_VOICE = "sage_base_voice";
+    private static final String PREF_TTS_SPEED = "tts_speed";
 
     private WebView webView;
     private FrameLayout webContainer;
@@ -68,11 +72,16 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private Button micButton;
     private Button voiceButton;
+    private Button filesButton;
+    private Button speedButton;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
     private boolean listening = false;
     private boolean pressToTalkRequested = false;
+    private boolean recordingLocked = false;
+    private float touchStartY = 0f;
+    private float ttsSpeed = 1.0f;
     private String lastUrl = HOME;
 
     private TextToSpeech tts;
@@ -81,6 +90,7 @@ public class MainActivity extends Activity {
 
     private ValueCallback<Uri[]> filePathCallback;
     private String pendingDownloadName = null;
+    private long pendingDownloadNameAt = 0L;
     private long lastDownloadId = -1L;
     private BroadcastReceiver downloadReceiver;
 
@@ -116,18 +126,26 @@ public class MainActivity extends Activity {
         logo.setBackgroundColor(Color.rgb(0, 168, 132));
 
         TextView title = new TextView(this);
-        title.setText("  ChatGPT Radio");
+        title.setText("  Dan");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
         voiceButton = makeButton("🔊");
         voiceButton.setTextSize(18);
 
+        filesButton = makeButton("📁");
+        filesButton.setTextSize(18);
+
+        speedButton = makeButton("1×");
+        speedButton.setTextSize(15);
+
         Button back = makeButton("‹");
         Button reload = makeButton("↻");
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
         topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
+        topBar.addView(filesButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(54), dp(44)));
         topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
         topBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(44), dp(44)));
@@ -182,23 +200,122 @@ public class MainActivity extends Activity {
         });
 
         voiceButton.setOnClickListener(v -> showVoiceChooser());
+        filesButton.setOnClickListener(v -> openDocumentPicker());
+        speedButton.setOnClickListener(v -> cycleTtsSpeed());
 
         micButton.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
                 case MotionEvent.ACTION_DOWN:
+                    if (recordingLocked) {
+                        finishLockedRecording();
+                        return true;
+                    }
+
+                    touchStartY = event.getRawY();
                     pressToTalkRequested = true;
                     startPressToTalk();
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if (listening && !recordingLocked) {
+                        float movedUp = touchStartY - event.getRawY();
+
+                        if (movedUp >= dp(80)) {
+                            recordingLocked = true;
+                            pressToTalkRequested = false;
+                            micButton.setText("■");
+                            applyMicStyle(true);
+                            statusText.setText("🔒 Registrazione bloccata — tocca ■ per inviare");
+                        }
+                    }
                     return true;
 
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL:
                     pressToTalkRequested = false;
-                    stopPressToTalk();
-                    v.performClick();
+
+                    if (!recordingLocked) {
+                        stopPressToTalk();
+                    }
                     return true;
             }
+
             return false;
         });
+    }
+
+    private void restoreTtsSpeed() {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        ttsSpeed = prefs.getFloat(PREF_TTS_SPEED, 1.0f);
+
+        if (ttsSpeed != 1.0f && ttsSpeed != 1.5f && ttsSpeed != 2.0f) {
+            ttsSpeed = 1.0f;
+        }
+
+        updateSpeedButton();
+        applyCurrentSpeechRate();
+    }
+
+    private void cycleTtsSpeed() {
+        if (ttsSpeed == 1.0f) {
+            ttsSpeed = 1.5f;
+        } else if (ttsSpeed == 1.5f) {
+            ttsSpeed = 2.0f;
+        } else {
+            ttsSpeed = 1.0f;
+        }
+
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putFloat(PREF_TTS_SPEED, ttsSpeed)
+                .apply();
+
+        updateSpeedButton();
+        applyCurrentSpeechRate();
+
+        Toast.makeText(
+                this,
+                "Velocità voce: " + speedLabel(),
+                Toast.LENGTH_SHORT
+        ).show();
+    }
+
+    private String speedLabel() {
+        if (ttsSpeed == 1.5f) return "1,5×";
+        if (ttsSpeed == 2.0f) return "2×";
+        return "1×";
+    }
+
+    private void updateSpeedButton() {
+        if (speedButton != null) {
+            speedButton.setText(speedLabel());
+        }
+    }
+
+    private void applyCurrentSpeechRate() {
+        if (tts == null) return;
+
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        String mode = prefs.getString(PREF_TTS_MODE, MODE_NORMAL);
+
+        float baseRate = MODE_SAGE.equals(mode) ? 0.76f : 1.0f;
+        tts.setSpeechRate(baseRate * ttsSpeed);
+    }
+
+    private void openDocumentPicker() {
+        try {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            startActivityForResult(intent, REQ_FILE_CHOOSER);
+        } catch (Exception e) {
+            Toast.makeText(
+                    this,
+                    "Impossibile aprire il selettore documenti",
+                    Toast.LENGTH_LONG
+            ).show();
+        }
     }
 
     private void applyMicStyle(boolean active) {
@@ -231,6 +348,7 @@ public class MainActivity extends Activity {
                     && result != TextToSpeech.LANG_NOT_SUPPORTED;
 
             restoreSavedVoice();
+            restoreTtsSpeed();
 
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override
@@ -267,13 +385,13 @@ public class MainActivity extends Activity {
                     tts.setVoice(sageVoice);
                 }
             }
-            tts.setPitch(0.68f);
-            tts.setSpeechRate(0.76f);
+            tts.setPitch(0.61f);
+            applyCurrentSpeechRate();
             return;
         }
 
         tts.setPitch(1.0f);
-        tts.setSpeechRate(1.0f);
+        applyCurrentSpeechRate();
 
         String savedName = prefs.getString(PREF_TTS_VOICE, null);
         if (savedName == null) return;
@@ -337,8 +455,8 @@ public class MainActivity extends Activity {
         }
 
         tts.setVoice(baseVoice);
-        tts.setPitch(0.68f);
-        tts.setSpeechRate(0.76f);
+        tts.setPitch(0.61f);
+        applyCurrentSpeechRate();
 
         prefs.edit()
                 .putString(PREF_TTS_MODE, MODE_SAGE)
@@ -445,7 +563,7 @@ public class MainActivity extends Activity {
                     Voice selected = finalVoices.get(which - 1);
 
                     tts.setPitch(1.0f);
-                    tts.setSpeechRate(1.0f);
+                    applyCurrentSpeechRate();
 
                     int result = tts.setVoice(selected);
 
@@ -558,6 +676,8 @@ public class MainActivity extends Activity {
             @Override
             public void onError(int error) {
                 listening = false;
+                recordingLocked = false;
+                micButton.setText("🎙");
                 applyMicStyle(false);
 
                 String msg;
@@ -581,6 +701,8 @@ public class MainActivity extends Activity {
             @Override
             public void onResults(Bundle results) {
                 listening = false;
+                recordingLocked = false;
+                micButton.setText("🎙");
                 applyMicStyle(false);
 
                 ArrayList<String> matches =
@@ -633,11 +755,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void finishLockedRecording() {
+        if (!recordingLocked) return;
+
+        recordingLocked = false;
+        pressToTalkRequested = false;
+        micButton.setText("🎙");
+        applyMicStyle(false);
+
+        if (speechRecognizer != null && listening) {
+            statusText.setText("Trascrivo…");
+            speechRecognizer.stopListening();
+        }
+    }
+
     private void stopPressToTalk() {
         if (speechRecognizer != null && listening) {
             statusText.setText("Trascrivo…");
             speechRecognizer.stopListening();
         }
+        micButton.setText("🎙");
         applyMicStyle(false);
     }
 
@@ -720,17 +857,34 @@ public class MainActivity extends Activity {
                     request.addRequestHeader("User-Agent", userAgent);
                 }
 
-                String filename;
-                if (pendingDownloadName != null && !pendingDownloadName.trim().isEmpty()) {
+                String guessed = URLUtil.guessFileName(
+                        url,
+                        contentDisposition,
+                        mimetype
+                );
+
+                String filename = null;
+
+                long age = System.currentTimeMillis() - pendingDownloadNameAt;
+                if (pendingDownloadName != null
+                        && !pendingDownloadName.trim().isEmpty()
+                        && age >= 0
+                        && age <= 10000L) {
                     filename = sanitizeFilename(pendingDownloadName);
-                    pendingDownloadName = null;
-                } else {
-                    filename = URLUtil.guessFileName(
-                            url,
-                            contentDisposition,
-                            mimetype
-                    );
-                    filename = sanitizeFilename(filename);
+                }
+
+                pendingDownloadName = null;
+                pendingDownloadNameAt = 0L;
+
+                if (filename == null || filename.isEmpty()) {
+                    String safeGuessed = sanitizeFilename(guessed);
+
+                    if (safeGuessed.toLowerCase(Locale.ROOT).matches(
+                            "^content(?:[-_]?\\d+)?\\.[a-z0-9]{2,5}$")) {
+                        filename = fallbackDownloadName(safeGuessed);
+                    } else {
+                        filename = safeGuessed;
+                    }
                 }
 
                 request.setTitle(filename);
@@ -799,25 +953,49 @@ public class MainActivity extends Activity {
 
                 MainActivity.this.filePathCallback = filePathCallback;
 
-                Intent intent;
                 try {
-                    intent = fileChooserParams.createIntent();
-                } catch (Exception e) {
-                    intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.setType("*/*");
-                }
 
-                try {
+                    String[] acceptTypes = fileChooserParams != null
+                            ? fileChooserParams.getAcceptTypes()
+                            : null;
+
+                    String mime = "*/*";
+                    ArrayList<String> validTypes = new ArrayList<>();
+
+                    if (acceptTypes != null) {
+                        for (String type : acceptTypes) {
+                            if (type != null && !type.trim().isEmpty()) {
+                                validTypes.add(type.trim());
+                            }
+                        }
+                    }
+
+                    if (validTypes.size() == 1) {
+                        mime = validTypes.get(0);
+                    } else if (validTypes.size() > 1) {
+                        intent.putExtra(
+                                Intent.EXTRA_MIME_TYPES,
+                                validTypes.toArray(new String[0])
+                        );
+                    }
+
+                    intent.setType(mime);
+                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+
                     startActivityForResult(intent, REQ_FILE_CHOOSER);
                     return true;
+
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
+
                     Toast.makeText(
                             MainActivity.this,
                             "Impossibile aprire il selettore file",
                             Toast.LENGTH_LONG
                     ).show();
+
                     return false;
                 }
             }
@@ -881,10 +1059,21 @@ public class MainActivity extends Activity {
         if (requestCode == REQ_FILE_CHOOSER) {
             if (filePathCallback == null) return;
 
-            Uri[] results = WebChromeClient.FileChooserParams.parseResult(
-                    resultCode,
-                    data
-            );
+            Uri[] results = null;
+
+            if (resultCode == RESULT_OK && data != null) {
+                ClipData clipData = data.getClipData();
+
+                if (clipData != null && clipData.getItemCount() > 0) {
+                    results = new Uri[clipData.getItemCount()];
+
+                    for (int i = 0; i < clipData.getItemCount(); i++) {
+                        results[i] = clipData.getItemAt(i).getUri();
+                    }
+                } else if (data.getData() != null) {
+                    results = new Uri[]{data.getData()};
+                }
+            }
 
             filePathCallback.onReceiveValue(results);
             filePathCallback = null;
@@ -903,6 +1092,7 @@ public class MainActivity extends Activity {
             String cleaned = sanitizeFilename(name);
             if (!cleaned.isEmpty()) {
                 pendingDownloadName = cleaned;
+                pendingDownloadNameAt = System.currentTimeMillis();
             }
         }
     }
@@ -1011,17 +1201,43 @@ public class MainActivity extends Activity {
                 "(function(){" +
                 " if(window.__radioDownloadNameInstalled)return;" +
                 " window.__radioDownloadNameInstalled=true;" +
-                " document.addEventListener('click',function(e){" +
-                "  const a=e.target&&e.target.closest?e.target.closest('a'):null;" +
-                "  if(!a)return;" +
-                "  let name=(a.getAttribute('download')||'').trim();" +
-                "  if(!name){" +
-                "   const text=(a.innerText||a.textContent||'').trim();" +
-                "   const m=text.match(/([\\\\w .()\\\\-]+\\\\.(?:zip|pdf|docx?|xlsx?|pptx?|apk|txt|csv|json|jpg|jpeg|png|webp))$/i);" +
-                "   if(m)name=m[1].trim();" +
+
+                " function clean(s){return (s||'').replace(/\\s+/g,' ').trim();}" +
+                " function fileFromText(s){" +
+                "  s=clean(s);" +
+                "  const m=s.match(/([^\\n\\r\\t\\/\\\\]+\\.(?:zip|pdf|docx?|xlsx?|pptx?|apk|txt|csv|json|jpg|jpeg|png|webp|mp3|mp4))(?=\\s|$)/i);" +
+                "  return m?clean(m[1]):'';" +
+                " }" +
+                " function candidate(el){" +
+                "  if(!el)return '';" +
+                "  const a=el.closest?el.closest('a'):null;" +
+                "  const b=el.closest?el.closest('button'):null;" +
+                "  let n='';" +
+                "  if(a){" +
+                "   n=clean(a.getAttribute('download'));" +
+                "   if(!n)n=fileFromText(a.innerText||a.textContent||'');" +
+                "   if(!n){" +
+                "    try{" +
+                "     const u=new URL(a.href,location.href);" +
+                "     const last=decodeURIComponent((u.pathname.split('/').pop()||''));" +
+                "     if(/\\.[a-z0-9]{2,5}$/i.test(last) && !/^content(?:[-_]?\\d+)?\\./i.test(last))n=last;" +
+                "    }catch(e){}" +
+                "   }" +
                 "  }" +
-                "  if(name&&window.AndroidRadio&&window.AndroidRadio.setPendingDownloadName){" +
-                "   window.AndroidRadio.setPendingDownloadName(name);" +
+                "  if(!n&&b)n=fileFromText(b.innerText||b.textContent||b.getAttribute('aria-label')||'');" +
+                "  if(!n)n=fileFromText(el.innerText||el.textContent||'');" +
+                "  return clean(n);" +
+                " }" +
+                " document.addEventListener('pointerdown',function(e){" +
+                "  const n=candidate(e.target);" +
+                "  if(n&&window.AndroidRadio&&window.AndroidRadio.setPendingDownloadName){" +
+                "   window.AndroidRadio.setPendingDownloadName(n);" +
+                "  }" +
+                " },true);" +
+                " document.addEventListener('click',function(e){" +
+                "  const n=candidate(e.target);" +
+                "  if(n&&window.AndroidRadio&&window.AndroidRadio.setPendingDownloadName){" +
+                "   window.AndroidRadio.setPendingDownloadName(n);" +
                 "  }" +
                 " },true);" +
                 "})();";
@@ -1090,6 +1306,24 @@ public class MainActivity extends Activity {
         } else {
             super.onBackPressed();
         }
+    }
+
+    private String fallbackDownloadName(String guessed) {
+        String ext = ".bin";
+
+        if (guessed != null) {
+            int dot = guessed.lastIndexOf('.');
+            if (dot >= 0 && dot < guessed.length() - 1) {
+                ext = guessed.substring(dot);
+            }
+        }
+
+        String stamp = new SimpleDateFormat(
+                "yyyyMMdd-HHmmss",
+                Locale.getDefault()
+        ).format(new Date());
+
+        return "ChatGPT-download-" + stamp + ext;
     }
 
     private String sanitizeFilename(String name) {
