@@ -4,6 +4,10 @@ import android.app.DownloadManager;
 import android.content.Context;
 import android.os.Environment;
 import android.webkit.URLUtil;
+import android.content.BroadcastReceiver;
+import android.content.IntentFilter;
+import android.database.Cursor;
+import android.os.Build;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -76,12 +80,16 @@ public class MainActivity extends Activity {
     private String lastSpokenText = "";
 
     private ValueCallback<Uri[]> filePathCallback;
+    private String pendingDownloadName = null;
+    private long lastDownloadId = -1L;
+    private BroadcastReceiver downloadReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         buildInterface();
+        registerDownloadReceiver();
         createTextToSpeech();
         createSpeechRecognizer();
         createWebView();
@@ -259,8 +267,8 @@ public class MainActivity extends Activity {
                     tts.setVoice(sageVoice);
                 }
             }
-            tts.setPitch(0.84f);
-            tts.setSpeechRate(0.80f);
+            tts.setPitch(0.68f);
+            tts.setSpeechRate(0.76f);
             return;
         }
 
@@ -329,8 +337,8 @@ public class MainActivity extends Activity {
         }
 
         tts.setVoice(baseVoice);
-        tts.setPitch(0.84f);
-        tts.setSpeechRate(0.80f);
+        tts.setPitch(0.68f);
+        tts.setSpeechRate(0.76f);
 
         prefs.edit()
                 .putString(PREF_TTS_MODE, MODE_SAGE)
@@ -339,7 +347,7 @@ public class MainActivity extends Activity {
 
         if (preview) {
             tts.speak(
-                    "Questa è la modalità Saggio. Più calma, più lenta e leggermente più profonda.",
+                    "Questa è la modalità Saggio. Più calma, lenta e decisamente più profonda.",
                     TextToSpeech.QUEUE_FLUSH,
                     null,
                     "sage_preview"
@@ -471,7 +479,7 @@ public class MainActivity extends Activity {
     private void speakAssistantText(String text) {
         if (text == null) return;
 
-        String cleaned = text.trim();
+        String cleaned = stripEmojis(text).trim();
         if (cleaned.isEmpty() || cleaned.equals(lastSpokenText)) return;
 
         lastSpokenText = cleaned;
@@ -515,6 +523,16 @@ public class MainActivity extends Activity {
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_MAX_RESULTS,
                 1);
+
+        speechIntent.putExtra(
+                RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
+                15000L);
+        speechIntent.putExtra(
+                RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
+                3500L);
+        speechIntent.putExtra(
+                RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+                5000L);
 
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
             @Override
@@ -702,11 +720,18 @@ public class MainActivity extends Activity {
                     request.addRequestHeader("User-Agent", userAgent);
                 }
 
-                String filename = URLUtil.guessFileName(
-                        url,
-                        contentDisposition,
-                        mimetype
-                );
+                String filename;
+                if (pendingDownloadName != null && !pendingDownloadName.trim().isEmpty()) {
+                    filename = sanitizeFilename(pendingDownloadName);
+                    pendingDownloadName = null;
+                } else {
+                    filename = URLUtil.guessFileName(
+                            url,
+                            contentDisposition,
+                            mimetype
+                    );
+                    filename = sanitizeFilename(filename);
+                }
 
                 request.setTitle(filename);
                 request.setDescription("Download da ChatGPT Radio");
@@ -737,7 +762,7 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                manager.enqueue(request);
+                lastDownloadId = manager.enqueue(request);
 
                 Toast.makeText(
                         MainActivity.this,
@@ -871,6 +896,15 @@ public class MainActivity extends Activity {
         public void assistantReady(String text) {
             speakAssistantText(text);
         }
+
+        @JavascriptInterface
+        public void setPendingDownloadName(String name) {
+            if (name == null) return;
+            String cleaned = sanitizeFilename(name);
+            if (!cleaned.isEmpty()) {
+                pendingDownloadName = cleaned;
+            }
+        }
     }
 
     private void injectTextAndSend(String text) {
@@ -928,6 +962,7 @@ public class MainActivity extends Activity {
 
     private void injectPageBehaviors() {
         injectEnterToSend();
+        injectDownloadNameCapture();
         injectAssistantObserver();
     }
 
@@ -963,6 +998,31 @@ public class MainActivity extends Activity {
                 "   const send=findSend();" +
                 "   if(send&&!send.disabled)send.click();" +
                 "  },0);" +
+                " },true);" +
+                "})();";
+
+        webView.evaluateJavascript(script, null);
+    }
+
+    private void injectDownloadNameCapture() {
+        if (webView == null) return;
+
+        String script =
+                "(function(){" +
+                " if(window.__radioDownloadNameInstalled)return;" +
+                " window.__radioDownloadNameInstalled=true;" +
+                " document.addEventListener('click',function(e){" +
+                "  const a=e.target&&e.target.closest?e.target.closest('a'):null;" +
+                "  if(!a)return;" +
+                "  let name=(a.getAttribute('download')||'').trim();" +
+                "  if(!name){" +
+                "   const text=(a.innerText||a.textContent||'').trim();" +
+                "   const m=text.match(/([\\\\w .()\\\\-]+\\\\.(?:zip|pdf|docx?|xlsx?|pptx?|apk|txt|csv|json|jpg|jpeg|png|webp))$/i);" +
+                "   if(m)name=m[1].trim();" +
+                "  }" +
+                "  if(name&&window.AndroidRadio&&window.AndroidRadio.setPendingDownloadName){" +
+                "   window.AndroidRadio.setPendingDownloadName(name);" +
+                "  }" +
                 " },true);" +
                 "})();";
 
@@ -1032,6 +1092,96 @@ public class MainActivity extends Activity {
         }
     }
 
+    private String sanitizeFilename(String name) {
+        if (name == null) return "download";
+        String cleaned = name
+                .replaceAll("[\\\\/:*?\"<>|]", "_")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return cleaned.isEmpty() ? "download" : cleaned;
+    }
+
+    private void registerDownloadReceiver() {
+        downloadReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if (!DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) return;
+
+                long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+                if (id == -1L || id != lastDownloadId) return;
+
+                DownloadManager manager =
+                        (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                if (manager == null) return;
+
+                DownloadManager.Query query = new DownloadManager.Query();
+                query.setFilterById(id);
+
+                try (Cursor cursor = manager.query(query)) {
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+                        int titleIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE);
+
+                        int status = statusIndex >= 0 ? cursor.getInt(statusIndex) : -1;
+                        String title = titleIndex >= 0 ? cursor.getString(titleIndex) : "file";
+
+                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                            Toast.makeText(
+                                    MainActivity.this,
+                                    "Download completato: " + title,
+                                    Toast.LENGTH_LONG
+                            ).show();
+                        } else if (status == DownloadManager.STATUS_FAILED) {
+                            Toast.makeText(
+                                    MainActivity.this,
+                                    "Download fallito: " + title,
+                                    Toast.LENGTH_LONG
+                            ).show();
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        };
+
+        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(downloadReceiver, filter);
+        }
+    }
+
+    private String stripEmojis(String input) {
+        if (input == null || input.isEmpty()) return "";
+
+        StringBuilder out = new StringBuilder();
+
+        for (int i = 0; i < input.length();) {
+            int cp = input.codePointAt(i);
+            i += Character.charCount(cp);
+
+            boolean emoji =
+                    (cp >= 0x1F300 && cp <= 0x1FAFF) || // emoji, simboli, faccine
+                    (cp >= 0x1F1E6 && cp <= 0x1F1FF) || // bandiere
+                    (cp >= 0x1F3FB && cp <= 0x1F3FF) || // tonalità pelle
+                    (cp >= 0x2600 && cp <= 0x26FF) ||   // simboli vari
+                    (cp >= 0x2700 && cp <= 0x27BF) ||   // dingbats
+                    cp == 0xFE0F ||                     // variation selector
+                    cp == 0x200D ||                     // zero width joiner
+                    cp == 0x20E3;                       // keycap
+
+            if (!emoji) {
+                out.appendCodePoint(cp);
+            }
+        }
+
+        return out.toString()
+                .replaceAll("\\\\s{2,}", " ")
+                .trim();
+    }
+
     @Override
     protected void onDestroy() {
         if (speechRecognizer != null) {
@@ -1058,6 +1208,14 @@ public class MainActivity extends Activity {
             webView.removeAllViews();
             webView.destroy();
             webView = null;
+        }
+
+        if (downloadReceiver != null) {
+            try {
+                unregisterReceiver(downloadReceiver);
+            } catch (Exception ignored) {
+            }
+            downloadReceiver = null;
         }
 
         super.onDestroy();
