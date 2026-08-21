@@ -1087,6 +1087,11 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void nativeReadStarted() {
+            runOnUiThread(() -> statusText.setText("🔊 Voce ChatGPT…"));
+        }
+
+        @JavascriptInterface
         public void setPendingDownloadName(String name) {
             if (name == null) return;
             String cleaned = sanitizeFilename(name);
@@ -1250,50 +1255,71 @@ public class MainActivity extends Activity {
 
         String script =
                 "(function(){" +
-                " if(window.__radioTtsInstalled)return;" +
-                " window.__radioTtsInstalled=true;" +
+                " if(window.__danHybridReadInstalled)return;" +
+                " window.__danHybridReadInstalled=true;" +
                 " let timer=null;" +
 
                 " function generating(){" +
                 "  return Array.from(document.querySelectorAll('button')).some(b=>{" +
                 "   const a=((b.getAttribute('aria-label')||'')+' '+(b.innerText||'')).toLowerCase();" +
-                "   return a.includes('stop generating')||" +
-                "          a.includes('interrompi generazione')||" +
-                "          a.includes('stop streaming');" +
+                "   return a.includes('stop generating')||a.includes('interrompi generazione')||a.includes('stop streaming');" +
                 "  });" +
                 " }" +
 
-                " function latestAssistantText(){" +
+                " function latestAssistant(){" +
                 "  const msgs=Array.from(document.querySelectorAll(\"[data-message-author-role='assistant']\"));" +
-                "  if(!msgs.length)return '';" +
-                "  return (msgs[msgs.length-1].innerText||'').trim();" +
+                "  return msgs.length?msgs[msgs.length-1]:null;" +
                 " }" +
 
-                " let lastSent=latestAssistantText();" +
+                " function latestAssistantText(){" +
+                "  const m=latestAssistant();" +
+                "  return m?(m.innerText||'').trim():'';" +
+                " }" +
 
-                " function scheduleCheck(){" +
-                "  clearTimeout(timer);" +
-                "  timer=setTimeout(()=>{" +
-                "   if(generating()){" +
-                "    scheduleCheck();" +
-                "    return;" +
+                " function isReadButton(b){" +
+                "  if(!b)return false;" +
+                "  const s=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')+' '+(b.innerText||'')).toLowerCase();" +
+                "  return s.includes('read aloud')||s.includes('leggi ad alta voce')||s.includes('lettura ad alta voce')||s.includes('read-aloud');" +
+                " }" +
+
+                " function findReadButton(){" +
+                "  const msg=latestAssistant();" +
+                "  if(msg){" +
+                "   let scope=msg;" +
+                "   for(let i=0;i<5&&scope;i++,scope=scope.parentElement){" +
+                "    const local=Array.from(scope.querySelectorAll('button')).find(isReadButton);" +
+                "    if(local)return local;" +
                 "   }" +
-                "   const text=latestAssistantText();" +
-                "   if(!text||text===lastSent)return;" +
-                "   lastSent=text;" +
-                "   try{" +
-                "    if(window.AndroidRadio&&window.AndroidRadio.assistantReady){" +
-                "     window.AndroidRadio.assistantReady(text);" +
-                "    }" +
-                "   }catch(e){}" +
-                "  },1200);" +
+                "  }" +
+                "  const all=Array.from(document.querySelectorAll('button')).filter(isReadButton);" +
+                "  return all.length?all[all.length-1]:null;" +
                 " }" +
 
-                " new MutationObserver(()=>{" +
-                "  scheduleCheck();" +
-                " }).observe(document.documentElement,{" +
-                "  childList:true,subtree:true,characterData:true" +
-                " });" +
+                " let lastHandled=latestAssistantText();" +
+
+                " function check(){" +
+                "  if(generating()){schedule();return;}" +
+                "  const text=latestAssistantText();" +
+                "  if(!text||text===lastHandled)return;" +
+                "  lastHandled=text;" +
+                "  let clicked=false;" +
+                "  const btn=findReadButton();" +
+                "  if(btn&&!btn.disabled){" +
+                "   try{" +
+                "    btn.click();" +
+                "    clicked=true;" +
+                "    if(window.AndroidRadio&&window.AndroidRadio.nativeReadStarted)window.AndroidRadio.nativeReadStarted();" +
+                "   }catch(e){}" +
+                "  }" +
+                "  if(!clicked){" +
+                "   try{" +
+                "    if(window.AndroidRadio&&window.AndroidRadio.assistantReady)window.AndroidRadio.assistantReady(text);" +
+                "   }catch(e){}" +
+                "  }" +
+                " }" +
+
+                " function schedule(){clearTimeout(timer);timer=setTimeout(check,1600);}" +
+                " new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true,characterData:true});" +
                 "})();";
 
         webView.evaluateJavascript(script, null);
