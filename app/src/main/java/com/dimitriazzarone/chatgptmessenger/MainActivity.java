@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
     private boolean handsFreeDictating = false;
     private boolean ttsSpeaking = false;
     private final StringBuilder handsFreeBuffer = new StringBuilder();
-    private static final String WAKE_WORD = "dan";
+    private static final String WAKE_WORD = "jasper";
     private float touchStartY = 0f;
     private float ttsSpeed = 1.0f;
     private String lastUrl = HOME;
@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
         voiceButton = makeButton("🔊");
         voiceButton.setTextSize(18);
 
-        autoButton = makeButton(handsFreeEnabled ? "Dan✓" : "Dan×");
+        autoButton = makeButton(handsFreeEnabled ? "Jasper✓" : "Jasper×");
         autoButton.setTextSize(13);
 
         speedButton = makeButton("1×");
@@ -182,7 +182,7 @@ public class MainActivity extends Activity {
 
         statusText = new TextView(this);
         statusText.setText(handsFreeEnabled
-                ? "🟢 In attesa — dì Dan per iniziare"
+                ? "🟢 In attesa — dì Jasper per iniziare"
                 : "⚪ Auto OFF — usa il microfono manuale");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
@@ -279,13 +279,13 @@ public class MainActivity extends Activity {
         if (handsFreeEnabled) {
             handsFreeDictating = false;
             handsFreeBuffer.setLength(0);
-            autoButton.setText("Dan✓");
-            statusText.setText("🟢 Auto ON — dì Dan per iniziare");
+            autoButton.setText("Jasper✓");
+            statusText.setText("🟢 Auto ON — dì Jasper per iniziare");
             startHandsFreeMode();
         } else {
             handsFreeDictating = false;
             handsFreeBuffer.setLength(0);
-            autoButton.setText("Dan×");
+            autoButton.setText("Jasper×");
 
             if (speechRecognizer != null && recognizerSessionActive) {
                 try { speechRecognizer.cancel(); } catch (Exception ignored) {}
@@ -421,7 +421,7 @@ public class MainActivity extends Activity {
                     ttsSpeaking = false;
                     runOnUiThread(() -> {
                         statusText.setText(handsFreeEnabled
-                                ? "🟢 In attesa — dì Dan per iniziare"
+                                ? "🟢 In attesa — dì Jasper per iniziare"
                                 : "⚪ Auto OFF — usa il microfono manuale");
                         scheduleHandsFreeRestart(350L);
                     });
@@ -724,9 +724,9 @@ public class MainActivity extends Activity {
                 if (manualCapture) {
                     statusText.setText("🎙 Ti ascolto… rilascia per inviare");
                 } else if (handsFreeDictating) {
-                    statusText.setText("🔴 Dettatura attiva — dì Dan per inviare");
+                    statusText.setText("🔴 Dettatura attiva — dì Jasper per inviare");
                 } else {
-                    statusText.setText("🟢 In attesa — dì Dan per iniziare");
+                    statusText.setText("🟢 In attesa — dì Jasper per iniziare");
                 }
             }
 
@@ -735,9 +735,9 @@ public class MainActivity extends Activity {
                 if (manualCapture) {
                     statusText.setText("🎙 Parla…");
                 } else if (handsFreeDictating) {
-                    statusText.setText("🔴 Ti ascolto… dì Dan quando hai finito");
+                    statusText.setText("🔴 Ti ascolto… dì Jasper quando hai finito");
                 } else {
-                    statusText.setText("👂 Ascolto la parola Dan…");
+                    statusText.setText("👂 Ascolto la parola Jasper…");
                 }
             }
 
@@ -842,8 +842,8 @@ public class MainActivity extends Activity {
         }
 
         statusText.setText(handsFreeDictating
-                ? "🔴 Dettatura attiva — dì Dan per inviare"
-                : "🟢 In attesa — dì Dan per iniziare");
+                ? "🔴 Dettatura attiva — dì Jasper per inviare"
+                : "🟢 In attesa — dì Jasper per iniziare");
         scheduleHandsFreeRestart(100L);
     }
 
@@ -870,7 +870,7 @@ public class MainActivity extends Activity {
 
         if (!handsFreeDictating) {
             if (commandStart < 0) {
-                statusText.setText("🟢 In attesa — dì Dan per iniziare");
+                statusText.setText("🟢 In attesa — dì Jasper per iniziare");
                 scheduleHandsFreeRestart(200L);
                 return;
             }
@@ -885,7 +885,7 @@ public class MainActivity extends Activity {
                 handsFreeBuffer.append(afterDan);
             }
 
-            statusText.setText("🔴 Dettatura attiva — dì Dan per inviare");
+            statusText.setText("🔴 Dettatura attiva — dì Jasper per inviare");
             scheduleHandsFreeRestart(180L);
             return;
         }
@@ -900,7 +900,7 @@ public class MainActivity extends Activity {
         }
 
         appendHandsFreeChunk(clean);
-        statusText.setText("🔴 Continuo ad ascoltare… dì Dan per inviare");
+        statusText.setText("🔴 Continuo ad ascoltare… dì Jasper per inviare");
         scheduleHandsFreeRestart(180L);
     }
 
@@ -941,7 +941,7 @@ public class MainActivity extends Activity {
         handsFreeDictating = false;
 
         if (message.isEmpty()) {
-            statusText.setText("Messaggio vuoto — dì Dan per ricominciare");
+            statusText.setText("Messaggio vuoto — dì Jasper per ricominciare");
             scheduleHandsFreeRestart(350L);
             return;
         }
