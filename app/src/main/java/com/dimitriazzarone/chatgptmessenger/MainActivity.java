@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
     private static final String MODE_SAGE = "sage";
     private static final String PREF_SAGE_BASE_VOICE = "sage_base_voice";
     private static final String PREF_TTS_SPEED = "tts_speed";
+    private static final String PREF_HANDS_FREE = "hands_free_enabled";
 
     private WebView webView;
     private FrameLayout webContainer;
@@ -74,7 +75,7 @@ public class MainActivity extends Activity {
     private TextView statusText;
     private Button micButton;
     private Button voiceButton;
-    private Button filesButton;
+    private Button autoButton;
     private Button speedButton;
 
     private SpeechRecognizer speechRecognizer;
@@ -107,6 +108,9 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        handsFreeEnabled = startupPrefs.getBoolean(PREF_HANDS_FREE, true);
+
         buildInterface();
         registerDownloadReceiver();
         createTextToSpeech();
@@ -114,7 +118,11 @@ public class MainActivity extends Activity {
         createWebView();
 
         webView.loadUrl(HOME);
-        statusText.postDelayed(this::startHandsFreeMode, 900L);
+        if (handsFreeEnabled) {
+            statusText.postDelayed(this::startHandsFreeMode, 900L);
+        } else {
+            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+        }
     }
 
     private void buildInterface() {
@@ -143,8 +151,8 @@ public class MainActivity extends Activity {
         voiceButton = makeButton("🔊");
         voiceButton.setTextSize(18);
 
-        filesButton = makeButton("📁");
-        filesButton.setTextSize(18);
+        autoButton = makeButton(handsFreeEnabled ? "Dan✓" : "Dan×");
+        autoButton.setTextSize(13);
 
         speedButton = makeButton("1×");
         speedButton.setTextSize(15);
@@ -154,7 +162,7 @@ public class MainActivity extends Activity {
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
         topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
-        topBar.addView(filesButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(58), dp(44)));
         topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(54), dp(44)));
         topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
         topBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
@@ -173,7 +181,9 @@ public class MainActivity extends Activity {
         bottomBar.setBackgroundColor(Color.rgb(32, 44, 51));
 
         statusText = new TextView(this);
-        statusText.setText("🟢 In attesa — dì Dan per iniziare");
+        statusText.setText(handsFreeEnabled
+                ? "🟢 In attesa — dì Dan per iniziare"
+                : "⚪ Auto OFF — usa il microfono manuale");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
         statusText.setGravity(Gravity.CENTER_VERTICAL);
@@ -210,7 +220,7 @@ public class MainActivity extends Activity {
         });
 
         voiceButton.setOnClickListener(v -> showVoiceChooser());
-        filesButton.setOnClickListener(v -> openDocumentPicker());
+        autoButton.setOnClickListener(v -> toggleHandsFreeMode());
         speedButton.setOnClickListener(v -> cycleTtsSpeed());
 
         micButton.setOnTouchListener((v, event) -> {
@@ -256,6 +266,36 @@ public class MainActivity extends Activity {
 
             return false;
         });
+    }
+
+    private void toggleHandsFreeMode() {
+        handsFreeEnabled = !handsFreeEnabled;
+
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_HANDS_FREE, handsFreeEnabled)
+                .apply();
+
+        if (handsFreeEnabled) {
+            handsFreeDictating = false;
+            handsFreeBuffer.setLength(0);
+            autoButton.setText("Dan✓");
+            statusText.setText("🟢 Auto ON — dì Dan per iniziare");
+            startHandsFreeMode();
+        } else {
+            handsFreeDictating = false;
+            handsFreeBuffer.setLength(0);
+            autoButton.setText("Dan×");
+
+            if (speechRecognizer != null && recognizerSessionActive) {
+                try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+            }
+
+            recognizerSessionActive = false;
+            listening = false;
+            applyMicStyle(false);
+            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+        }
     }
 
     private void restoreTtsSpeed() {
@@ -380,7 +420,9 @@ public class MainActivity extends Activity {
                 public void onDone(String utteranceId) {
                     ttsSpeaking = false;
                     runOnUiThread(() -> {
-                        statusText.setText("🟢 In attesa — dì Dan per iniziare");
+                        statusText.setText(handsFreeEnabled
+                                ? "🟢 In attesa — dì Dan per iniziare"
+                                : "⚪ Auto OFF — usa il microfono manuale");
                         scheduleHandsFreeRestart(350L);
                     });
                 }
@@ -784,7 +826,10 @@ public class MainActivity extends Activity {
     }
 
     private void startHandsFreeMode() {
-        handsFreeEnabled = true;
+        if (!handsFreeEnabled) {
+            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+            return;
+        }
 
         if (speechRecognizer == null) return;
 
