@@ -38,6 +38,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -987,6 +988,198 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showDownloadNameDialog(
+            String url,
+            String userAgent,
+            String mimetype,
+            String suggestedName
+    ) {
+        final String safeSuggested = sanitizeFilename(suggestedName);
+
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(safeSuggested);
+        input.setSelectAllOnFocus(true);
+        input.setHint("Nome del file");
+
+        int pad = dp(20);
+        FrameLayout holder = new FrameLayout(this);
+        holder.setPadding(pad, dp(4), pad, 0);
+        holder.addView(
+                input,
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+        );
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Salva file come")
+                .setMessage("Scegli il nome con cui salvare il file nella cartella Download.")
+                .setView(holder)
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Salva", null)
+                .create();
+
+        dialog.setOnShowListener(d -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                String typed = sanitizeFilename(input.getText().toString());
+
+                if (typed.isEmpty() || "download".equalsIgnoreCase(typed)) {
+                    input.setError("Inserisci un nome valido");
+                    return;
+                }
+
+                typed = keepOriginalExtensionIfMissing(
+                        typed,
+                        safeSuggested
+                );
+
+                String finalName = uniqueDownloadFilename(typed);
+                dialog.dismiss();
+
+                startNamedDownload(
+                        url,
+                        userAgent,
+                        mimetype,
+                        finalName
+                );
+            });
+        });
+
+        dialog.show();
+        input.requestFocus();
+        if (input.getText() != null) {
+            input.setSelection(0, input.getText().length());
+        }
+    }
+
+    private void startNamedDownload(
+            String url,
+            String userAgent,
+            String mimetype,
+            String filename
+    ) {
+        try {
+            DownloadManager.Request request =
+                    new DownloadManager.Request(Uri.parse(url));
+
+            String cookie = CookieManager.getInstance().getCookie(url);
+            if (cookie != null && !cookie.isEmpty()) {
+                request.addRequestHeader("Cookie", cookie);
+            }
+
+            if (userAgent != null && !userAgent.isEmpty()) {
+                request.addRequestHeader("User-Agent", userAgent);
+            }
+
+            request.setTitle(filename);
+            request.setDescription("Download da Dan");
+            request.setNotificationVisibility(
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+            );
+            request.setAllowedOverMetered(true);
+            request.setAllowedOverRoaming(true);
+
+            if (mimetype != null && !mimetype.isEmpty()) {
+                request.setMimeType(mimetype);
+            }
+
+            request.setDestinationInExternalPublicDir(
+                    Environment.DIRECTORY_DOWNLOADS,
+                    filename
+            );
+
+            DownloadManager manager =
+                    (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+
+            if (manager == null) {
+                Toast.makeText(
+                        MainActivity.this,
+                        "Gestore download Android non disponibile",
+                        Toast.LENGTH_LONG
+                ).show();
+                return;
+            }
+
+            lastDownloadId = manager.enqueue(request);
+
+            Toast.makeText(
+                    MainActivity.this,
+                    "Download avviato: " + filename,
+                    Toast.LENGTH_LONG
+            ).show();
+
+        } catch (Exception e) {
+            Toast.makeText(
+                    MainActivity.this,
+                    "Impossibile avviare il download",
+                    Toast.LENGTH_LONG
+            ).show();
+        }
+    }
+
+    private String keepOriginalExtensionIfMissing(
+            String typed,
+            String suggested
+    ) {
+        if (typed == null) return "download";
+
+        String clean = sanitizeFilename(typed);
+        if (hasExtension(clean)) return clean;
+
+        String ext = extensionOf(suggested);
+        if (!ext.isEmpty()) {
+            return clean + ext;
+        }
+
+        return clean;
+    }
+
+    private boolean hasExtension(String name) {
+        if (name == null) return false;
+
+        int dot = name.lastIndexOf('.');
+        return dot > 0 && dot < name.length() - 1;
+    }
+
+    private String extensionOf(String name) {
+        if (name == null) return "";
+
+        int dot = name.lastIndexOf('.');
+        if (dot <= 0 || dot >= name.length() - 1) return "";
+
+        String ext = name.substring(dot);
+        if (!ext.matches("\\.[A-Za-z0-9]{1,8}")) return "";
+
+        return ext;
+    }
+
+    private String uniqueDownloadFilename(String requested) {
+        String clean = sanitizeFilename(requested);
+
+        File downloads = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_DOWNLOADS
+        );
+
+        File candidate = new File(downloads, clean);
+        if (!candidate.exists()) return clean;
+
+        String ext = extensionOf(clean);
+        String base = ext.isEmpty()
+                ? clean
+                : clean.substring(0, clean.length() - ext.length());
+
+        for (int i = 1; i < 1000; i++) {
+            String candidateName = base + " (" + i + ")" + ext;
+            if (!new File(downloads, candidateName).exists()) {
+                return candidateName;
+            }
+        }
+
+        return base + "-" + System.currentTimeMillis() + ext;
+    }
+
     private void createWebView() {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(11, 20, 26));
@@ -1034,92 +1227,41 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            try {
-                DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            String guessed = URLUtil.guessFileName(
+                    url,
+                    contentDisposition,
+                    mimetype
+            );
 
-                String cookie = CookieManager.getInstance().getCookie(url);
-                if (cookie != null && !cookie.isEmpty()) {
-                    request.addRequestHeader("Cookie", cookie);
-                }
+            String suggested = null;
 
-                if (userAgent != null && !userAgent.isEmpty()) {
-                    request.addRequestHeader("User-Agent", userAgent);
-                }
-
-                String guessed = URLUtil.guessFileName(
-                        url,
-                        contentDisposition,
-                        mimetype
-                );
-
-                String filename = null;
-
-                long age = System.currentTimeMillis() - pendingDownloadNameAt;
-                if (pendingDownloadName != null
-                        && !pendingDownloadName.trim().isEmpty()
-                        && age >= 0
-                        && age <= 10000L) {
-                    filename = sanitizeFilename(pendingDownloadName);
-                }
-
-                pendingDownloadName = null;
-                pendingDownloadNameAt = 0L;
-
-                if (filename == null || filename.isEmpty()) {
-                    String safeGuessed = sanitizeFilename(guessed);
-
-                    if (safeGuessed.toLowerCase(Locale.ROOT).matches(
-                            "^content(?:[-_]?\\d+)?\\.[a-z0-9]{2,5}$")) {
-                        filename = fallbackDownloadName(safeGuessed);
-                    } else {
-                        filename = safeGuessed;
-                    }
-                }
-
-                request.setTitle(filename);
-                request.setDescription("Download da ChatGPT Radio");
-                request.setNotificationVisibility(
-                        DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                );
-                request.setAllowedOverMetered(true);
-                request.setAllowedOverRoaming(true);
-
-                if (mimetype != null && !mimetype.isEmpty()) {
-                    request.setMimeType(mimetype);
-                }
-
-                request.setDestinationInExternalPublicDir(
-                        Environment.DIRECTORY_DOWNLOADS,
-                        filename
-                );
-
-                DownloadManager manager =
-                        (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-
-                if (manager == null) {
-                    Toast.makeText(
-                            MainActivity.this,
-                            "Gestore download Android non disponibile",
-                            Toast.LENGTH_LONG
-                    ).show();
-                    return;
-                }
-
-                lastDownloadId = manager.enqueue(request);
-
-                Toast.makeText(
-                        MainActivity.this,
-                        "Download avviato: " + filename,
-                        Toast.LENGTH_LONG
-                ).show();
-
-            } catch (Exception e) {
-                Toast.makeText(
-                        MainActivity.this,
-                        "Impossibile avviare il download",
-                        Toast.LENGTH_LONG
-                ).show();
+            long age = System.currentTimeMillis() - pendingDownloadNameAt;
+            if (pendingDownloadName != null
+                    && !pendingDownloadName.trim().isEmpty()
+                    && age >= 0
+                    && age <= 10000L) {
+                suggested = sanitizeFilename(pendingDownloadName);
             }
+
+            pendingDownloadName = null;
+            pendingDownloadNameAt = 0L;
+
+            if (suggested == null || suggested.isEmpty()) {
+                suggested = sanitizeFilename(guessed);
+            }
+
+            if (suggested == null || suggested.isEmpty()
+                    || suggested.toLowerCase(Locale.ROOT).matches(
+                    "^content(?:[-_]?\\d+)?\\.[a-z0-9]{2,5}$")) {
+                suggested = fallbackDownloadName(guessed);
+            }
+
+            showDownloadNameDialog(
+                    url,
+                    userAgent,
+                    mimetype,
+                    suggested
+            );
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
