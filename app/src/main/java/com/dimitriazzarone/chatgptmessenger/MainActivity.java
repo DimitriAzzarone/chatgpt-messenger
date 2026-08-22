@@ -78,8 +78,15 @@ public class MainActivity extends Activity {
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
     private boolean listening = false;
+    private boolean recognizerSessionActive = false;
     private boolean pressToTalkRequested = false;
     private boolean recordingLocked = false;
+    private boolean manualCapture = false;
+    private boolean handsFreeEnabled = true;
+    private boolean handsFreeDictating = false;
+    private boolean ttsSpeaking = false;
+    private final StringBuilder handsFreeBuffer = new StringBuilder();
+    private static final String WAKE_WORD = "dan";
     private float touchStartY = 0f;
     private float ttsSpeed = 1.0f;
     private String lastUrl = HOME;
@@ -105,6 +112,7 @@ public class MainActivity extends Activity {
         createWebView();
 
         webView.loadUrl(HOME);
+        statusText.postDelayed(this::startHandsFreeMode, 900L);
     }
 
     private void buildInterface() {
@@ -163,7 +171,7 @@ public class MainActivity extends Activity {
         bottomBar.setBackgroundColor(Color.rgb(32, 44, 51));
 
         statusText = new TextView(this);
-        statusText.setText("Tieni premuto il microfono per parlare");
+        statusText.setText("🟢 In attesa — dì Dan per iniziare");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
         statusText.setGravity(Gravity.CENTER_VERTICAL);
@@ -213,6 +221,10 @@ public class MainActivity extends Activity {
 
                     touchStartY = event.getRawY();
                     pressToTalkRequested = true;
+                    manualCapture = true;
+                    if (speechRecognizer != null && recognizerSessionActive) {
+                        try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+                    }
                     startPressToTalk();
                     return true;
 
@@ -353,19 +365,31 @@ public class MainActivity extends Activity {
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override
                 public void onStart(String utteranceId) {
-                    runOnUiThread(() -> statusText.setText("🔊 Lettura risposta…"));
+                    ttsSpeaking = true;
+                    runOnUiThread(() -> {
+                        if (speechRecognizer != null && recognizerSessionActive) {
+                            try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+                        }
+                        statusText.setText("🔊 Lettura risposta…");
+                    });
                 }
 
                 @Override
                 public void onDone(String utteranceId) {
-                    runOnUiThread(() -> statusText.setText(
-                            "Tieni premuto il microfono per parlare"));
+                    ttsSpeaking = false;
+                    runOnUiThread(() -> {
+                        statusText.setText("🟢 In attesa — dì Dan per iniziare");
+                        scheduleHandsFreeRestart(350L);
+                    });
                 }
 
                 @Override
                 public void onError(String utteranceId) {
-                    runOnUiThread(() -> statusText.setText(
-                            "Errore nella sintesi vocale"));
+                    ttsSpeaking = false;
+                    runOnUiThread(() -> {
+                        statusText.setText("Errore nella sintesi vocale");
+                        scheduleHandsFreeRestart(500L);
+                    });
                 }
             });
         });
@@ -635,34 +659,42 @@ public class MainActivity extends Activity {
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE,
                 Locale.getDefault().toLanguageTag());
-        speechIntent.putExtra(
-                RecognizerIntent.EXTRA_PARTIAL_RESULTS,
-                false);
-        speechIntent.putExtra(
-                RecognizerIntent.EXTRA_MAX_RESULTS,
-                1);
-
+        speechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
                 15000L);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
-                3500L);
+                1800L);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
-                5000L);
+                2500L);
 
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
             @Override
             public void onReadyForSpeech(Bundle params) {
                 listening = true;
+                recognizerSessionActive = true;
                 applyMicStyle(true);
-                statusText.setText("🎙 Ti ascolto… rilascia per inviare");
+                if (manualCapture) {
+                    statusText.setText("🎙 Ti ascolto… rilascia per inviare");
+                } else if (handsFreeDictating) {
+                    statusText.setText("🔴 Dettatura attiva — dì Dan per inviare");
+                } else {
+                    statusText.setText("🟢 In attesa — dì Dan per iniziare");
+                }
             }
 
             @Override
             public void onBeginningOfSpeech() {
-                statusText.setText("🎙 Parla…");
+                if (manualCapture) {
+                    statusText.setText("🎙 Parla…");
+                } else if (handsFreeDictating) {
+                    statusText.setText("🔴 Ti ascolto… dì Dan quando hai finito");
+                } else {
+                    statusText.setText("👂 Ascolto la parola Dan…");
+                }
             }
 
             @Override public void onRmsChanged(float rmsdB) {}
@@ -670,58 +702,78 @@ public class MainActivity extends Activity {
 
             @Override
             public void onEndOfSpeech() {
-                statusText.setText("Trascrivo…");
+                statusText.setText(manualCapture ? "Trascrivo…" : "Elaboro…");
             }
 
             @Override
             public void onError(int error) {
                 listening = false;
-                recordingLocked = false;
-                micButton.setText("🎙");
+                recognizerSessionActive = false;
                 applyMicStyle(false);
 
-                String msg;
-                switch (error) {
-                    case SpeechRecognizer.ERROR_NO_MATCH:
-                        msg = "Non ho capito. Riprova.";
-                        break;
-                    case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
-                        msg = "Non ho sentito parlare.";
-                        break;
-                    case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
-                        msg = "Permesso microfono mancante.";
-                        break;
-                    default:
-                        msg = "Errore riconoscimento vocale: " + error;
+                if (manualCapture) {
+                    manualCapture = false;
+                    recordingLocked = false;
+                    pressToTalkRequested = false;
+                    micButton.setText("🎙");
+                    if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                        statusText.setText("Permesso microfono mancante.");
+                    } else if (error == SpeechRecognizer.ERROR_NO_MATCH
+                            || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                            || error == SpeechRecognizer.ERROR_CLIENT) {
+                        statusText.setText("Non ho capito. Riprova.");
+                    } else {
+                        statusText.setText("Errore riconoscimento vocale: " + error);
+                    }
+                    scheduleHandsFreeRestart(500L);
+                    return;
                 }
 
-                statusText.setText(msg);
+                if (!handsFreeEnabled) return;
+
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    statusText.setText("Permesso microfono mancante.");
+                    return;
+                }
+
+                long delay = (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
+                        || error == SpeechRecognizer.ERROR_CLIENT) ? 800L : 300L;
+                scheduleHandsFreeRestart(delay);
             }
 
             @Override
             public void onResults(Bundle results) {
                 listening = false;
-                recordingLocked = false;
-                micButton.setText("🎙");
+                recognizerSessionActive = false;
                 applyMicStyle(false);
 
                 ArrayList<String> matches =
                         results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                String text = (matches == null || matches.isEmpty())
+                        ? ""
+                        : matches.get(0).trim();
 
-                if (matches == null || matches.isEmpty()) {
-                    statusText.setText("Nessun testo riconosciuto");
+                if (manualCapture) {
+                    manualCapture = false;
+                    recordingLocked = false;
+                    pressToTalkRequested = false;
+                    micButton.setText("🎙");
+
+                    if (!text.isEmpty()) {
+                        statusText.setText("Invio a ChatGPT…");
+                        injectTextAndSend(text);
+                    } else {
+                        statusText.setText("Nessun testo riconosciuto");
+                    }
+                    scheduleHandsFreeRestart(700L);
                     return;
                 }
 
-                String text = matches.get(0).trim();
-
-                if (text.isEmpty()) {
-                    statusText.setText("Nessun testo riconosciuto");
-                    return;
+                if (!text.isEmpty()) {
+                    processHandsFreeText(text);
+                } else {
+                    scheduleHandsFreeRestart(250L);
                 }
-
-                statusText.setText("Invio a ChatGPT…");
-                injectTextAndSend(text);
             }
 
             @Override public void onPartialResults(Bundle partialResults) {}
@@ -729,12 +781,10 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void startPressToTalk() {
-        if (speechRecognizer == null) return;
+    private void startHandsFreeMode() {
+        handsFreeEnabled = true;
 
-        if (tts != null) {
-            tts.stop();
-        }
+        if (speechRecognizer == null) return;
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -744,14 +794,151 @@ public class MainActivity extends Activity {
             return;
         }
 
-        startListening();
+        statusText.setText(handsFreeDictating
+                ? "🔴 Dettatura attiva — dì Dan per inviare"
+                : "🟢 In attesa — dì Dan per iniziare");
+        scheduleHandsFreeRestart(100L);
+    }
+
+    private void scheduleHandsFreeRestart(long delayMs) {
+        if (!handsFreeEnabled || manualCapture || ttsSpeaking || speechRecognizer == null) return;
+
+        statusText.postDelayed(() -> {
+            if (!handsFreeEnabled || manualCapture || ttsSpeaking
+                    || speechRecognizer == null || recognizerSessionActive) {
+                return;
+            }
+            startListening();
+        }, delayMs);
+    }
+
+    private void processHandsFreeText(String text) {
+        String clean = text.trim();
+        if (clean.isEmpty()) {
+            scheduleHandsFreeRestart(200L);
+            return;
+        }
+
+        int commandStart = findWakeWord(clean);
+
+        if (!handsFreeDictating) {
+            if (commandStart < 0) {
+                statusText.setText("🟢 In attesa — dì Dan per iniziare");
+                scheduleHandsFreeRestart(200L);
+                return;
+            }
+
+            handsFreeDictating = true;
+            handsFreeBuffer.setLength(0);
+
+            String afterDan = clean.substring(commandStart + WAKE_WORD.length())
+                    .replaceFirst("^[\\s,.:;!?-]+", "")
+                    .trim();
+            if (!afterDan.isEmpty()) {
+                handsFreeBuffer.append(afterDan);
+            }
+
+            statusText.setText("🔴 Dettatura attiva — dì Dan per inviare");
+            scheduleHandsFreeRestart(180L);
+            return;
+        }
+
+        if (commandStart >= 0) {
+            String beforeDan = clean.substring(0, commandStart)
+                    .replaceFirst("[\\s,.:;!?-]+$", "")
+                    .trim();
+            appendHandsFreeChunk(beforeDan);
+            finishHandsFreeMessage();
+            return;
+        }
+
+        appendHandsFreeChunk(clean);
+        statusText.setText("🔴 Continuo ad ascoltare… dì Dan per inviare");
+        scheduleHandsFreeRestart(180L);
+    }
+
+    private int findWakeWord(String text) {
+        String lower = text.toLowerCase(Locale.ROOT);
+        int from = 0;
+
+        while (from < lower.length()) {
+            int i = lower.indexOf(WAKE_WORD, from);
+            if (i < 0) return -1;
+
+            int end = i + WAKE_WORD.length();
+            boolean leftOk = i == 0 || !Character.isLetterOrDigit(lower.charAt(i - 1));
+            boolean rightOk = end >= lower.length()
+                    || !Character.isLetterOrDigit(lower.charAt(end));
+
+            if (leftOk && rightOk) return i;
+            from = i + 1;
+        }
+
+        return -1;
+    }
+
+    private void appendHandsFreeChunk(String chunk) {
+        if (chunk == null) return;
+        String clean = chunk.trim();
+        if (clean.isEmpty()) return;
+
+        if (handsFreeBuffer.length() > 0) {
+            handsFreeBuffer.append(' ');
+        }
+        handsFreeBuffer.append(clean);
+    }
+
+    private void finishHandsFreeMessage() {
+        String message = handsFreeBuffer.toString().trim();
+        handsFreeBuffer.setLength(0);
+        handsFreeDictating = false;
+
+        if (message.isEmpty()) {
+            statusText.setText("Messaggio vuoto — dì Dan per ricominciare");
+            scheduleHandsFreeRestart(350L);
+            return;
+        }
+
+        statusText.setText("Invio a ChatGPT…");
+        injectTextAndSend(message);
+        scheduleHandsFreeRestart(800L);
+    }
+
+    private void startPressToTalk() {
+        if (speechRecognizer == null) return;
+
+        if (tts != null) {
+            tts.stop();
+        }
+        ttsSpeaking = false;
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQ_AUDIO);
+            return;
+        }
+
+        statusText.postDelayed(() -> {
+            if (manualCapture) startListening();
+        }, 180L);
     }
 
     private void startListening() {
+        if (speechRecognizer == null || recognizerSessionActive) return;
+
         try {
+            recognizerSessionActive = true;
             speechRecognizer.startListening(speechIntent);
         } catch (Exception e) {
-            statusText.setText("Impossibile avviare il microfono");
+            recognizerSessionActive = false;
+            listening = false;
+            if (manualCapture) {
+                statusText.setText("Impossibile avviare il microfono");
+            } else {
+                scheduleHandsFreeRestart(800L);
+            }
         }
     }
 
@@ -763,16 +950,16 @@ public class MainActivity extends Activity {
         micButton.setText("🎙");
         applyMicStyle(false);
 
-        if (speechRecognizer != null && listening) {
+        if (speechRecognizer != null && recognizerSessionActive) {
             statusText.setText("Trascrivo…");
             speechRecognizer.stopListening();
         }
     }
 
     private void stopPressToTalk() {
-        if (speechRecognizer != null && listening) {
+        if (speechRecognizer != null && recognizerSessionActive && manualCapture) {
             statusText.setText("Trascrivo…");
-            speechRecognizer.stopListening();
+            try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
         }
         micButton.setText("🎙");
         applyMicStyle(false);
@@ -789,8 +976,10 @@ public class MainActivity extends Activity {
         if (requestCode == REQ_AUDIO) {
             if (grantResults.length > 0
                     && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                if (pressToTalkRequested) {
-                    startListening();
+                if (pressToTalkRequested || manualCapture) {
+                    startPressToTalk();
+                } else {
+                    startHandsFreeMode();
                 }
             } else {
                 statusText.setText("Microfono non autorizzato");
@@ -1444,7 +1633,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        handsFreeEnabled = false;
         if (speechRecognizer != null) {
+            try { speechRecognizer.cancel(); } catch (Exception ignored) {}
             speechRecognizer.destroy();
             speechRecognizer = null;
         }
