@@ -924,8 +924,7 @@ public class MainActivity extends Activity {
                     micButton.setText("🎙");
 
                     if (!text.isEmpty()) {
-                        statusText.setText("Invio a ChatGPT…");
-                        injectTextAndSend(text);
+                        handleRecognizedCommandOrMessage(text);
                     } else {
                         statusText.setText("Nessun testo riconosciuto");
                     }
@@ -1067,8 +1066,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        statusText.setText("Invio a ChatGPT…");
-        injectTextAndSend(message);
+        handleRecognizedCommandOrMessage(message);
         scheduleHandsFreeRestart(800L);
     }
 
@@ -1598,6 +1596,84 @@ public class MainActivity extends Activity {
                 pendingDownloadNameAt = System.currentTimeMillis();
             }
         }
+    }
+
+    private void handleRecognizedCommandOrMessage(String text) {
+        if (text == null) return;
+
+        String clean = text.trim();
+        if (clean.isEmpty()) return;
+
+        String lower = clean.toLowerCase(Locale.ROOT);
+
+        if (lower.startsWith("apri ")) {
+            String target = clean.substring(5).trim();
+
+            if (target.toLowerCase(Locale.ROOT).startsWith("conversazione ")) {
+                target = target.substring("conversazione ".length()).trim();
+            } else if (target.toLowerCase(Locale.ROOT).startsWith("chat ")) {
+                target = target.substring("chat ".length()).trim();
+            }
+
+            if (!target.isEmpty()) {
+                openChatByTitle(target);
+                return;
+            }
+        }
+
+        statusText.setText("Invio a ChatGPT…");
+        injectTextAndSend(clean);
+    }
+
+    private void openChatByTitle(String requestedTitle) {
+        if (webView == null || requestedTitle == null) return;
+
+        String cleanTitle = requestedTitle.trim();
+        if (cleanTitle.isEmpty()) return;
+
+        String escaped = cleanTitle
+                .replace("\\", "\\\\")
+                .replace("'", "\\'");
+
+        statusText.setText("Cerco chat: " + cleanTitle + "…");
+
+        String script =
+                "(function(){" +
+                " const wanted='" + escaped + "'.toLowerCase().trim();" +
+                " const norm=s=>(s||'').replace(/\\s+/g,' ').trim().toLowerCase();" +
+                " const links=Array.from(document.querySelectorAll('a[href]'))" +
+                "   .filter(a=>{" +
+                "     const h=a.getAttribute('href')||'';" +
+                "     return h.includes('/c/')||h.includes('/g/');" +
+                "   });" +
+                " let exact=links.find(a=>norm(a.innerText||a.textContent)===wanted);" +
+                " if(!exact) exact=links.find(a=>norm(a.innerText||a.textContent).includes(wanted));" +
+                " if(!exact) return 'NOT_FOUND';" +
+                " const href=exact.href||exact.getAttribute('href');" +
+                " if(href){ location.href=href; return 'OPENED'; }" +
+                " try{ exact.click(); return 'OPENED'; }catch(e){}" +
+                " return 'FAILED';" +
+                "})();";
+
+        webView.evaluateJavascript(script, value -> runOnUiThread(() -> {
+            if (value == null) {
+                statusText.setText("Chat non trovata: " + cleanTitle);
+                return;
+            }
+
+            if (value.contains("OPENED")) {
+                statusText.setText("Apro chat: " + cleanTitle);
+            } else if (value.contains("NOT_FOUND")) {
+                statusText.setText("Chat non trovata: " + cleanTitle);
+                Toast.makeText(
+                        MainActivity.this,
+                        "Non trovo una chat visibile con titolo: " + cleanTitle,
+                        Toast.LENGTH_LONG
+                ).show();
+            } else {
+                statusText.setText("Non riesco ad aprire: " + cleanTitle);
+            }
+        }));
     }
 
     private void injectTextAndSend(String text) {
