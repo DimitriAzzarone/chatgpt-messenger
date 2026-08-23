@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
     private boolean pressToTalkRequested = false;
     private boolean recordingLocked = false;
     private boolean manualCapture = false;
-    private boolean handsFreeEnabled = true;
+    private boolean handsFreeEnabled = false;
     private boolean handsFreeDictating = false;
     private boolean ttsSpeaking = false;
     private boolean headsetRecording = false;
@@ -114,7 +114,11 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        handsFreeEnabled = startupPrefs.getBoolean(PREF_HANDS_FREE, true);
+
+        // v1.16 Audio Safe reale:
+        // Jasper parte sempre OFF e il vecchio stato salvato viene azzerato.
+        handsFreeEnabled = false;
+        startupPrefs.edit().putBoolean(PREF_HANDS_FREE, false).apply();
 
         buildInterface();
         registerDownloadReceiver();
@@ -186,8 +190,8 @@ public class MainActivity extends Activity {
 
         statusText = new TextView(this);
         statusText.setText(handsFreeEnabled
-                ? "🟢 In attesa — dì Jasper per iniziare"
-                : "⚪ Auto OFF — usa il microfono manuale");
+                ? "🟢 Jasper ON — dì Jasper per iniziare"
+                : "⚪ Audio libero — microfono/cuffie solo quando li usi");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
         statusText.setGravity(Gravity.CENTER_VERTICAL);
@@ -737,7 +741,8 @@ public class MainActivity extends Activity {
                 }
             });
 
-            headsetMediaSession.setActive(true);
+            // Verrà attivata solo quando Dan è in primo piano.
+            headsetMediaSession.setActive(false);
         } catch (Exception e) {
             headsetMediaSession = null;
         }
@@ -2012,6 +2017,57 @@ public class MainActivity extends Activity {
         return out.toString()
                 .replaceAll("\\\\s{2,}", " ")
                 .trim();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (headsetMediaSession != null) {
+            try { headsetMediaSession.setActive(true); } catch (Exception ignored) {}
+        }
+
+        statusText.setText(handsFreeEnabled
+                ? "🟢 Jasper ON — dì Jasper per iniziare"
+                : "⚪ Audio libero — microfono/cuffie solo quando li usi");
+
+        if (handsFreeEnabled && !manualCapture && !headsetRecording && !ttsSpeaking) {
+            scheduleHandsFreeRestart(250L);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        // Dan deve lasciare completamente liberi microfono e controlli cuffie
+        // quando l'utente passa a Brave, YouTube, WhatsApp, ecc.
+        if (speechRecognizer != null && recognizerSessionActive) {
+            try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+        }
+
+        recognizerSessionActive = false;
+        listening = false;
+        manualCapture = false;
+        headsetRecording = false;
+        recordingLocked = false;
+        pressToTalkRequested = false;
+
+        if (micButton != null) {
+            micButton.setText("🎙");
+            applyMicStyle(false);
+        }
+
+        if (headsetMediaSession != null) {
+            try { headsetMediaSession.setActive(false); } catch (Exception ignored) {}
+        }
+
+        // Ferma eventuale lettura vocale di Dan per non contendere l'audio
+        // alle altre app quando Dan è in background.
+        if (tts != null) {
+            try { tts.stop(); } catch (Exception ignored) {}
+        }
+        ttsSpeaking = false;
+
+        super.onPause();
     }
 
     @Override
