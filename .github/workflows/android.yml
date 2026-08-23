@@ -34,6 +34,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Dan-APK-v1.16
+          name: Dan-APK-v1.17
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

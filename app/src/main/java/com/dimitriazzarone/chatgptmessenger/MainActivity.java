@@ -696,6 +696,10 @@ public class MainActivity extends Activity {
     private void createHeadsetMediaSession() {
         try {
             headsetMediaSession = new MediaSession(this, "DanHeadsetControls");
+            headsetMediaSession.setFlags(
+                    MediaSession.FLAG_HANDLES_MEDIA_BUTTONS
+                            | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+            );
 
             PlaybackState state = new PlaybackState.Builder()
                     .setActions(
@@ -2024,7 +2028,23 @@ public class MainActivity extends Activity {
         super.onResume();
 
         if (headsetMediaSession != null) {
-            try { headsetMediaSession.setActive(true); } catch (Exception ignored) {}
+            try {
+                PlaybackState foregroundState = new PlaybackState.Builder()
+                        .setActions(
+                                PlaybackState.ACTION_PLAY
+                                        | PlaybackState.ACTION_PAUSE
+                                        | PlaybackState.ACTION_PLAY_PAUSE
+                        )
+                        .setState(
+                                PlaybackState.STATE_PLAYING,
+                                PlaybackState.PLAYBACK_POSITION_UNKNOWN,
+                                1.0f
+                        )
+                        .build();
+
+                headsetMediaSession.setPlaybackState(foregroundState);
+                headsetMediaSession.setActive(true);
+            } catch (Exception ignored) {}
         }
 
         statusText.setText(handsFreeEnabled
@@ -2057,7 +2077,19 @@ public class MainActivity extends Activity {
         }
 
         if (headsetMediaSession != null) {
-            try { headsetMediaSession.setActive(false); } catch (Exception ignored) {}
+            try {
+                PlaybackState backgroundState = new PlaybackState.Builder()
+                        .setActions(0L)
+                        .setState(
+                                PlaybackState.STATE_STOPPED,
+                                PlaybackState.PLAYBACK_POSITION_UNKNOWN,
+                                0.0f
+                        )
+                        .build();
+
+                headsetMediaSession.setPlaybackState(backgroundState);
+                headsetMediaSession.setActive(false);
+            } catch (Exception ignored) {}
         }
 
         // Ferma eventuale lettura vocale di Dan per non contendere l'audio
