@@ -124,11 +124,9 @@ public class MainActivity extends Activity {
         createWebView();
 
         webView.loadUrl(HOME);
-        if (handsFreeEnabled) {
-            statusText.postDelayed(this::startHandsFreeMode, 900L);
-        } else {
-            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
-        }
+        // v1.15 Audio Safe: niente ascolto automatico all'avvio.
+        // Il microfono si attiva solo con comando esplicito.
+        statusText.setText("⚪ Audio Safe — usa microfono o cuffie quando vuoi");
     }
 
     private void buildInterface() {
