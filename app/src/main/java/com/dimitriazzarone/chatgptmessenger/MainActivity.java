@@ -19,6 +19,9 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
+import android.view.KeyEvent;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -88,6 +91,8 @@ public class MainActivity extends Activity {
     private boolean handsFreeEnabled = true;
     private boolean handsFreeDictating = false;
     private boolean ttsSpeaking = false;
+    private boolean headsetRecording = false;
+    private MediaSession headsetMediaSession;
     private final StringBuilder handsFreeBuffer = new StringBuilder();
     private static final String WAKE_WORD = "jasper";
     private float touchStartY = 0f;
@@ -115,6 +120,7 @@ public class MainActivity extends Activity {
         registerDownloadReceiver();
         createTextToSpeech();
         createSpeechRecognizer();
+        createHeadsetMediaSession();
         createWebView();
 
         webView.loadUrl(HOME);
@@ -685,6 +691,118 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void createHeadsetMediaSession() {
+        try {
+            headsetMediaSession = new MediaSession(this, "DanHeadsetControls");
+
+            PlaybackState state = new PlaybackState.Builder()
+                    .setActions(
+                            PlaybackState.ACTION_PLAY
+                                    | PlaybackState.ACTION_PAUSE
+                                    | PlaybackState.ACTION_PLAY_PAUSE
+                    )
+                    .setState(PlaybackState.STATE_PAUSED, 0L, 1.0f)
+                    .build();
+
+            headsetMediaSession.setPlaybackState(state);
+
+            headsetMediaSession.setCallback(new MediaSession.Callback() {
+                @Override
+                public boolean onMediaButtonEvent(Intent mediaButtonIntent) {
+                    if (mediaButtonIntent == null) return false;
+
+                    KeyEvent event = mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                    if (event == null || event.getAction() != KeyEvent.ACTION_DOWN) {
+                        return true;
+                    }
+
+                    int code = event.getKeyCode();
+                    if (code == KeyEvent.KEYCODE_HEADSETHOOK
+                            || code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+                            || code == KeyEvent.KEYCODE_MEDIA_PLAY
+                            || code == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                        runOnUiThread(() -> toggleHeadsetRecording());
+                        return true;
+                    }
+
+                    return super.onMediaButtonEvent(mediaButtonIntent);
+                }
+
+                @Override
+                public void onPlay() {
+                    runOnUiThread(() -> toggleHeadsetRecording());
+                }
+
+                @Override
+                public void onPause() {
+                    runOnUiThread(() -> toggleHeadsetRecording());
+                }
+            });
+
+            headsetMediaSession.setActive(true);
+        } catch (Exception e) {
+            headsetMediaSession = null;
+        }
+    }
+
+    private void toggleHeadsetRecording() {
+        if (speechRecognizer == null) {
+            Toast.makeText(this,
+                    "Riconoscimento vocale non disponibile",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (headsetRecording) {
+            headsetRecording = false;
+            recordingLocked = false;
+            pressToTalkRequested = false;
+            micButton.setText("🎙");
+            applyMicStyle(false);
+
+            if (speechRecognizer != null && recognizerSessionActive && manualCapture) {
+                statusText.setText("🎧 Trascrivo e invio…");
+                try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
+            } else {
+                manualCapture = false;
+                statusText.setText(handsFreeEnabled
+                        ? "🟢 In attesa — dì Jasper per iniziare"
+                        : "⚪ Auto OFF — usa il microfono manuale");
+                scheduleHandsFreeRestart(400L);
+            }
+            return;
+        }
+
+        headsetRecording = true;
+        handsFreeDictating = false;
+        handsFreeBuffer.setLength(0);
+
+        if (tts != null) {
+            try { tts.stop(); } catch (Exception ignored) {}
+        }
+        ttsSpeaking = false;
+
+        if (speechRecognizer != null && recognizerSessionActive) {
+            try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+        }
+
+        recognizerSessionActive = false;
+        listening = false;
+        statusText.setText("🎧 Cuffia: preparo il microfono…");
+
+        statusText.postDelayed(() -> {
+            if (!headsetRecording) return;
+
+            manualCapture = true;
+            recordingLocked = true;
+            pressToTalkRequested = true;
+            micButton.setText("■");
+            applyMicStyle(true);
+            statusText.setText("🎧 Registrazione cuffia — premi di nuovo per inviare");
+            startPressToTalk();
+        }, 350L);
+    }
+
     private void createSpeechRecognizer() {
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             Toast.makeText(this,
@@ -757,6 +875,7 @@ public class MainActivity extends Activity {
 
                 if (manualCapture) {
                     manualCapture = false;
+                    headsetRecording = false;
                     recordingLocked = false;
                     pressToTalkRequested = false;
                     micButton.setText("🎙");
@@ -799,6 +918,7 @@ public class MainActivity extends Activity {
 
                 if (manualCapture) {
                     manualCapture = false;
+                    headsetRecording = false;
                     recordingLocked = false;
                     pressToTalkRequested = false;
                     micButton.setText("🎙");
@@ -848,10 +968,11 @@ public class MainActivity extends Activity {
     }
 
     private void scheduleHandsFreeRestart(long delayMs) {
-        if (!handsFreeEnabled || manualCapture || ttsSpeaking || speechRecognizer == null) return;
+        if (!handsFreeEnabled || manualCapture || headsetRecording
+                || ttsSpeaking || speechRecognizer == null) return;
 
         statusText.postDelayed(() -> {
-            if (!handsFreeEnabled || manualCapture || ttsSpeaking
+            if (!handsFreeEnabled || manualCapture || headsetRecording || ttsSpeaking
                     || speechRecognizer == null || recognizerSessionActive) {
                 return;
             }
@@ -1822,6 +1943,16 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         handsFreeEnabled = false;
+        headsetRecording = false;
+
+        if (headsetMediaSession != null) {
+            try {
+                headsetMediaSession.setActive(false);
+                headsetMediaSession.release();
+            } catch (Exception ignored) {
+            }
+            headsetMediaSession = null;
+        }
         if (speechRecognizer != null) {
             try { speechRecognizer.cancel(); } catch (Exception ignored) {}
             speechRecognizer.destroy();
