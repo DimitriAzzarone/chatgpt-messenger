@@ -19,6 +19,8 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.media.session.MediaSession;
 import android.media.session.PlaybackState;
 import android.view.KeyEvent;
@@ -72,6 +74,7 @@ public class MainActivity extends Activity {
     private static final String PREF_SAGE_BASE_VOICE = "sage_base_voice";
     private static final String PREF_TTS_SPEED = "tts_speed";
     private static final String PREF_HANDS_FREE = "hands_free_enabled";
+    private static final String PREF_RECORDING_SOUNDS = "recording_sounds_enabled";
 
     private WebView webView;
     private FrameLayout webContainer;
@@ -81,6 +84,7 @@ public class MainActivity extends Activity {
     private Button voiceButton;
     private Button autoButton;
     private Button speedButton;
+    private Button soundButton;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
@@ -93,6 +97,8 @@ public class MainActivity extends Activity {
     private boolean handsFreeDictating = false;
     private boolean ttsSpeaking = false;
     private boolean headsetRecording = false;
+    private boolean recordingSoundsEnabled = true;
+    private String lastPartialText = "";
     private MediaSession headsetMediaSession;
     private final StringBuilder handsFreeBuffer = new StringBuilder();
     private static final String WAKE_WORD = "jasper";
@@ -120,6 +126,8 @@ public class MainActivity extends Activity {
         // Jasper parte sempre OFF e il vecchio stato salvato viene azzerato.
         handsFreeEnabled = false;
         startupPrefs.edit().putBoolean(PREF_HANDS_FREE, false).apply();
+
+        recordingSoundsEnabled = startupPrefs.getBoolean(PREF_RECORDING_SOUNDS, true);
 
         buildInterface();
         registerDownloadReceiver();
@@ -160,19 +168,15 @@ public class MainActivity extends Activity {
         voiceButton = makeButton("🔊");
         voiceButton.setTextSize(18);
 
-        autoButton = makeButton(handsFreeEnabled ? "Jasper✓" : "Jasper×");
-        autoButton.setTextSize(13);
-
-        speedButton = makeButton("1×");
-        speedButton.setTextSize(15);
+        soundButton = makeButton(recordingSoundsEnabled ? "🔔" : "🔕");
+        soundButton.setTextSize(18);
 
         Button back = makeButton("‹");
         Button reload = makeButton("↻");
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
         topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
-        topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(58), dp(44)));
-        topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(54), dp(44)));
+        topBar.addView(soundButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
         topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
         topBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(44), dp(44)));
@@ -229,8 +233,7 @@ public class MainActivity extends Activity {
         });
 
         voiceButton.setOnClickListener(v -> showVoiceChooser());
-        autoButton.setOnClickListener(v -> toggleHandsFreeMode());
-        speedButton.setOnClickListener(v -> cycleTtsSpeed());
+        soundButton.setOnClickListener(v -> toggleRecordingSounds());
 
         micButton.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
@@ -275,6 +278,77 @@ public class MainActivity extends Activity {
 
             return false;
         });
+    }
+
+    private void toggleRecordingSounds() {
+        recordingSoundsEnabled = !recordingSoundsEnabled;
+
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_RECORDING_SOUNDS, recordingSoundsEnabled)
+                .apply();
+
+        if (soundButton != null) {
+            soundButton.setText(recordingSoundsEnabled ? "🔔" : "🔕");
+        }
+
+        Toast.makeText(
+                this,
+                recordingSoundsEnabled ? "Suoni registrazione attivi" : "Suoni registrazione disattivati",
+                Toast.LENGTH_SHORT
+        ).show();
+    }
+
+    private void playRecordingStartSound() {
+        if (!recordingSoundsEnabled) return;
+        try {
+            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 28);
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 90);
+            statusText.postDelayed(tone::release, 180L);
+        } catch (Exception ignored) {}
+    }
+
+    private void playRecordingEndSound() {
+        if (!recordingSoundsEnabled) return;
+        try {
+            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 24);
+            tone.startTone(ToneGenerator.TONE_PROP_ACK, 120);
+            statusText.postDelayed(tone::release, 220L);
+        } catch (Exception ignored) {}
+    }
+
+    private String chooseBestRecognition(Bundle results) {
+        if (results == null) return lastPartialText == null ? "" : lastPartialText.trim();
+
+        ArrayList<String> matches =
+                results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+
+        if (matches == null || matches.isEmpty()) {
+            return lastPartialText == null ? "" : lastPartialText.trim();
+        }
+
+        float[] confidence = results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES);
+        int bestIndex = 0;
+        float bestScore = -1.0f;
+
+        if (confidence != null) {
+            int limit = Math.min(matches.size(), confidence.length);
+            for (int i = 0; i < limit; i++) {
+                String candidate = matches.get(i) == null ? "" : matches.get(i).trim();
+                float score = confidence[i];
+                if (!candidate.isEmpty() && score >= 0.0f && score > bestScore) {
+                    bestScore = score;
+                    bestIndex = i;
+                }
+            }
+        }
+
+        String best = matches.get(bestIndex) == null ? "" : matches.get(bestIndex).trim();
+        String partial = lastPartialText == null ? "" : lastPartialText.trim();
+
+        if (best.isEmpty()) return partial;
+        if (!partial.isEmpty() && best.length() < partial.length() / 2) return partial;
+        return best;
     }
 
     private void toggleHandsFreeMode() {
@@ -762,6 +836,7 @@ public class MainActivity extends Activity {
         }
 
         if (headsetRecording) {
+            playRecordingEndSound();
             headsetRecording = false;
             recordingLocked = false;
             pressToTalkRequested = false;
@@ -829,8 +904,8 @@ public class MainActivity extends Activity {
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_LANGUAGE,
                 Locale.getDefault().toLanguageTag());
-        speechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
-        speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5);
         // v1.18 Long Listening: più tolleranza a pause naturali e respiro.
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
@@ -847,8 +922,10 @@ public class MainActivity extends Activity {
             public void onReadyForSpeech(Bundle params) {
                 listening = true;
                 recognizerSessionActive = true;
+                lastPartialText = "";
                 applyMicStyle(true);
                 if (manualCapture) {
+                    playRecordingStartSound();
                     statusText.setText("🎙 Ti ascolto… rilascia per inviare");
                 } else if (handsFreeDictating) {
                     statusText.setText("🔴 Dettatura attiva — dì Jasper per inviare");
@@ -919,11 +996,7 @@ public class MainActivity extends Activity {
                 recognizerSessionActive = false;
                 applyMicStyle(false);
 
-                ArrayList<String> matches =
-                        results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-                String text = (matches == null || matches.isEmpty())
-                        ? ""
-                        : matches.get(0).trim();
+                String text = chooseBestRecognition(results);
 
                 if (manualCapture) {
                     manualCapture = false;
@@ -948,7 +1021,20 @@ public class MainActivity extends Activity {
                 }
             }
 
-            @Override public void onPartialResults(Bundle partialResults) {}
+            @Override
+            public void onPartialResults(Bundle partialResults) {
+                if (partialResults == null) return;
+
+                ArrayList<String> partials =
+                        partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                if (partials == null || partials.isEmpty()) return;
+
+                String candidate = partials.get(0) == null ? "" : partials.get(0).trim();
+                if (!candidate.isEmpty() && candidate.length() >= lastPartialText.length()) {
+                    lastPartialText = candidate;
+                }
+            }
+
             @Override public void onEvent(int eventType, Bundle params) {}
         });
     }
@@ -1120,6 +1206,7 @@ public class MainActivity extends Activity {
     private void finishLockedRecording() {
         if (!recordingLocked) return;
 
+        playRecordingEndSound();
         recordingLocked = false;
         pressToTalkRequested = false;
         micButton.setText("🎙");
@@ -1132,6 +1219,9 @@ public class MainActivity extends Activity {
     }
 
     private void stopPressToTalk() {
+        if (manualCapture) {
+            playRecordingEndSound();
+        }
         if (speechRecognizer != null && recognizerSessionActive && manualCapture) {
             statusText.setText("Trascrivo…");
             try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
