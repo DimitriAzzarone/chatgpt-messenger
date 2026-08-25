@@ -31,6 +31,7 @@ import android.speech.tts.Voice;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
@@ -830,15 +831,16 @@ public class MainActivity extends Activity {
                 Locale.getDefault().toLanguageTag());
         speechIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
         speechIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        // v1.18 Long Listening: più tolleranza a pause naturali e respiro.
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS,
-                15000L);
+                30000L);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS,
-                1800L);
+                3500L);
         speechIntent.putExtra(
                 RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
-                2500L);
+                5000L);
 
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
             @Override
@@ -2027,6 +2029,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
 
+        // v1.18: finché Dan è in primo piano lo schermo non va in sospensione.
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
         if (headsetMediaSession != null) {
             try {
                 PlaybackState foregroundState = new PlaybackState.Builder()
@@ -2058,6 +2063,9 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        // Fuori da Dan Android torna a gestire normalmente lo spegnimento schermo.
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
         // Dan deve lasciare completamente liberi microfono e controlli cuffie
         // quando l'utente passa a Brave, YouTube, WhatsApp, ecc.
         if (speechRecognizer != null && recognizerSessionActive) {
@@ -2092,12 +2100,9 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
 
-        // Ferma eventuale lettura vocale di Dan per non contendere l'audio
-        // alle altre app quando Dan è in background.
-        if (tts != null) {
-            try { tts.stop(); } catch (Exception ignored) {}
-        }
-        ttsSpeaking = false;
+        // v1.18: la lettura TTS può continuare anche se Dan passa in background.
+        // Microfono e controlli cuffie restano invece rilasciati come sopra.
+        // ttsSpeaking non viene azzerato qui: sarà onDone/onError a farlo.
 
         super.onPause();
     }
