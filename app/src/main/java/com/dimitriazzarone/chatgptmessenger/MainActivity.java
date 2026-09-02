@@ -85,6 +85,7 @@ public class MainActivity extends Activity {
     private Button autoButton;
     private Button speedButton;
     private Button soundButton;
+    private Button stopSpeechButton;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
@@ -171,15 +172,23 @@ public class MainActivity extends Activity {
         soundButton = makeButton(recordingSoundsEnabled ? "🔔" : "🔕");
         soundButton.setTextSize(18);
 
+        speedButton = makeButton(speedLabel());
+        speedButton.setTextSize(15);
+
+        stopSpeechButton = makeButton("⏹");
+        stopSpeechButton.setTextSize(18);
+
         Button back = makeButton("‹");
         Button reload = makeButton("↻");
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
         topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
-        topBar.addView(soundButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
-        topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
-        topBar.addView(back, new LinearLayout.LayoutParams(dp(44), dp(44)));
-        topBar.addView(reload, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        topBar.addView(soundButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(50), dp(44)));
+        topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
+        topBar.addView(back, new LinearLayout.LayoutParams(dp(40), dp(44)));
+        topBar.addView(reload, new LinearLayout.LayoutParams(dp(40), dp(44)));
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
@@ -234,6 +243,8 @@ public class MainActivity extends Activity {
 
         voiceButton.setOnClickListener(v -> showVoiceChooser());
         soundButton.setOnClickListener(v -> toggleRecordingSounds());
+        speedButton.setOnClickListener(v -> cycleTtsSpeed());
+        stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
 
         micButton.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
@@ -315,6 +326,47 @@ public class MainActivity extends Activity {
             tone.startTone(ToneGenerator.TONE_PROP_ACK, 120);
             statusText.postDelayed(tone::release, 220L);
         } catch (Exception ignored) {}
+    }
+
+    private void playRecognitionErrorSound() {
+        if (!recordingSoundsEnabled) return;
+        try {
+            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 28);
+            tone.startTone(ToneGenerator.TONE_PROP_NACK, 180);
+            statusText.postDelayed(tone::release, 280L);
+        } catch (Exception ignored) {}
+    }
+
+    private void playReadingFinishedSound() {
+        if (!recordingSoundsEnabled) return;
+        try {
+            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 24);
+            tone.startTone(ToneGenerator.TONE_PROP_PROMPT, 150);
+            statusText.postDelayed(tone::release, 260L);
+        } catch (Exception ignored) {}
+    }
+
+    private void stopAllSpeech() {
+        if (tts != null) {
+            try { tts.stop(); } catch (Exception ignored) {}
+        }
+        ttsSpeaking = false;
+
+        if (webView != null) {
+            String js =
+                    "(function(){"
+                    + "const buttons=Array.from(document.querySelectorAll('button'));"
+                    + "const b=buttons.find(x=>{"
+                    + " const s=((x.getAttribute('aria-label')||'')+' '+(x.getAttribute('title')||'')+' '+(x.innerText||'')).toLowerCase();"
+                    + " return s.includes('stop')||s.includes('interrompi')||s.includes('pause')||s.includes('pausa');"
+                    + "});"
+                    + "if(b){try{b.click();return 'STOPPED';}catch(e){}}"
+                    + "return 'NO_NATIVE_READER';"
+                    + "})();";
+            try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
+        }
+
+        statusText.setText("⏹ Lettura interrotta");
     }
 
     private String chooseBestRecognition(Bundle results) {
@@ -503,6 +555,7 @@ public class MainActivity extends Activity {
                 public void onDone(String utteranceId) {
                     ttsSpeaking = false;
                     runOnUiThread(() -> {
+                        playReadingFinishedSound();
                         statusText.setText(handsFreeEnabled
                                 ? "🟢 In attesa — dì Jasper per iniziare"
                                 : "⚪ Auto OFF — usa il microfono manuale");
@@ -970,6 +1023,7 @@ public class MainActivity extends Activity {
                     } else if (error == SpeechRecognizer.ERROR_NO_MATCH
                             || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
                             || error == SpeechRecognizer.ERROR_CLIENT) {
+                        playRecognitionErrorSound();
                         statusText.setText("Non ho capito. Riprova.");
                     } else {
                         statusText.setText("Errore riconoscimento vocale: " + error);
@@ -1008,6 +1062,7 @@ public class MainActivity extends Activity {
                     if (!text.isEmpty()) {
                         handleRecognizedCommandOrMessage(text);
                     } else {
+                        playRecognitionErrorSound();
                         statusText.setText("Nessun testo riconosciuto");
                     }
                     scheduleHandsFreeRestart(700L);
