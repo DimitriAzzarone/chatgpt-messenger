@@ -28,15 +28,25 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: Restore signing key
+        env:
+          DAN_KEYSTORE_BASE64: ${{ secrets.DAN_KEYSTORE_BASE64 }}
+        run: |
+          echo "$DAN_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/dan-release.jks"
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dan-v1.21.apk
+      - name: Build release APK
+        run: gradle assembleRelease --stacktrace
+
+      - name: Sign Dan APK
+        run: |
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          "$BUILD_TOOLS/zipalign" -f -p 4             app/build/outputs/apk/release/app-release-unsigned.apk             app/build/outputs/apk/release/Dan-v1.22-aligned.apk
+          "$BUILD_TOOLS/apksigner" sign             --ks "$RUNNER_TEMP/dan-release.jks"             --ks-key-alias dan             --ks-pass pass:android             --key-pass pass:android             --out app/build/outputs/apk/release/Dan-v1.22.apk             app/build/outputs/apk/release/Dan-v1.22-aligned.apk
+          "$BUILD_TOOLS/apksigner" verify             app/build/outputs/apk/release/Dan-v1.22.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Dan-APK-v1.21
-          path: app/build/outputs/apk/debug/Dan-v1.21.apk
+          name: Dan-APK-v1.22
+          path: app/build/outputs/apk/release/Dan-v1.22.apk
           if-no-files-found: error

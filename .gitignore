@@ -4,3 +4,7 @@ local.properties
 **/build/
 *.iml
 .DS_Store
+
+# Signing keys - non committare
+*.jks
+*.keystore
