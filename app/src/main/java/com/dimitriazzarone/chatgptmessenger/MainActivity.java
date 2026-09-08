@@ -86,6 +86,8 @@ public class MainActivity extends Activity {
     private Button speedButton;
     private Button soundButton;
     private Button stopSpeechButton;
+    private Button playSpeechButton;
+    private Button fullscreenButton;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
@@ -110,6 +112,7 @@ public class MainActivity extends Activity {
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private String lastSpokenText = "";
+    private boolean fullscreenMode = false;
 
     private ValueCallback<Uri[]> filePathCallback;
     private String pendingDownloadName = null;
@@ -175,20 +178,28 @@ public class MainActivity extends Activity {
         speedButton = makeButton(speedLabel());
         speedButton.setTextSize(15);
 
+        playSpeechButton = makeButton("▶");
+        playSpeechButton.setTextSize(18);
+
         stopSpeechButton = makeButton("⏹");
         stopSpeechButton.setTextSize(18);
+
+        fullscreenButton = makeButton("⛶");
+        fullscreenButton.setTextSize(18);
 
         Button back = makeButton("‹");
         Button reload = makeButton("↻");
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
         topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
-        topBar.addView(soundButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
-        topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(50), dp(44)));
-        topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
-        topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(46), dp(44)));
-        topBar.addView(back, new LinearLayout.LayoutParams(dp(40), dp(44)));
-        topBar.addView(reload, new LinearLayout.LayoutParams(dp(40), dp(44)));
+        topBar.addView(soundButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
+        topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
+        topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
+        topBar.addView(playSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
+        topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
+        topBar.addView(fullscreenButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
+        topBar.addView(back, new LinearLayout.LayoutParams(dp(38), dp(44)));
+        topBar.addView(reload, new LinearLayout.LayoutParams(dp(38), dp(44)));
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
@@ -244,7 +255,9 @@ public class MainActivity extends Activity {
         voiceButton.setOnClickListener(v -> showVoiceChooser());
         soundButton.setOnClickListener(v -> toggleRecordingSounds());
         speedButton.setOnClickListener(v -> cycleTtsSpeed());
+        playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
+        fullscreenButton.setOnClickListener(v -> toggleFullscreen());
 
         micButton.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
@@ -367,6 +380,47 @@ public class MainActivity extends Activity {
         }
 
         statusText.setText("⏹ Lettura interrotta");
+    }
+
+    private void replayLastSpeech() {
+        String text = lastSpokenText == null ? "" : lastSpokenText.trim();
+        if (text.isEmpty()) {
+            statusText.setText("▶ Nessuna lettura da ripetere");
+            return;
+        }
+        if (!ttsReady || tts == null) {
+            statusText.setText("Sintesi vocale non pronta");
+            return;
+        }
+        try {
+            tts.stop();
+            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "chatgpt_replay");
+            statusText.setText("▶ Lettura dall'inizio");
+        } catch (Exception e) {
+            statusText.setText("Impossibile avviare la lettura");
+        }
+    }
+
+    private void toggleFullscreen() {
+        fullscreenMode = !fullscreenMode;
+        View decor = getWindow().getDecorView();
+
+        if (fullscreenMode) {
+            decor.setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            );
+            fullscreenButton.setText("↙");
+            statusText.setText("⛶ Tutto schermo");
+        } else {
+            decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
+            fullscreenButton.setText("⛶");
+            statusText.setText("Finestra normale");
+        }
     }
 
     private String chooseBestRecognition(Bundle results) {
@@ -2174,8 +2228,10 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
 
-        // v1.18: finché Dan è in primo piano lo schermo non va in sospensione.
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // v1.21: keep-screen-on sulla view, meno invasivo per multi-window.
+        if (webContainer != null) {
+            webContainer.setKeepScreenOn(true);
+        }
 
         if (headsetMediaSession != null) {
             try {
@@ -2209,7 +2265,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         // Fuori da Dan Android torna a gestire normalmente lo spegnimento schermo.
-        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (webContainer != null) {
+            webContainer.setKeepScreenOn(false);
+        }
 
         // Dan deve lasciare completamente liberi microfono e controlli cuffie
         // quando l'utente passa a Brave, YouTube, WhatsApp, ecc.
