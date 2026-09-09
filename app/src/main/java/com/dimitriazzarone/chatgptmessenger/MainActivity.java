@@ -9,6 +9,7 @@ import android.content.BroadcastReceiver;
 import android.content.IntentFilter;
 import android.database.Cursor;
 import android.os.Build;
+import android.os.Message;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -77,6 +78,7 @@ public class MainActivity extends Activity {
     private static final String PREF_RECORDING_SOUNDS = "recording_sounds_enabled";
 
     private WebView webView;
+    private WebView popupWebView;
     private FrameLayout webContainer;
     private ProgressBar progressBar;
     private TextView statusText;
@@ -1539,14 +1541,24 @@ public class MainActivity extends Activity {
         settings.setDatabaseEnabled(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
-        settings.setSupportMultipleWindows(false);
-        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        settings.setSupportMultipleWindows(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
         settings.setLoadWithOverviewMode(false);
         settings.setUseWideViewPort(false);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            settings.setSafeBrowsingEnabled(true);
+        }
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        webView.setFocusable(true);
+        webView.setFocusableInTouchMode(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            webView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
+        }
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -1609,6 +1621,95 @@ public class MainActivity extends Activity {
         });
 
         webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(
+                    WebView view,
+                    boolean isDialog,
+                    boolean isUserGesture,
+                    Message resultMsg
+            ) {
+                closePopupWebView();
+
+                popupWebView = new WebView(MainActivity.this);
+                WebSettings popupSettings = popupWebView.getSettings();
+                popupSettings.setJavaScriptEnabled(true);
+                popupSettings.setDomStorageEnabled(true);
+                popupSettings.setDatabaseEnabled(true);
+                popupSettings.setAllowFileAccess(true);
+                popupSettings.setAllowContentAccess(true);
+                popupSettings.setSupportMultipleWindows(true);
+                popupSettings.setJavaScriptCanOpenWindowsAutomatically(true);
+                popupSettings.setMediaPlaybackRequiresUserGesture(false);
+                popupSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    popupSettings.setSafeBrowsingEnabled(true);
+                }
+
+                popupWebView.setFocusable(true);
+                popupWebView.setFocusableInTouchMode(true);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    popupWebView.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
+                }
+
+                CookieManager cookieManager = CookieManager.getInstance();
+                cookieManager.setAcceptCookie(true);
+                cookieManager.setAcceptThirdPartyCookies(popupWebView, true);
+
+                popupWebView.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(
+                            WebView view,
+                            WebResourceRequest request
+                    ) {
+                        Uri uri = request.getUrl();
+                        if (uri == null) return false;
+
+                        String scheme = uri.getScheme();
+                        if ("http".equalsIgnoreCase(scheme)
+                                || "https".equalsIgnoreCase(scheme)) {
+                            return false;
+                        }
+
+                        try {
+                            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                            return true;
+                        } catch (Exception ignored) {
+                            return false;
+                        }
+                    }
+
+                    @Override
+                    public void onPageFinished(WebView view, String url) {
+                        try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
+                    }
+                });
+
+                popupWebView.setWebChromeClient(new WebChromeClient() {
+                    @Override
+                    public void onCloseWindow(WebView window) {
+                        closePopupWebView();
+                        try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
+                        if (webView != null) webView.reload();
+                    }
+                });
+
+                webContainer.addView(
+                        popupWebView,
+                        new FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT
+                        )
+                );
+
+                WebView.WebViewTransport transport =
+                        (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(popupWebView);
+                resultMsg.sendToTarget();
+
+                statusText.setText("Accesso browser dentro Dan");
+                return true;
+            }
+
             @Override
             public void onProgressChanged(WebView view, int progress) {
                 progressBar.setProgress(progress);
@@ -1722,6 +1823,21 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+    }
+
+    private void closePopupWebView() {
+        if (popupWebView == null) return;
+
+        try {
+            webContainer.removeView(popupWebView);
+            popupWebView.stopLoading();
+            popupWebView.loadUrl("about:blank");
+            popupWebView.removeAllViews();
+            popupWebView.destroy();
+        } catch (Exception ignored) {
+        }
+
+        popupWebView = null;
     }
 
     @Override
@@ -2081,6 +2197,15 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (popupWebView != null) {
+            if (popupWebView.canGoBack()) {
+                popupWebView.goBack();
+            } else {
+                closePopupWebView();
+            }
+            return;
+        }
+
         if (webView != null && webView.canGoBack()) {
             webView.goBack();
         } else {
@@ -2284,6 +2409,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        closePopupWebView();
         handsFreeEnabled = false;
         headsetRecording = false;
 
