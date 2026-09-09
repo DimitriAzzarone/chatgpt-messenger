@@ -87,7 +87,6 @@ public class MainActivity extends Activity {
     private Button soundButton;
     private Button stopSpeechButton;
     private Button playSpeechButton;
-    private Button fullscreenButton;
 
     private SpeechRecognizer speechRecognizer;
     private Intent speechIntent;
@@ -112,7 +111,6 @@ public class MainActivity extends Activity {
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private String lastSpokenText = "";
-    private boolean fullscreenMode = false;
 
     private ValueCallback<Uri[]> filePathCallback;
     private String pendingDownloadName = null;
@@ -184,9 +182,6 @@ public class MainActivity extends Activity {
         stopSpeechButton = makeButton("⏹");
         stopSpeechButton.setTextSize(18);
 
-        fullscreenButton = makeButton("⛶");
-        fullscreenButton.setTextSize(18);
-
         Button back = makeButton("‹");
         Button reload = makeButton("↻");
 
@@ -197,7 +192,6 @@ public class MainActivity extends Activity {
         topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(playSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
-        topBar.addView(fullscreenButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(back, new LinearLayout.LayoutParams(dp(38), dp(44)));
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(38), dp(44)));
 
@@ -257,7 +251,6 @@ public class MainActivity extends Activity {
         speedButton.setOnClickListener(v -> cycleTtsSpeed());
         playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
-        fullscreenButton.setOnClickListener(v -> toggleFullscreen());
 
         micButton.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
@@ -398,28 +391,6 @@ public class MainActivity extends Activity {
             statusText.setText("▶ Lettura dall'inizio");
         } catch (Exception e) {
             statusText.setText("Impossibile avviare la lettura");
-        }
-    }
-
-    private void toggleFullscreen() {
-        fullscreenMode = !fullscreenMode;
-        View decor = getWindow().getDecorView();
-
-        if (fullscreenMode) {
-            decor.setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                            | View.SYSTEM_UI_FLAG_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                            | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            );
-            fullscreenButton.setText("↙");
-            statusText.setText("⛶ Tutto schermo");
-        } else {
-            decor.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
-            fullscreenButton.setText("⛶");
-            statusText.setText("Finestra normale");
         }
     }
 
@@ -1727,6 +1698,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 lastUrl = url;
                 injectPageBehaviors();
+                try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
             }
 
             @Override
