@@ -32,11 +32,11 @@ jobs:
         run: gradle assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dan-v1.22.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dan-v1.23.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Dan-APK-v1.22
-          path: app/build/outputs/apk/debug/Dan-v1.22.apk
+          name: Dan-APK-v1.23
+          path: app/build/outputs/apk/debug/Dan-v1.23.apk
           if-no-files-found: error

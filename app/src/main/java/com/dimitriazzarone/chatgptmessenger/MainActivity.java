@@ -126,10 +126,9 @@ public class MainActivity extends Activity {
 
         SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
 
-        // v1.16 Audio Safe reale:
-        // Jasper parte sempre OFF e il vecchio stato salvato viene azzerato.
-        handsFreeEnabled = false;
-        startupPrefs.edit().putBoolean(PREF_HANDS_FREE, false).apply();
+        // v1.23: conserva l'ultimo stato AUTO scelto dall'utente.
+        // Al primo avvio resta OFF.
+        handsFreeEnabled = startupPrefs.getBoolean(PREF_HANDS_FREE, false);
 
         recordingSoundsEnabled = startupPrefs.getBoolean(PREF_RECORDING_SOUNDS, true);
 
@@ -141,9 +140,15 @@ public class MainActivity extends Activity {
         createWebView();
 
         webView.loadUrl(HOME);
-        // v1.15 Audio Safe: niente ascolto automatico all'avvio.
-        // Il microfono si attiva solo con comando esplicito.
-        statusText.setText("⚪ Audio Safe — usa microfono o cuffie quando vuoi");
+
+        if (handsFreeEnabled) {
+            autoButton.setText("AUTO ON");
+            statusText.setText("🟢 Auto ON — preparo il microfono…");
+            statusText.postDelayed(this::recoverHandsFreeMicrophone, 500L);
+        } else {
+            autoButton.setText("AUTO OFF");
+            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+        }
     }
 
     private void buildInterface() {
@@ -184,7 +189,8 @@ public class MainActivity extends Activity {
         stopSpeechButton = makeButton("⏹");
         stopSpeechButton.setTextSize(18);
 
-        Button back = makeButton("‹");
+        autoButton = makeButton(handsFreeEnabled ? "AUTO ON" : "AUTO OFF");
+        autoButton.setTextSize(10);
         Button reload = makeButton("↻");
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
@@ -194,7 +200,7 @@ public class MainActivity extends Activity {
         topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(playSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
-        topBar.addView(back, new LinearLayout.LayoutParams(dp(38), dp(44)));
+        topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(68), dp(44)));
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(38), dp(44)));
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -240,9 +246,7 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        back.setOnClickListener(v -> {
-            if (webView != null && webView.canGoBack()) webView.goBack();
-        });
+        autoButton.setOnClickListener(v -> toggleHandsFreeMode());
 
         reload.setOnClickListener(v -> {
             if (webView != null) webView.reload();
@@ -438,25 +442,58 @@ public class MainActivity extends Activity {
                 .putBoolean(PREF_HANDS_FREE, handsFreeEnabled)
                 .apply();
 
-        if (handsFreeEnabled) {
-            handsFreeDictating = false;
-            handsFreeBuffer.setLength(0);
-            autoButton.setText("Jasper✓");
-            statusText.setText("🟢 Auto ON — dì Jasper per iniziare");
-            startHandsFreeMode();
-        } else {
-            handsFreeDictating = false;
-            handsFreeBuffer.setLength(0);
-            autoButton.setText("Jasper×");
+        handsFreeDictating = false;
+        handsFreeBuffer.setLength(0);
 
-            if (speechRecognizer != null && recognizerSessionActive) {
+        if (handsFreeEnabled) {
+            autoButton.setText("AUTO ON");
+            statusText.setText("🟢 Auto ON — riattivo il microfono…");
+            recoverHandsFreeMicrophone();
+        } else {
+            autoButton.setText("AUTO OFF");
+
+            if (speechRecognizer != null) {
                 try { speechRecognizer.cancel(); } catch (Exception ignored) {}
             }
 
             recognizerSessionActive = false;
             listening = false;
+            manualCapture = false;
+            headsetRecording = false;
             applyMicStyle(false);
             statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+        }
+    }
+
+    private void recoverHandsFreeMicrophone() {
+        if (!handsFreeEnabled) return;
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQ_AUDIO);
+            return;
+        }
+
+        if (speechRecognizer != null) {
+            try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+            try { speechRecognizer.destroy(); } catch (Exception ignored) {}
+        }
+
+        speechRecognizer = null;
+        recognizerSessionActive = false;
+        listening = false;
+        manualCapture = false;
+        headsetRecording = false;
+
+        createSpeechRecognizer();
+
+        if (speechRecognizer != null) {
+            statusText.setText("🟢 Auto ON — dì Jasper per iniziare");
+            scheduleHandsFreeRestart(300L);
+        } else {
+            statusText.setText("Microfono non disponibile");
         }
     }
 
@@ -586,7 +623,11 @@ public class MainActivity extends Activity {
                         statusText.setText(handsFreeEnabled
                                 ? "🟢 In attesa — dì Jasper per iniziare"
                                 : "⚪ Auto OFF — usa il microfono manuale");
-                        scheduleHandsFreeRestart(350L);
+                        if (handsFreeEnabled) {
+                            recognizerSessionActive = false;
+                            listening = false;
+                            scheduleHandsFreeRestart(500L);
+                        }
                     });
                 }
 
