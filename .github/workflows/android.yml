@@ -46,11 +46,11 @@ jobs:
         run: gradle assembleRelease --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/debug/Dan-Luminex-AI-Integration-v1.26.apk
+        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Dan-Luminex-AI-Integration-v1.26.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Dan-Luminex-AI-Integration-v1.26
-          path: app/build/outputs/apk/debug/Dan-Luminex-AI-Integration-v1.26.apk
+          path: app/build/outputs/apk/release/Dan-Luminex-AI-Integration-v1.26.apk
           if-no-files-found: error
