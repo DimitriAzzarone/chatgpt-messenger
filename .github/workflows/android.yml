@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - luminex-integration-v1.25
 
 jobs:
   build:
@@ -28,15 +29,17 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
+      - name: Build Dan Luminex AI Integration
+        env:
+          LUMINEX_DEVICE_TOKEN: ${{ secrets.DEVICE_TOKEN }}
         run: gradle assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dan-v1.24.apk
+        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dan-Luminex-AI-Integration-v1.25.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Dan-APK-v1.24
-          path: app/build/outputs/apk/debug/Dan-v1.24.apk
+          name: Dan-Luminex-AI-Integration-v1.25
+          path: app/build/outputs/apk/debug/Dan-Luminex-AI-Integration-v1.25.apk
           if-no-files-found: error

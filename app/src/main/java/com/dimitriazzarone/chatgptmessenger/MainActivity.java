@@ -10,6 +10,9 @@ import android.content.IntentFilter;
 import android.database.Cursor;
 import android.os.Build;
 import android.os.Message;
+import android.os.Handler;
+import android.os.Looper;
+import android.text.TextUtils;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -54,6 +57,13 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.BufferedReader;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import org.json.JSONObject;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.ArrayList;
@@ -66,6 +76,10 @@ import java.util.Set;
 public class MainActivity extends Activity {
 
     private static final String HOME = "https://chatgpt.com/";
+    private static final String LUMINEX_HOME = "https://www.google.com/";
+    private static final String LUMINEX_CONTROL_URL =
+            "https://luminex-ai-control.dimitri-azzarone.workers.dev/device/next";
+    private static final long LUMINEX_POLL_MS = 2500L;
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final String PREFS = "radio_prefs";
@@ -79,6 +93,31 @@ public class MainActivity extends Activity {
     private static final String PREF_RECORDING_SOUNDS = "recording_sounds_enabled";
 
     private WebView webView;
+    private WebView luminexWebView;
+    private Button luminexButton;
+    private boolean luminexVisible = false;
+    private boolean luminexPolling = false;
+
+    private final Handler luminexHandler =
+            new Handler(Looper.getMainLooper());
+
+    private final Runnable luminexPollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!luminexPolling) return;
+
+            new Thread(() -> {
+                pollNextLuminexCommand();
+
+                if (luminexPolling) {
+                    luminexHandler.postDelayed(
+                            this,
+                            LUMINEX_POLL_MS
+                    );
+                }
+            }, "Dan-Luminex-Poll").start();
+        }
+    };
     private WebView popupWebView;
     private FrameLayout webContainer;
     private ProgressBar progressBar;
@@ -139,6 +178,7 @@ public class MainActivity extends Activity {
         createSpeechRecognizer();
         createHeadsetMediaSession();
         createWebView();
+        createLuminexWebView();
 
         webView.loadUrl(HOME);
 
@@ -192,6 +232,12 @@ public class MainActivity extends Activity {
 
         autoButton = makeButton("MIC FIX");
         autoButton.setTextSize(10);
+        luminexButton = makeButton("L");
+        luminexButton.setTextSize(16);
+        luminexButton.setContentDescription(
+                "Mostra o nascondi Luminex AI"
+        );
+
         Button reload = makeButton("↻");
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
@@ -202,6 +248,7 @@ public class MainActivity extends Activity {
         topBar.addView(playSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(68), dp(44)));
+        topBar.addView(luminexButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(38), dp(44)));
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -248,9 +295,14 @@ public class MainActivity extends Activity {
         setContentView(root);
 
         autoButton.setOnClickListener(v -> recoverMicrophoneAccess());
+        luminexButton.setOnClickListener(v -> toggleLuminexView());
 
         reload.setOnClickListener(v -> {
-            if (webView != null) webView.reload();
+            WebView active = luminexVisible
+                    ? luminexWebView
+                    : webView;
+
+            if (active != null) active.reload();
         });
 
         voiceButton.setOnClickListener(v -> showVoiceChooser());
@@ -1580,6 +1632,281 @@ public class MainActivity extends Activity {
         return base + "-" + System.currentTimeMillis() + ext;
     }
 
+
+    // Dan Luminex AI Integration v1.25
+    private void createLuminexWebView() {
+        luminexWebView = new WebView(this);
+        luminexWebView.setBackgroundColor(Color.WHITE);
+
+        WebSettings settings = luminexWebView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setDatabaseEnabled(true);
+        settings.setAllowFileAccess(true);
+        settings.setAllowContentAccess(true);
+        settings.setMediaPlaybackRequiresUserGesture(false);
+        settings.setMixedContentMode(
+                WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        );
+
+        settings.setUserAgentString(
+                settings.getUserAgentString()
+                        + " Dan-Luminex/1.25"
+        );
+
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(
+                luminexWebView,
+                true
+        );
+
+        luminexWebView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(
+                    WebView view,
+                    String url
+            ) {
+                if (!luminexVisible || statusText == null) return;
+
+                String title = view.getTitle();
+                statusText.setText(
+                        "Luminex AI — "
+                                + (TextUtils.isEmpty(title)
+                                ? url
+                                : title)
+                );
+            }
+        });
+
+        luminexWebView.setVisibility(View.GONE);
+
+        webContainer.addView(
+                luminexWebView,
+                new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                )
+        );
+
+        luminexWebView.loadUrl(LUMINEX_HOME);
+    }
+
+    private void toggleLuminexView() {
+        luminexVisible = !luminexVisible;
+
+        if (webView != null) {
+            webView.setVisibility(
+                    luminexVisible ? View.GONE : View.VISIBLE
+            );
+        }
+
+        if (luminexWebView != null) {
+            luminexWebView.setVisibility(
+                    luminexVisible ? View.VISIBLE : View.GONE
+            );
+        }
+
+        if (luminexButton != null) {
+            luminexButton.setText(
+                    luminexVisible ? "D" : "L"
+            );
+        }
+
+        if (statusText != null) {
+            statusText.setText(
+                    luminexVisible
+                            ? "Luminex AI visibile — premi D per tornare a Dan"
+                            : "Dan visibile — Luminex AI resta collegato"
+            );
+        }
+    }
+
+    private void startLuminexPolling() {
+        if (TextUtils.isEmpty(
+                BuildConfig.LUMINEX_DEVICE_TOKEN
+        )) {
+            android.util.Log.w(
+                    "DanLuminex",
+                    "LUMINEX_DEVICE_TOKEN non configurato"
+            );
+            return;
+        }
+
+        luminexPolling = true;
+        luminexHandler.removeCallbacks(
+                luminexPollRunnable
+        );
+        luminexHandler.post(luminexPollRunnable);
+    }
+
+    private void stopLuminexPolling() {
+        luminexPolling = false;
+        luminexHandler.removeCallbacks(
+                luminexPollRunnable
+        );
+    }
+
+    private void pollNextLuminexCommand() {
+        HttpURLConnection connection = null;
+
+        try {
+            connection = (HttpURLConnection)
+                    new URL(LUMINEX_CONTROL_URL)
+                            .openConnection();
+
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(8000);
+            connection.setReadTimeout(8000);
+            connection.setUseCaches(false);
+
+            connection.setRequestProperty(
+                    "Authorization",
+                    "Bearer "
+                            + BuildConfig.LUMINEX_DEVICE_TOKEN
+            );
+
+            connection.setRequestProperty(
+                    "Accept",
+                    "application/json"
+            );
+
+            int status = connection.getResponseCode();
+
+            if (status ==
+                    HttpURLConnection.HTTP_NO_CONTENT) {
+                return;
+            }
+
+            if (status != HttpURLConnection.HTTP_OK) {
+                android.util.Log.w(
+                        "DanLuminex",
+                        "Server HTTP " + status
+                );
+                return;
+            }
+
+            String body = readLuminexUtf8(
+                    connection.getInputStream()
+            );
+
+            JSONObject command = new JSONObject(body);
+            String action =
+                    command.optString("action", "");
+            String targetUrl =
+                    command.optString("url", null);
+
+            runOnUiThread(
+                    () -> executeLuminexCommand(
+                            action,
+                            targetUrl
+                    )
+            );
+
+        } catch (Exception error) {
+            android.util.Log.w(
+                    "DanLuminex",
+                    "Polling non riuscito",
+                    error
+            );
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private String readLuminexUtf8(
+            InputStream input
+    ) throws Exception {
+        StringBuilder result =
+                new StringBuilder();
+
+        try (BufferedReader reader =
+                     new BufferedReader(
+                             new InputStreamReader(
+                                     input,
+                                     StandardCharsets.UTF_8
+                             )
+                     )) {
+            String line;
+
+            while ((line = reader.readLine()) != null) {
+                result.append(line);
+            }
+        }
+
+        return result.toString();
+    }
+
+    private boolean isLuminexHttpUrl(String url) {
+        if (TextUtils.isEmpty(url)) return false;
+
+        try {
+            String scheme = Uri.parse(url).getScheme();
+
+            return "http".equalsIgnoreCase(scheme)
+                    || "https".equalsIgnoreCase(scheme);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void executeLuminexCommand(
+            String action,
+            String targetUrl
+    ) {
+        if (luminexWebView == null) return;
+
+        switch (action) {
+            case "open":
+                if (!isLuminexHttpUrl(targetUrl)) {
+                    statusText.setText(
+                            "Luminex AI: URL non valido"
+                    );
+                    return;
+                }
+
+                luminexWebView.loadUrl(targetUrl);
+                break;
+
+            case "new-tab":
+                luminexWebView.loadUrl(LUMINEX_HOME);
+                break;
+
+            case "back":
+                if (luminexWebView.canGoBack()) {
+                    luminexWebView.goBack();
+                }
+                break;
+
+            case "forward":
+                if (luminexWebView.canGoForward()) {
+                    luminexWebView.goForward();
+                }
+                break;
+
+            case "reload":
+                luminexWebView.reload();
+                break;
+
+            case "home":
+                luminexWebView.loadUrl(LUMINEX_HOME);
+                break;
+
+            default:
+                android.util.Log.w(
+                        "DanLuminex",
+                        "Comando sconosciuto: " + action
+                );
+                return;
+        }
+
+        statusText.setText(
+                "Luminex AI ha eseguito: " + action
+        );
+    }
+
     private void createWebView() {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(11, 20, 26));
@@ -2251,6 +2578,16 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (luminexVisible) {
+            if (luminexWebView != null
+                    && luminexWebView.canGoBack()) {
+                luminexWebView.goBack();
+            } else {
+                toggleLuminexView();
+            }
+            return;
+        }
+
         if (popupWebView != null) {
             if (popupWebView.canGoBack()) {
                 popupWebView.goBack();
@@ -2378,6 +2715,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        startLuminexPolling();
 
         // v1.21: keep-screen-on sulla view, meno invasivo per multi-window.
         if (webContainer != null) {
@@ -2415,6 +2753,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        stopLuminexPolling();
+
         // Fuori da Dan Android torna a gestire normalmente lo spegnimento schermo.
         if (webContainer != null) {
             webContainer.setKeepScreenOn(false);
@@ -2463,6 +2803,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        stopLuminexPolling();
         closePopupWebView();
         handsFreeEnabled = false;
         headsetRecording = false;
@@ -2490,6 +2831,16 @@ public class MainActivity extends Activity {
         if (filePathCallback != null) {
             filePathCallback.onReceiveValue(null);
             filePathCallback = null;
+        }
+
+        if (luminexWebView != null) {
+            webContainer.removeView(luminexWebView);
+            luminexWebView.stopLoading();
+            luminexWebView.loadUrl("about:blank");
+            luminexWebView.clearHistory();
+            luminexWebView.removeAllViews();
+            luminexWebView.destroy();
+            luminexWebView = null;
         }
 
         if (webView != null) {

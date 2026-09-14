@@ -10,8 +10,14 @@ android {
         applicationId "com.dimitriazzarone.chatgptmessenger"
         minSdk 24
         targetSdk 35
-        versionCode 34
-        versionName "1.24"
+        versionCode 35
+        versionName "1.25"
+        buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
+                "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {
