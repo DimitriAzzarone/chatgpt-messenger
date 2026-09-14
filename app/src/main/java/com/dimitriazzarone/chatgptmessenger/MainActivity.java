@@ -1667,6 +1667,11 @@ public class MainActivity extends Activity {
                     WebView view,
                     String url
             ) {
+                view.postDelayed(
+                        () -> sendLuminexPageState(view),
+                        1200L
+                );
+
                 if (!luminexVisible || statusText == null) return;
 
                 String title = view.getTitle();
@@ -1690,6 +1695,132 @@ public class MainActivity extends Activity {
         );
 
         luminexWebView.loadUrl(LUMINEX_HOME);
+    }
+
+
+    // DAN_LUMINEX_PAGE_UPLOAD_V1
+    private void sendLuminexPageState(WebView source) {
+        if (source == null
+                || TextUtils.isEmpty(
+                        BuildConfig.LUMINEX_DEVICE_TOKEN
+                )) {
+            return;
+        }
+
+        String script =
+                "(function(){"
+                + "try{"
+                + "var body=document.body;"
+                + "var text=body?(body.innerText||''):'';"
+                + "return JSON.stringify({"
+                + "url:String(location.href||''),"
+                + "title:String(document.title||''),"
+                + "text:String(text).slice(0,30000)"
+                + "});"
+                + "}catch(e){return null;}"
+                + "})()";
+
+        source.evaluateJavascript(script, value -> {
+            if (value == null
+                    || "null".equals(value)
+                    || "\"null\"".equals(value)) {
+                return;
+            }
+
+            try {
+                String decoded =
+                        new org.json.JSONArray(
+                                "[" + value + "]"
+                        ).getString(0);
+
+                JSONObject state =
+                        new JSONObject(decoded);
+
+                String url = state.optString("url", "");
+
+                if (!isLuminexHttpUrl(url)) {
+                    return;
+                }
+
+                postLuminexPageState(state.toString());
+
+            } catch (Exception error) {
+                android.util.Log.w(
+                        "DanLuminex",
+                        "Lettura pagina non riuscita",
+                        error
+                );
+            }
+        });
+    }
+
+    private void postLuminexPageState(String payload) {
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+
+            try {
+                URL endpoint = new URL(
+                        "https://luminex-ai-control."
+                                + "dimitri-azzarone.workers.dev"
+                                + "/device/page-state"
+                );
+
+                connection =
+                        (HttpURLConnection)
+                                endpoint.openConnection();
+
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(8000);
+                connection.setReadTimeout(8000);
+                connection.setUseCaches(false);
+                connection.setDoOutput(true);
+
+                connection.setRequestProperty(
+                        "Authorization",
+                        "Bearer "
+                                + BuildConfig
+                                .LUMINEX_DEVICE_TOKEN
+                );
+
+                connection.setRequestProperty(
+                        "Content-Type",
+                        "application/json; charset=utf-8"
+                );
+
+                byte[] data = payload.getBytes(
+                        StandardCharsets.UTF_8
+                );
+
+                connection.setFixedLengthStreamingMode(
+                        data.length
+                );
+
+                try (java.io.OutputStream output =
+                             connection.getOutputStream()) {
+                    output.write(data);
+                }
+
+                int status = connection.getResponseCode();
+
+                if (status < 200 || status >= 300) {
+                    android.util.Log.w(
+                            "DanLuminex",
+                            "Invio pagina: HTTP " + status
+                    );
+                }
+
+            } catch (Exception error) {
+                android.util.Log.w(
+                        "DanLuminex",
+                        "Invio pagina non riuscito",
+                        error
+                );
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        }, "Dan-Luminex-Page").start();
     }
 
     private void toggleLuminexView() {
