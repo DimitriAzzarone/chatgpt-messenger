@@ -30,13 +30,23 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Prepare stable signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > app/dan-release.jks
+
       - name: Build Dan Luminex AI Integration
         env:
           LUMINEX_DEVICE_TOKEN: ${{ secrets.DEVICE_TOKEN }}
-        run: gradle assembleDebug --stacktrace
+          ANDROID_KEYSTORE_PATH: dan-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle assembleRelease --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Dan-Luminex-AI-Integration-v1.26.apk
+        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/debug/Dan-Luminex-AI-Integration-v1.26.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
