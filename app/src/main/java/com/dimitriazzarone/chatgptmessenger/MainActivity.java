@@ -183,11 +183,11 @@ public class MainActivity extends Activity {
         webView.loadUrl(HOME);
 
         if (handsFreeEnabled) {
-            autoButton.setText("MIC FIX");
+            autoButton.setText("MIC");
             statusText.setText("🟢 Auto ON — preparo il microfono…");
             statusText.postDelayed(this::recoverHandsFreeMicrophone, 500L);
         } else {
-            autoButton.setText("MIC FIX");
+            autoButton.setText("MIC");
             statusText.setText("⚪ Auto OFF — usa il microfono manuale");
         }
     }
@@ -230,7 +230,7 @@ public class MainActivity extends Activity {
         stopSpeechButton = makeButton("⏹");
         stopSpeechButton.setTextSize(18);
 
-        autoButton = makeButton("MIC FIX");
+        autoButton = makeButton("MIC");
         autoButton.setTextSize(10);
         luminexButton = makeButton("L");
         luminexButton.setTextSize(16);
@@ -294,7 +294,32 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        autoButton.setOnClickListener(v -> recoverMicrophoneAccess());
+        // DAN_V127_COMPACT_MOBILE_TOOLBAR
+        autoButton.setAllCaps(false);
+        autoButton.setTextSize(12);
+        autoButton.setMinWidth(0);
+        autoButton.setMinimumWidth(0);
+        autoButton.setPadding(dp(7), 0, dp(7), 0);
+
+        reloadButton.setMinWidth(0);
+        reloadButton.setMinimumWidth(0);
+        reloadButton.setPadding(dp(6), 0, dp(6), 0);
+
+        autoButton.setOnClickListener(v -> {
+            // Ripristino completo: evita il pulsante MIC bloccato.
+            recognizerSessionActive = false;
+            listening = false;
+            manualCapture = false;
+            pressToTalkRequested = false;
+            recordingLocked = false;
+
+            micButton.setEnabled(true);
+            autoButton.setEnabled(true);
+            micButton.setText("🎙");
+            applyMicStyle(false);
+
+            recoverMicrophoneAccess();
+        });
         luminexButton.setOnClickListener(v -> toggleLuminexView());
 
         reload.setOnClickListener(v -> {
@@ -497,7 +522,7 @@ public class MainActivity extends Activity {
                 .putBoolean(PREF_HANDS_FREE, true)
                 .apply();
 
-        autoButton.setText("MIC FIX");
+        autoButton.setText("MIC");
 
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED) {
