@@ -20,6 +20,7 @@ import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.media.session.MediaSession;
@@ -142,11 +143,11 @@ public class MainActivity extends Activity {
         webView.loadUrl(HOME);
 
         if (handsFreeEnabled) {
-            autoButton.setText("AUTO ON");
+            autoButton.setText("MIC FIX");
             statusText.setText("🟢 Auto ON — preparo il microfono…");
             statusText.postDelayed(this::recoverHandsFreeMicrophone, 500L);
         } else {
-            autoButton.setText("AUTO OFF");
+            autoButton.setText("MIC FIX");
             statusText.setText("⚪ Auto OFF — usa il microfono manuale");
         }
     }
@@ -189,7 +190,7 @@ public class MainActivity extends Activity {
         stopSpeechButton = makeButton("⏹");
         stopSpeechButton.setTextSize(18);
 
-        autoButton = makeButton(handsFreeEnabled ? "AUTO ON" : "AUTO OFF");
+        autoButton = makeButton("MIC FIX");
         autoButton.setTextSize(10);
         Button reload = makeButton("↻");
 
@@ -246,7 +247,7 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        autoButton.setOnClickListener(v -> toggleHandsFreeMode());
+        autoButton.setOnClickListener(v -> recoverMicrophoneAccess());
 
         reload.setOnClickListener(v -> {
             if (webView != null) webView.reload();
@@ -434,34 +435,41 @@ public class MainActivity extends Activity {
         return best;
     }
 
-    private void toggleHandsFreeMode() {
-        handsFreeEnabled = !handsFreeEnabled;
-
-        getSharedPreferences(PREFS, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_HANDS_FREE, handsFreeEnabled)
-                .apply();
-
+    private void recoverMicrophoneAccess() {
+        handsFreeEnabled = true;
         handsFreeDictating = false;
         handsFreeBuffer.setLength(0);
 
-        if (handsFreeEnabled) {
-            autoButton.setText("AUTO ON");
-            statusText.setText("🟢 Auto ON — riattivo il microfono…");
-            recoverHandsFreeMicrophone();
-        } else {
-            autoButton.setText("AUTO OFF");
+        getSharedPreferences(PREFS, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_HANDS_FREE, true)
+                .apply();
 
-            if (speechRecognizer != null) {
-                try { speechRecognizer.cancel(); } catch (Exception ignored) {}
-            }
+        autoButton.setText("MIC FIX");
 
-            recognizerSessionActive = false;
-            listening = false;
-            manualCapture = false;
-            headsetRecording = false;
-            applyMicStyle(false);
-            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            statusText.setText("🎙 Richiedo il permesso microfono…");
+            requestPermissions(
+                    new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQ_AUDIO);
+            return;
+        }
+
+        statusText.setText("🎙 Ripristino il microfono…");
+        recoverHandsFreeMicrophone();
+    }
+
+    private void openMicrophoneAppSettings() {
+        try {
+            Intent intent = new Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", getPackageName(), null)
+            );
+            startActivity(intent);
+            statusText.setText("Apri Permessi → Microfono e abilitalo per Dan");
+        } catch (Exception e) {
+            statusText.setText("Impossibile aprire le impostazioni dei permessi");
         }
     }
 
@@ -1367,10 +1375,15 @@ public class MainActivity extends Activity {
                 if (pressToTalkRequested || manualCapture) {
                     startPressToTalk();
                 } else {
-                    startHandsFreeMode();
+                    handsFreeEnabled = true;
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit()
+                            .putBoolean(PREF_HANDS_FREE, true)
+                            .apply();
+                    recoverHandsFreeMicrophone();
                 }
             } else {
-                statusText.setText("Microfono non autorizzato");
+                openMicrophoneAppSettings();
             }
         }
     }
