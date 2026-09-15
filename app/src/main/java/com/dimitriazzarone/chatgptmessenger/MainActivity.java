@@ -1675,9 +1675,11 @@ public class MainActivity extends Activity {
         );
 
         settings.setUserAgentString(
-                settings.getUserAgentString()
-                        + " Dan-Luminex/1.25"
-        );
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                            + "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            + "Chrome/140.0.0.0 Safari/537.36 "
+                            + "Dan-Luminex/1.27"
+            );
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -2090,8 +2092,8 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
-        settings.setLoadWithOverviewMode(false);
-        settings.setUseWideViewPort(false);
+        settings.setLoadWithOverviewMode(true);
+        settings.setUseWideViewPort(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
