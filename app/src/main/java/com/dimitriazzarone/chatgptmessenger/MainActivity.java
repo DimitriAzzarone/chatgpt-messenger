@@ -80,6 +80,7 @@ public class MainActivity extends Activity {
     private static final String LUMINEX_CONTROL_URL =
             "https://luminex-ai-control.dimitri-azzarone.workers.dev/device/next";
     private static final long LUMINEX_POLL_MS = 2500L;
+    private static final long LUMINEX_SNAPSHOT_MS = 4000L;
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final String PREFS = "radio_prefs";
@@ -97,6 +98,7 @@ public class MainActivity extends Activity {
     private Button luminexButton;
     private boolean luminexVisible = false;
     private boolean luminexPolling = false;
+    private boolean luminexSnapshotInFlight = false;
 
     private final Handler luminexHandler =
             new Handler(Looper.getMainLooper());
@@ -116,6 +118,24 @@ public class MainActivity extends Activity {
                     );
                 }
             }, "Dan-Luminex-Poll").start();
+        }
+    };
+    private final Runnable luminexSnapshotRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!luminexVisible || luminexWebView == null) return;
+
+            if (!luminexSnapshotInFlight) {
+                luminexSnapshotInFlight = true;
+                sendLuminexPageState(luminexWebView, () -> {
+                    luminexSnapshotInFlight = false;
+                    if (luminexVisible) {
+                        luminexHandler.postDelayed(this, LUMINEX_SNAPSHOT_MS);
+                    }
+                });
+            } else {
+                luminexHandler.postDelayed(this, LUMINEX_SNAPSHOT_MS);
+            }
         }
     };
     private WebView popupWebView;
@@ -240,16 +260,35 @@ public class MainActivity extends Activity {
 
         Button reload = makeButton("↻");
 
-        topBar.addView(logo, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        boolean compactPhone = getResources().getConfiguration().smallestScreenWidthDp < 600;
+        int logoWidth = compactPhone ? 34 : 38;
+        int iconWidth = compactPhone ? 32 : 42;
+        int speedWidth = compactPhone ? 38 : 48;
+        int micWidth = compactPhone ? 46 : 68;
+        int luminexWidth = compactPhone ? 30 : 42;
+        int reloadWidth = compactPhone ? 30 : 38;
+
+        if (compactPhone) {
+            topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
+            title.setText(" Dan");
+            soundButton.setPadding(0, 0, 0, 0);
+            speedButton.setPadding(0, 0, 0, 0);
+            voiceButton.setPadding(0, 0, 0, 0);
+            playSpeechButton.setPadding(0, 0, 0, 0);
+            stopSpeechButton.setPadding(0, 0, 0, 0);
+            luminexButton.setPadding(0, 0, 0, 0);
+        }
+
+        topBar.addView(logo, new LinearLayout.LayoutParams(dp(logoWidth), dp(38)));
         topBar.addView(title, new LinearLayout.LayoutParams(0, dp(44), 1));
-        topBar.addView(soundButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
-        topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(48), dp(44)));
-        topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
-        topBar.addView(playSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
-        topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
-        topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(68), dp(44)));
-        topBar.addView(luminexButton, new LinearLayout.LayoutParams(dp(42), dp(44)));
-        topBar.addView(reload, new LinearLayout.LayoutParams(dp(38), dp(44)));
+        topBar.addView(soundButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
+        topBar.addView(speedButton, new LinearLayout.LayoutParams(dp(speedWidth), dp(44)));
+        topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
+        topBar.addView(playSpeechButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
+        topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
+        topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(micWidth), dp(44)));
+        topBar.addView(luminexButton, new LinearLayout.LayoutParams(dp(luminexWidth), dp(44)));
+        topBar.addView(reload, new LinearLayout.LayoutParams(dp(reloadWidth), dp(44)));
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setMax(100);
@@ -1733,10 +1772,15 @@ public class MainActivity extends Activity {
 
     // DAN_LUMINEX_PAGE_UPLOAD_V1
     private void sendLuminexPageState(WebView source) {
+        sendLuminexPageState(source, null);
+    }
+
+    private void sendLuminexPageState(WebView source, Runnable completion) {
         if (source == null
                 || TextUtils.isEmpty(
                         BuildConfig.LUMINEX_DEVICE_TOKEN
                 )) {
+            if (completion != null) completion.run();
             return;
         }
 
@@ -1754,7 +1798,7 @@ public class MainActivity extends Activity {
                 + "return JSON.stringify({"
                 + "url:String(location.href||''),"
                 + "title:String(document.title||''),"
-                + "text:String(text).slice(0,12000),"
+                + "text:String(text).slice(0,30000),"
                 + "links:links"
                 + "});"
                 + "}catch(e){return null;}"
@@ -1764,6 +1808,7 @@ public class MainActivity extends Activity {
             if (value == null
                     || "null".equals(value)
                     || "\"null\"".equals(value)) {
+                if (completion != null) completion.run();
                 return;
             }
 
@@ -1790,6 +1835,8 @@ public class MainActivity extends Activity {
                         "Lettura pagina non riuscita",
                         error
                 );
+            } finally {
+                if (completion != null) completion.run();
             }
         });
     }
@@ -1864,11 +1911,18 @@ public class MainActivity extends Activity {
     }
 
     private void toggleLuminexView() {
-        luminexVisible = !luminexVisible;
-
-        if (!luminexVisible && luminexWebView != null) {
-            sendLuminexPageState(luminexWebView);
+        if (luminexVisible && luminexWebView != null) {
+            // Acquisisce la pagina mentre e ancora visibile; la callback di
+            // evaluateJavascript non viene quindi annullata nascondendo la WebView.
+            sendLuminexPageState(luminexWebView, () -> setLuminexVisible(false));
+            return;
         }
+
+        setLuminexVisible(true);
+    }
+
+    private void setLuminexVisible(boolean visible) {
+        luminexVisible = visible;
 
         if (webView != null) {
             webView.setVisibility(
@@ -1895,6 +1949,12 @@ public class MainActivity extends Activity {
                             : "Dan visibile — Luminex AI resta collegato"
             );
         }
+
+        luminexHandler.removeCallbacks(luminexSnapshotRunnable);
+        luminexSnapshotInFlight = false;
+        if (luminexVisible) {
+            luminexHandler.postDelayed(luminexSnapshotRunnable, 1000L);
+        }
     }
 
     private void startLuminexPolling() {
@@ -1913,6 +1973,10 @@ public class MainActivity extends Activity {
                 luminexPollRunnable
         );
         luminexHandler.post(luminexPollRunnable);
+        if (luminexVisible) {
+            luminexHandler.removeCallbacks(luminexSnapshotRunnable);
+            luminexHandler.postDelayed(luminexSnapshotRunnable, 1000L);
+        }
     }
 
     private void stopLuminexPolling() {
@@ -1920,6 +1984,8 @@ public class MainActivity extends Activity {
         luminexHandler.removeCallbacks(
                 luminexPollRunnable
         );
+        luminexHandler.removeCallbacks(luminexSnapshotRunnable);
+        luminexSnapshotInFlight = false;
     }
 
     private void pollNextLuminexCommand() {
