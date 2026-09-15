@@ -1775,6 +1775,18 @@ public class MainActivity extends Activity {
         sendLuminexPageState(source, null);
     }
 
+    private void scheduleLuminexPageSnapshots() {
+        if (luminexWebView == null) return;
+
+        long[] delays = {4000L, 7000L, 10000L};
+        for (long delay : delays) {
+            luminexHandler.postDelayed(
+                    () -> sendLuminexPageState(luminexWebView),
+                    delay
+            );
+        }
+    }
+
     private void sendLuminexPageState(WebView source, Runnable completion) {
         if (source == null
                 || TextUtils.isEmpty(
@@ -2109,6 +2121,9 @@ public class MainActivity extends Activity {
                 }
 
                 luminexWebView.loadUrl(targetUrl);
+                // Una WebView nascosta non garantisce onPageFinished in tempo:
+                // acquisisce comunque più volte mentre la pagina si stabilizza.
+                scheduleLuminexPageSnapshots();
                 break;
 
             case "new-tab":
@@ -2129,6 +2144,7 @@ public class MainActivity extends Activity {
 
             case "reload":
                 luminexWebView.reload();
+                scheduleLuminexPageSnapshots();
                 break;
 
             case "home":
