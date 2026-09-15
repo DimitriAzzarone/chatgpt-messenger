@@ -110,7 +110,10 @@ public class MainActivity extends Activity {
                 pollNextLuminexCommand();
 
                 if (luminexPolling) {
-                    luminexHandler.postDelayed(this, 2500L);
+                    luminexHandler.postDelayed(
+                            this,
+                            LUMINEX_POLL_MS
+                    );
                 }
             }, "Dan-Luminex-Poll").start();
         }
@@ -302,11 +305,8 @@ public class MainActivity extends Activity {
         reload.setMinimumWidth(0);
         reload.setPadding(0, 0, 0, 0);
         reload.setText("↻");
-        reload.setTextSize(20);
+        reload.setTextSize(18);
         reload.setVisibility(View.VISIBLE);
-        reload.setLayoutParams(
-                new LinearLayout.LayoutParams(dp(38), dp(40))
-        );
 
         autoButton.setOnClickListener(v -> {
             // Ripristino completo: evita il pulsante MIC bloccato.
@@ -1727,7 +1727,7 @@ public class MainActivity extends Activity {
                 + "Chrome/140.0.0.0 Safari/537.36"
         );
 
-        luminexWebView.loadUrl("about:blank");
+        luminexWebView.loadUrl(LUMINEX_HOME);
     }
 
 
@@ -1865,6 +1865,10 @@ public class MainActivity extends Activity {
 
     private void toggleLuminexView() {
         luminexVisible = !luminexVisible;
+
+        if (!luminexVisible && luminexWebView != null) {
+            sendLuminexPageState(luminexWebView);
+        }
 
         if (webView != null) {
             webView.setVisibility(
