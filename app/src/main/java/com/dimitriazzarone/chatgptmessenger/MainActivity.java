@@ -513,28 +513,25 @@ public class MainActivity extends Activity {
     }
 
     private void recoverMicrophoneAccess() {
-        handsFreeEnabled = true;
+        handsFreeEnabled = false;
         handsFreeDictating = false;
         handsFreeBuffer.setLength(0);
+        headsetRecording = false;
 
         getSharedPreferences(PREFS, MODE_PRIVATE)
                 .edit()
-                .putBoolean(PREF_HANDS_FREE, true)
+                .putBoolean(PREF_HANDS_FREE, false)
                 .apply();
 
-        autoButton.setText("MIC");
-
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-            statusText.setText("🎙 Richiedo il permesso microfono…");
-            requestPermissions(
-                    new String[]{Manifest.permission.RECORD_AUDIO},
-                    REQ_AUDIO);
-            return;
+        if (headsetMediaSession != null) {
+            headsetMediaSession.setActive(false);
+            headsetMediaSession.release();
+            headsetMediaSession = null;
         }
 
-        statusText.setText("🎙 Ripristino il microfono…");
-        recoverHandsFreeMicrophone();
+        createHeadsetMediaSession();
+        autoButton.setText("MIC");
+        statusText.setText("Cuffie riattivate");
     }
 
     private void openMicrophoneAppSettings() {
@@ -1675,11 +1672,9 @@ public class MainActivity extends Activity {
         );
 
         settings.setUserAgentString(
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                            + "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            + "Chrome/140.0.0.0 Safari/537.36 "
-                            + "Dan-Luminex/1.27"
-            );
+                settings.getUserAgentString()
+                        + " Dan-Luminex/1.25"
+        );
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -1721,6 +1716,14 @@ public class MainActivity extends Activity {
                 )
         );
 
+        luminexWebView.getSettings().setUseWideViewPort(true);
+        luminexWebView.getSettings().setLoadWithOverviewMode(true);
+        luminexWebView.getSettings().setUserAgentString(
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                + "AppleWebKit/537.36 (KHTML, like Gecko) "
+                + "Chrome/140.0.0.0 Safari/537.36"
+        );
+
         luminexWebView.loadUrl(LUMINEX_HOME);
     }
 
@@ -1748,7 +1751,7 @@ public class MainActivity extends Activity {
                 + "return JSON.stringify({"
                 + "url:String(location.href||''),"
                 + "title:String(document.title||''),"
-                + "text:String(text).slice(0,30000),"
+                + "text:String(text).slice(0,12000),"
                 + "links:links"
                 + "});"
                 + "}catch(e){return null;}"
@@ -2092,8 +2095,8 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
-        settings.setLoadWithOverviewMode(true);
-        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(false);
+        settings.setUseWideViewPort(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setSafeBrowsingEnabled(true);
