@@ -301,9 +301,9 @@ public class MainActivity extends Activity {
         autoButton.setMinimumWidth(0);
         autoButton.setPadding(dp(7), 0, dp(7), 0);
 
-        reloadButton.setMinWidth(0);
-        reloadButton.setMinimumWidth(0);
-        reloadButton.setPadding(dp(6), 0, dp(6), 0);
+        reload.setMinWidth(0);
+        reload.setMinimumWidth(0);
+        reload.setPadding(dp(6), 0, dp(6), 0);
 
         autoButton.setOnClickListener(v -> {
             // Ripristino completo: evita il pulsante MIC bloccato.
