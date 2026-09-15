@@ -99,6 +99,7 @@ public class MainActivity extends Activity {
     private boolean luminexVisible = false;
     private boolean luminexPolling = false;
     private boolean luminexSnapshotInFlight = false;
+    private String lastLuminexContext = "";
 
     private final Handler luminexHandler =
             new Handler(Looper.getMainLooper());
@@ -1827,7 +1828,8 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                postLuminexPageState(state.toString());
+                lastLuminexContext = state.toString();
+            postLuminexPageState(lastLuminexContext);
 
             } catch (Exception error) {
                 android.util.Log.w(
@@ -2597,7 +2599,22 @@ public class MainActivity extends Activity {
     private void injectTextAndSend(String text) {
         if (webView == null) return;
 
-        String escaped = text
+        String textToSend = text;
+
+        if (!TextUtils.isEmpty(lastLuminexContext)) {
+            String context = lastLuminexContext;
+
+            if (context.length() > 12000) {
+                context = context.substring(0, 12000);
+            }
+
+            textToSend =
+                    text
+                    + "\n\n[CONTESTO LUMINEX - PAGINA CORRENTE]\n"
+                    + context;
+        }
+
+        String escaped = textToSend
                 .replace("\\", "\\\\")
                 .replace("'", "\\'")
                 .replace("\n", "\\n")
