@@ -232,7 +232,7 @@ public class MainActivity extends Activity {
         logo.setBackgroundColor(Color.rgb(0, 168, 132));
 
         TextView title = new TextView(this);
-        title.setText("  Dan 1.31");
+        title.setText("  Dan 1.32");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
@@ -271,7 +271,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText(" Dan 1.31");
+            title.setText(" Dan 1.32");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);
@@ -1777,10 +1777,7 @@ public class MainActivity extends Activity {
     }
 
     private void sendLuminexPageState(WebView source, Runnable completion) {
-        if (source == null
-                || TextUtils.isEmpty(
-                        BuildConfig.LUMINEX_DEVICE_TOKEN
-                )) {
+        if (source == null) {
             if (completion != null) completion.run();
             return;
         }
@@ -1829,7 +1826,22 @@ public class MainActivity extends Activity {
                 }
 
                 lastLuminexContext = state.toString();
-            postLuminexPageState(lastLuminexContext);
+
+                final String pageTitle = state.optString("title", "");
+                runOnUiThread(() -> {
+                    if (statusText != null) {
+                        statusText.setText(
+                                "👁 Luminex letto: "
+                                        + (TextUtils.isEmpty(pageTitle)
+                                        ? "(senza titolo)"
+                                        : pageTitle)
+                        );
+                    }
+                });
+
+                if (!TextUtils.isEmpty(BuildConfig.LUMINEX_DEVICE_TOKEN)) {
+                    postLuminexPageState(lastLuminexContext);
+                }
 
             } catch (Exception error) {
                 android.util.Log.w(

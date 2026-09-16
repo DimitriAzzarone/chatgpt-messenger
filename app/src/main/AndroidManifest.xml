@@ -10,7 +10,7 @@
         android:icon="@drawable/ic_dan_launcher"
         android:roundIcon="@drawable/ic_dan_launcher"
         android:allowBackup="true"
-        android:label="Dan 1.31"
+        android:label="Dan 1.32"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="false">
