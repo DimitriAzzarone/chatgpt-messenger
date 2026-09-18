@@ -1777,10 +1777,7 @@ public class MainActivity extends Activity {
     }
 
     private void sendLuminexPageState(WebView source, Runnable completion) {
-        if (source == null
-                || TextUtils.isEmpty(
-                        BuildConfig.LUMINEX_DEVICE_TOKEN
-                )) {
+        if (source == null) {
             if (completion != null) completion.run();
             return;
         }
@@ -1829,7 +1826,22 @@ public class MainActivity extends Activity {
                 }
 
                 lastLuminexContext = state.toString();
-            postLuminexPageState(lastLuminexContext);
+
+                final String pageTitle = state.optString("title", "");
+                runOnUiThread(() -> {
+                    if (statusText != null) {
+                        statusText.setText(
+                                "👁 Luminex letto: "
+                                        + (TextUtils.isEmpty(pageTitle)
+                                        ? "(senza titolo)"
+                                        : pageTitle)
+                        );
+                    }
+                });
+
+                if (!TextUtils.isEmpty(BuildConfig.LUMINEX_DEVICE_TOKEN)) {
+                    postLuminexPageState(lastLuminexContext);
+                }
 
             } catch (Exception error) {
                 android.util.Log.w(
