@@ -2960,17 +2960,32 @@ public class MainActivity extends Activity {
 
         String script =
                 "(function(){" +
-                " try{" +
-                "  const nodes=Array.from(document.querySelectorAll('body *'));" +
-                "  const el=nodes.find(n=>{" +
-                "   const t=(n.textContent||'').trim();" +
-                "   return t==='ChatGPT';" +
-                "  });" +
-                "  if(el){" +
-                "   el.textContent='Dan';" +
-                "  }" +
-                " }catch(e){}" +
-                "})()";
+                " if(window.__danHideChatGPTInstalled)return;" +
+                " window.__danHideChatGPTInstalled=true;" +
+
+                " function hideOnlyChatGPT(){" +
+                "  try{" +
+                "   const nodes=Array.from(document.querySelectorAll('body *'));" +
+                "   for(const n of nodes){" +
+                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT'){" +
+                "     n.style.display='none';" +
+                "    }" +
+                "   }" +
+                "  }catch(e){}" +
+                " }" +
+
+                " hideOnlyChatGPT();" +
+
+                " const observer=new MutationObserver(function(){" +
+                "  hideOnlyChatGPT();" +
+                " });" +
+
+                " observer.observe(document.body,{" +
+                "  childList:true," +
+                "  subtree:true," +
+                "  characterData:true" +
+                " });" +
+                "})();";
 
         webView.evaluateJavascript(script, null);
     }
