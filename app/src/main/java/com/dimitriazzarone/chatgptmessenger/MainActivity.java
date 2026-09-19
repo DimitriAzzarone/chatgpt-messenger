@@ -2273,6 +2273,14 @@ public class MainActivity extends Activity {
                 clickLuminexText(targetUrl);
                 break;
 
+            case "type-text":
+                typeLuminexText(targetUrl);
+                break;
+
+            case "send-confirmed":
+                confirmAndSendLuminexMessage();
+                break;
+
             default:
                 android.util.Log.w(
                         "DanLuminex",
@@ -2318,6 +2326,93 @@ public class MainActivity extends Activity {
                     statusText.setText("Luminex: clic eseguito su " + text);
                 } else {
                     statusText.setText("Luminex: elemento non trovato");
+                }
+            });
+        });
+    }
+
+    private void typeLuminexText(String text) {
+        if (luminexWebView == null || TextUtils.isEmpty(text)) return;
+
+        String escaped = text
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "");
+
+        String script =
+                "(function(){" +
+                " const text='" + escaped + "';" +
+                " const el=" +
+                " document.querySelector('[contenteditable=\"true\"][data-tab]') ||" +
+                " document.querySelector('footer [contenteditable=\"true\"]') ||" +
+                " document.querySelector('[contenteditable=\"true\"]');" +
+                " if(!el)return 'NOT_FOUND';" +
+
+                " el.focus();" +
+                " el.textContent=text;" +
+                " el.dispatchEvent(new InputEvent('input',{" +
+                "  bubbles:true," +
+                "  inputType:'insertText'," +
+                "  data:text" +
+                " }));" +
+                " return 'TYPED';" +
+                "})()";
+
+        luminexWebView.evaluateJavascript(script, result -> {
+            runOnUiThread(() -> {
+                if (result != null && result.contains("TYPED")) {
+                    statusText.setText("Luminex: messaggio preparato — conferma prima di inviare");
+                } else {
+                    statusText.setText("Luminex: campo messaggio non trovato");
+                }
+            });
+        });
+    }
+
+    private void confirmAndSendLuminexMessage() {
+        if (luminexWebView == null) return;
+
+        new AlertDialog.Builder(this)
+                .setTitle("Conferma invio")
+                .setMessage("Inviare il messaggio preparato nella pagina corrente?")
+                .setNegativeButton("Annulla", (dialog, which) -> {
+                    statusText.setText("Luminex: invio annullato");
+                })
+                .setPositiveButton("Invia", (dialog, which) -> {
+                    sendPreparedLuminexMessage();
+                })
+                .show();
+    }
+
+    private void sendPreparedLuminexMessage() {
+        if (luminexWebView == null) return;
+
+        String script =
+                "(function(){" +
+                " const footer=document.querySelector('footer')||document;" +
+                " const buttons=Array.from(footer.querySelectorAll('button,[role=button]'));" +
+                " const btn=buttons.find(b=>{" +
+                "  const a=((b.getAttribute('aria-label')||'')+' '+" +
+                "   (b.getAttribute('data-testid')||'')+' '+" +
+                "   (b.title||'')).toLowerCase();" +
+                "  return a.includes('send')||a.includes('invia')||" +
+                "   a.includes('compose-btn-send');" +
+                " });" +
+                " if(!btn)return 'NOT_FOUND';" +
+                " if(btn.disabled)return 'DISABLED';" +
+                " btn.click();" +
+                " return 'SENT';" +
+                "})()";
+
+        luminexWebView.evaluateJavascript(script, result -> {
+            runOnUiThread(() -> {
+                if (result != null && result.contains("SENT")) {
+                    statusText.setText("Luminex: messaggio inviato");
+                } else if (result != null && result.contains("DISABLED")) {
+                    statusText.setText("Luminex: pulsante invio non disponibile");
+                } else {
+                    statusText.setText("Luminex: pulsante invio non trovato");
                 }
             });
         });
