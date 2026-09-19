@@ -2955,7 +2955,28 @@ public class MainActivity extends Activity {
         }));
     }
 
+    private void injectDanBranding() {
+        if (webView == null) return;
+
+        String script =
+                "(function(){" +
+                " try{" +
+                "  const nodes=Array.from(document.querySelectorAll('body *'));" +
+                "  const el=nodes.find(n=>{" +
+                "   const t=(n.textContent||'').trim();" +
+                "   return t==='ChatGPT';" +
+                "  });" +
+                "  if(el){" +
+                "   el.textContent='Dan';" +
+                "  }" +
+                " }catch(e){}" +
+                "})()";
+
+        webView.evaluateJavascript(script, null);
+    }
+
     private void injectPageBehaviors() {
+        injectDanBranding();
         injectEnterToSend();
         injectManualLuminexContext();
         syncLuminexContextToChatGpt();
