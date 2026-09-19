@@ -2181,7 +2181,8 @@ public class MainActivity extends Activity {
         settings.setSupportMultipleWindows(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
-        settings.setBuiltInZoomControls(false);
+        settings.setSupportZoom(true);
+        settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setLoadWithOverviewMode(false);
         settings.setUseWideViewPort(false);
@@ -2277,6 +2278,9 @@ public class MainActivity extends Activity {
                 popupSettings.setSupportMultipleWindows(true);
                 popupSettings.setJavaScriptCanOpenWindowsAutomatically(true);
                 popupSettings.setMediaPlaybackRequiresUserGesture(false);
+                popupSettings.setSupportZoom(true);
+                popupSettings.setBuiltInZoomControls(true);
+                popupSettings.setDisplayZoomControls(false);
                 popupSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     popupSettings.setSafeBrowsingEnabled(true);
