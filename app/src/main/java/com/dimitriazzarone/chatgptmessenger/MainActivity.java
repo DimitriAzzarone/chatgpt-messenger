@@ -2972,6 +2972,21 @@ public class MainActivity extends Activity {
                 "    }" +
                 "   }" +
 
+                "   const disclaimerNodes=Array.from(document.querySelectorAll('body *'));" +
+                "   for(const n of disclaimerNodes){" +
+                "    const t=(n.textContent||'').trim().replace(/\\s+/g,' ');" +
+                "    const match=t.startsWith('ChatGPT può commettere errori') ||" +
+                "      t.startsWith('ChatGPT can make mistakes');" +
+                "    if(match){" +
+                "     const childMatch=Array.from(n.children||[]).some(c=>{" +
+                "      const ct=(c.textContent||'').trim().replace(/\\s+/g,' ');" +
+                "      return ct.startsWith('ChatGPT può commettere errori') ||" +
+                "        ct.startsWith('ChatGPT can make mistakes');" +
+                "     });" +
+                "     if(!childMatch)n.style.display='none';" +
+                "    }" +
+                "   }" +
+
                 "   const fields=Array.from(document.querySelectorAll(" +
                 "    'textarea,input,[contenteditable=true]'" +
                 "   ));" +
