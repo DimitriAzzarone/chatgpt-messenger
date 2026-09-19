@@ -2971,6 +2971,20 @@ public class MainActivity extends Activity {
                 "     n.style.display='none';" +
                 "    }" +
                 "   }" +
+
+                "   const fields=Array.from(document.querySelectorAll(" +
+                "    'textarea,input,[contenteditable=true]'" +
+                "   ));" +
+
+                "   for(const f of fields){" +
+                "    const attrs=['placeholder','data-placeholder','aria-label'];" +
+                "    for(const a of attrs){" +
+                "     const v=f.getAttribute(a);" +
+                "     if(v && v.toLowerCase().includes('chatgpt')){" +
+                "      f.setAttribute(a,'Chiedi a Dan');" +
+                "     }" +
+                "    }" +
+                "   }" +
                 "  }catch(e){}" +
                 " }" +
 
@@ -2983,7 +2997,9 @@ public class MainActivity extends Activity {
                 " observer.observe(document.body,{" +
                 "  childList:true," +
                 "  subtree:true," +
-                "  characterData:true" +
+                "  characterData:true," +
+                "  attributes:true," +
+                "  attributeFilter:['placeholder','data-placeholder','aria-label']" +
                 " });" +
                 "})();";
 
