@@ -1826,6 +1826,7 @@ public class MainActivity extends Activity {
                 }
 
                 lastLuminexContext = state.toString();
+                syncLuminexContextToChatGpt();
 
                 final String pageTitle = state.optString("title", "");
                 runOnUiThread(() -> {
@@ -2678,8 +2679,112 @@ public class MainActivity extends Activity {
 
     private void injectPageBehaviors() {
         injectEnterToSend();
+        injectManualLuminexContext();
+        syncLuminexContextToChatGpt();
         injectDownloadNameCapture();
         injectAssistantObserver();
+    }
+
+    private void syncLuminexContextToChatGpt() {
+        if (webView == null) return;
+
+        String context = lastLuminexContext == null
+                ? ""
+                : lastLuminexContext;
+
+        if (context.length() > 12000) {
+            context = context.substring(0, 12000);
+        }
+
+        String escaped = context
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "");
+
+        String script =
+                "window.__danLuminexContext='" + escaped + "';";
+
+        webView.evaluateJavascript(script, null);
+    }
+
+    private void injectManualLuminexContext() {
+        if (webView == null) return;
+
+        String script =
+                "(function(){" +
+                " if(window.__danLuminexManualInstalled)return;" +
+                " window.__danLuminexManualInstalled=true;" +
+
+                " function editor(){" +
+                "  return document.querySelector('#prompt-textarea') ||" +
+                "   document.querySelector(\"textarea[data-testid='prompt-textarea']\") ||" +
+                "   document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\");" +
+                " }" +
+
+                " function sendButton(){" +
+                "  return document.querySelector(\"button[data-testid='send-button']\") ||" +
+                "   Array.from(document.querySelectorAll('button')).find(b=>{" +
+                "    const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
+                "    return a.includes('send')||a.includes('invia');" +
+                "   });" +
+                " }" +
+
+                " function readText(el){" +
+                "  if(!el)return '';" +
+                "  return el.tagName==='TEXTAREA'||el.tagName==='INPUT' ? el.value : (el.innerText||el.textContent||'');" +
+                " }" +
+
+                " function writeText(el,text){" +
+                "  if(el.tagName==='TEXTAREA'||el.tagName==='INPUT'){" +
+                "   const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el),'value')?.set;" +
+                "   if(setter)setter.call(el,text);else el.value=text;" +
+                "  }else{" +
+                "   el.innerHTML='';" +
+                "   el.textContent=text;" +
+                "  }" +
+                "  el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));" +
+                "  el.dispatchEvent(new Event('change',{bubbles:true}));" +
+                " }" +
+
+                " document.addEventListener('click',function(e){" +
+                "  const btn=e.target&&e.target.closest?e.target.closest('button'):null;" +
+                "  const send=sendButton();" +
+                "  if(!btn||!send||btn!==send)return;" +
+
+                "  if(window.__danLuminexBypass){" +
+                "   window.__danLuminexBypass=false;" +
+                "   return;" +
+                "  }" +
+
+                "  const ctx=window.__danLuminexContext||'';" +
+                "  if(!ctx)return;" +
+
+                "  const ed=editor();" +
+                "  if(!ed)return;" +
+
+                "  const original=readText(ed).trim();" +
+                "  if(!original)return;" +
+
+                "  if(original.includes('[CONTESTO LUMINEX - PAGINA CORRENTE]'))return;" +
+
+                "  e.preventDefault();" +
+                "  e.stopImmediatePropagation();" +
+
+                "  const combined=original+'\\n\\n[CONTESTO LUMINEX - PAGINA CORRENTE]\\n'+ctx;" +
+                "  writeText(ed,combined);" +
+
+                "  setTimeout(()=>{" +
+                "   const again=sendButton();" +
+                "   if(again&&!again.disabled){" +
+                "    window.__danLuminexBypass=true;" +
+                "    again.click();" +
+                "   }" +
+                "  },120);" +
+                " },true);" +
+                "})();";
+
+        webView.evaluateJavascript(script, null);
     }
 
     private void injectEnterToSend() {
