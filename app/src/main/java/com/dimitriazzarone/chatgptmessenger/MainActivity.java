@@ -56,6 +56,10 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.webkit.ProfileStore;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
+
 import java.io.File;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -95,7 +99,11 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private WebView luminexWebView;
+    private WebView privateWebView;
     private Button luminexButton;
+    private Button privateButton;
+    private static final String PRIVATE_PROFILE = "dan-incognito";
+    private boolean privateVisible = false;
     private boolean luminexVisible = false;
     private boolean luminexPolling = false;
     private boolean luminexSnapshotInFlight = false;
@@ -259,6 +267,12 @@ public class MainActivity extends Activity {
                 "Mostra o nascondi Luminex AI"
         );
 
+        privateButton = makeButton("P");
+        privateButton.setTextSize(15);
+        privateButton.setContentDescription(
+                "Apri sessione privata"
+        );
+
         Button reload = makeButton("↻");
 
         boolean compactPhone = getResources().getConfiguration().smallestScreenWidthDp < 600;
@@ -267,6 +281,7 @@ public class MainActivity extends Activity {
         int speedWidth = compactPhone ? 38 : 48;
         int micWidth = compactPhone ? 46 : 68;
         int luminexWidth = compactPhone ? 30 : 42;
+        int privateWidth = compactPhone ? 30 : 42;
         int reloadWidth = compactPhone ? 30 : 38;
 
         if (compactPhone) {
@@ -278,6 +293,7 @@ public class MainActivity extends Activity {
             playSpeechButton.setPadding(0, 0, 0, 0);
             stopSpeechButton.setPadding(0, 0, 0, 0);
             luminexButton.setPadding(0, 0, 0, 0);
+            privateButton.setPadding(0, 0, 0, 0);
         }
 
         topBar.addView(logo, new LinearLayout.LayoutParams(dp(logoWidth), dp(38)));
@@ -289,6 +305,7 @@ public class MainActivity extends Activity {
         topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
         topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(micWidth), dp(44)));
         topBar.addView(luminexButton, new LinearLayout.LayoutParams(dp(luminexWidth), dp(44)));
+        topBar.addView(privateButton, new LinearLayout.LayoutParams(dp(privateWidth), dp(44)));
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(reloadWidth), dp(44)));
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -364,6 +381,7 @@ public class MainActivity extends Activity {
             recoverMicrophoneAccess();
         });
         luminexButton.setOnClickListener(v -> toggleLuminexView());
+        privateButton.setOnClickListener(v -> togglePrivateSession());
 
         reload.setOnClickListener(v -> {
             WebView active = luminexVisible
@@ -422,6 +440,104 @@ public class MainActivity extends Activity {
 
             return false;
         });
+    }
+
+    private void togglePrivateSession() {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+            Toast.makeText(
+                    this,
+                    "Sessione privata non supportata da questa WebView",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
+
+        if (privateVisible) {
+            closePrivateSession();
+        } else {
+            openPrivateSession();
+        }
+    }
+
+    private void openPrivateSession() {
+        if (privateWebView == null) {
+            privateWebView = new WebView(this);
+            WebViewCompat.setProfile(privateWebView, PRIVATE_PROFILE);
+            privateWebView.setBackgroundColor(Color.WHITE);
+
+            WebSettings settings = privateWebView.getSettings();
+            settings.setJavaScriptEnabled(true);
+            settings.setDomStorageEnabled(true);
+            settings.setDatabaseEnabled(true);
+            settings.setAllowFileAccess(true);
+            settings.setAllowContentAccess(true);
+            settings.setMediaPlaybackRequiresUserGesture(false);
+            settings.setSupportZoom(true);
+            settings.setBuiltInZoomControls(true);
+            settings.setDisplayZoomControls(false);
+            settings.setUseWideViewPort(true);
+            settings.setLoadWithOverviewMode(true);
+            settings.setMixedContentMode(
+                    WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            );
+
+            privateWebView.setWebViewClient(new WebViewClient());
+
+            webContainer.addView(
+                    privateWebView,
+                    new FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+            );
+
+            privateWebView.loadUrl(LUMINEX_HOME);
+        }
+
+        privateVisible = true;
+
+        if (webView != null) webView.setVisibility(View.GONE);
+        if (luminexWebView != null) luminexWebView.setVisibility(View.GONE);
+        privateWebView.setVisibility(View.VISIBLE);
+
+        privateButton.setText("X");
+        statusText.setText("Privata — profilo separato attivo");
+    }
+
+    private void closePrivateSession() {
+        privateVisible = false;
+
+        if (privateWebView != null) {
+            webContainer.removeView(privateWebView);
+
+            try {
+                privateWebView.stopLoading();
+                privateWebView.loadUrl("about:blank");
+                privateWebView.clearHistory();
+                privateWebView.clearCache(true);
+                privateWebView.removeAllViews();
+                privateWebView.destroy();
+            } catch (Exception ignored) {}
+
+            privateWebView = null;
+        }
+
+        try {
+            ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE);
+        } catch (Exception ignored) {}
+
+        if (webView != null) {
+            webView.setVisibility(luminexVisible ? View.GONE : View.VISIBLE);
+        }
+
+        if (luminexWebView != null) {
+            luminexWebView.setVisibility(
+                    luminexVisible ? View.VISIBLE : View.GONE
+            );
+        }
+
+        privateButton.setText("P");
+        statusText.setText("Sessione privata chiusa e dati eliminati");
     }
 
     private void toggleRecordingSounds() {
