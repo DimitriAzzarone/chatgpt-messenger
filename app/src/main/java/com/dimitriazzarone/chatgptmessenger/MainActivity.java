@@ -2418,6 +2418,25 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void composeLuminexMessage(String recipient, String message) {
+        if (luminexWebView == null
+                || TextUtils.isEmpty(recipient)
+                || TextUtils.isEmpty(message)) {
+            return;
+        }
+
+        clickLuminexText(recipient);
+
+        luminexHandler.postDelayed(() -> {
+            typeLuminexText(message);
+
+            luminexHandler.postDelayed(() -> {
+                confirmAndSendLuminexMessage();
+            }, 700L);
+
+        }, 900L);
+    }
+
     private void createWebView() {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(11, 20, 26));
