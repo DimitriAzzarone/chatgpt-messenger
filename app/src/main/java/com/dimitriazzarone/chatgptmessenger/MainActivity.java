@@ -2269,6 +2269,10 @@ public class MainActivity extends Activity {
                 luminexWebView.loadUrl(LUMINEX_HOME);
                 break;
 
+            case "click-text":
+                clickLuminexText(targetUrl);
+                break;
+
             default:
                 android.util.Log.w(
                         "DanLuminex",
@@ -2280,6 +2284,43 @@ public class MainActivity extends Activity {
         statusText.setText(
                 "Luminex AI ha eseguito: " + action
         );
+    }
+
+    private void clickLuminexText(String text) {
+        if (luminexWebView == null || TextUtils.isEmpty(text)) return;
+
+        String escaped = text
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "");
+
+        String script =
+                "(function(){" +
+                " const wanted='" + escaped + "'.trim().toLowerCase();" +
+                " if(!wanted)return 'EMPTY';" +
+                " const nodes=Array.from(document.querySelectorAll(" +
+                " 'button,a,[role=button],[role=link],div,span'+" +
+                " ));" +
+                " const el=nodes.find(n=>{" +
+                "  const t=((n.innerText||n.textContent||n.getAttribute('aria-label')||'')+'').trim().toLowerCase();" +
+                "  return t===wanted || t.includes(wanted);" +
+                " });" +
+                " if(!el)return 'NOT_FOUND';" +
+                " el.scrollIntoView({block:'center',inline:'center'});" +
+                " el.click();" +
+                " return 'CLICKED';" +
+                "})()";
+
+        luminexWebView.evaluateJavascript(script, result -> {
+            runOnUiThread(() -> {
+                if (result != null && result.contains("CLICKED")) {
+                    statusText.setText("Luminex: clic eseguito su " + text);
+                } else {
+                    statusText.setText("Luminex: elemento non trovato");
+                }
+            });
+        });
     }
 
     private void createWebView() {
