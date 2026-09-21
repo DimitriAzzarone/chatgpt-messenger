@@ -271,8 +271,9 @@ public class MainActivity extends Activity {
         privateButton = makeButton("P");
         privateButton.setTextSize(15);
         privateButton.setContentDescription(
-                "Apri sessione privata"
+                "Apri sessione privata Luminex"
         );
+        privateButton.setVisibility(View.GONE);
 
         Button reload = makeButton("↻");
 
@@ -537,7 +538,10 @@ public class MainActivity extends Activity {
         privateWebView.setVisibility(View.VISIBLE);
 
         if (luminexButton != null) luminexButton.setText("D");
-        privateButton.setText("X");
+        if (privateButton != null) {
+            privateButton.setVisibility(View.VISIBLE);
+            privateButton.setText("X");
+        }
         statusText.setText("Luminex PRIVATA — profilo separato attivo");
 
         luminexHandler.removeCallbacks(luminexSnapshotRunnable);
@@ -571,7 +575,10 @@ public class MainActivity extends Activity {
         if (luminexWebView != null) luminexWebView.setVisibility(View.VISIBLE);
 
         if (luminexButton != null) luminexButton.setText("D");
-        privateButton.setText("P");
+        if (privateButton != null) {
+            privateButton.setVisibility(View.VISIBLE);
+            privateButton.setText("P");
+        }
         statusText.setText("Luminex AI — sessione normale");
 
         luminexHandler.removeCallbacks(luminexSnapshotRunnable);
@@ -2117,6 +2124,15 @@ public class MainActivity extends Activity {
         if (luminexButton != null) {
             luminexButton.setText(
                     luminexVisible ? "D" : "L"
+            );
+        }
+
+        if (privateButton != null) {
+            privateButton.setVisibility(
+                    luminexVisible ? View.VISIBLE : View.GONE
+            );
+            privateButton.setText(
+                    privateVisible ? "X" : "P"
             );
         }
 
