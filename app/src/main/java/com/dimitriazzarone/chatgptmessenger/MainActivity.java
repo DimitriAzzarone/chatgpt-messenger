@@ -24,6 +24,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.media.session.MediaSession;
@@ -108,6 +111,14 @@ public class MainActivity extends Activity {
     private boolean luminexPolling = false;
     private boolean luminexSnapshotInFlight = false;
     private String lastLuminexContext = "";
+
+    private boolean fullChatLoading = false;
+    private boolean fullChatPrintAfterLoad = false;
+    private int fullChatStableRounds = 0;
+    private int fullChatAttempts = 0;
+    private long fullChatLastHeight = -1L;
+    private int fullChatLastMessageCount = -1;
+    private WebView fullChatWebView = null;
 
     private final Handler luminexHandler =
             new Handler(Looper.getMainLooper());
@@ -2342,6 +2353,18 @@ public class MainActivity extends Activity {
                 }
                 break;
 
+            case "load-full-chat":
+                loadFullLuminexPage(false);
+                return;
+
+            case "print-page-pdf":
+                printLuminexPagePdf(getActiveLuminexWebView());
+                return;
+
+            case "export-chat-pdf":
+                loadFullLuminexPage(true);
+                return;
+
             case "click-text":
                 clickLuminexText(targetUrl);
                 break;
@@ -2365,6 +2388,199 @@ public class MainActivity extends Activity {
         statusText.setText(
                 "Luminex AI ha eseguito: " + action
         );
+    }
+
+    private void loadFullLuminexPage(boolean printAfterLoad) {
+        WebView active = getActiveLuminexWebView();
+
+        if (active == null) {
+            statusText.setText("Luminex: nessuna pagina attiva");
+            return;
+        }
+
+        if (fullChatLoading) {
+            statusText.setText("Luminex: caricamento pagina già in corso");
+            return;
+        }
+
+        fullChatLoading = true;
+        fullChatPrintAfterLoad = printAfterLoad;
+        fullChatStableRounds = 0;
+        fullChatAttempts = 0;
+        fullChatLastHeight = -1L;
+        fullChatLastMessageCount = -1;
+        fullChatWebView = active;
+
+        statusText.setText("Luminex: sto caricando tutta la pagina…");
+        luminexHandler.post(this::stepLoadFullLuminexPage);
+    }
+
+    private void stepLoadFullLuminexPage() {
+        if (!fullChatLoading || fullChatWebView == null) return;
+
+        String script =
+                "(function(){" +
+                " const candidates=[document.scrollingElement,document.documentElement,document.body]" +
+                "  .concat(Array.from(document.querySelectorAll('*'))).filter(Boolean);" +
+                " let best=document.scrollingElement||document.documentElement||document.body;" +
+                " let maxHeight=0;" +
+                " for(const e of candidates){" +
+                "  try{" +
+                "   const sh=e.scrollHeight||0;" +
+                "   const ch=e.clientHeight||0;" +
+                "   if(sh-ch>200 && sh>maxHeight){maxHeight=sh;best=e;}" +
+                "  }catch(x){}" +
+                " }" +
+                " try{best.scrollTop=0;}catch(x){}" +
+                " try{best.scrollTo(0,0);}catch(x){}" +
+                " try{window.scrollTo(0,0);}catch(x){}" +
+                " const h=(best&&best.scrollHeight)||document.documentElement.scrollHeight||0;" +
+                " const top=(best&&best.scrollTop)||window.scrollY||0;" +
+                " const msgs=document.querySelectorAll('[data-message-author-role]').length;" +
+                " return [h,top,msgs];" +
+                "})()";
+
+        fullChatWebView.evaluateJavascript(script, result -> {
+            if (!fullChatLoading) return;
+
+            long height = -1L;
+            long top = -1L;
+            int messageCount = -1;
+
+            try {
+                org.json.JSONArray info = new org.json.JSONArray(result);
+                height = info.optLong(0, -1L);
+                top = info.optLong(1, -1L);
+                messageCount = info.optInt(2, -1);
+            } catch (Exception ignored) {}
+
+            fullChatAttempts++;
+
+            boolean sameHeight =
+                    height > 0L
+                            && height == fullChatLastHeight;
+
+            boolean sameMessages =
+                    messageCount >= 0
+                            && messageCount == fullChatLastMessageCount;
+
+            boolean atTop = top >= 0L && top <= 2L;
+
+            if (sameHeight && sameMessages && atTop) {
+                fullChatStableRounds++;
+            } else {
+                fullChatStableRounds = 0;
+            }
+
+            fullChatLastHeight = height;
+            fullChatLastMessageCount = messageCount;
+
+            if (statusText != null) {
+                String detail = messageCount >= 0
+                        ? " — messaggi caricati: " + messageCount
+                        : "";
+                statusText.setText(
+                        "Luminex: risalgo la chat"
+                                + detail
+                                + " — controllo "
+                                + fullChatAttempts
+                );
+            }
+
+            if (fullChatStableRounds >= 5 || fullChatAttempts >= 180) {
+                finishLoadFullLuminexPage();
+            } else {
+                luminexHandler.postDelayed(
+                        this::stepLoadFullLuminexPage,
+                        1500L
+                );
+            }
+        });
+    }
+
+    private void finishLoadFullLuminexPage() {
+        boolean printAfter = fullChatPrintAfterLoad;
+        WebView loadedView = fullChatWebView;
+
+        fullChatLoading = false;
+        fullChatPrintAfterLoad = false;
+        fullChatWebView = null;
+
+        if (statusText != null) {
+            String detail = fullChatLastMessageCount >= 0
+                    ? " (" + fullChatLastMessageCount + " messaggi rilevati)"
+                    : "";
+            statusText.setText(
+                    "Luminex: pagina caricata fino all'inizio" + detail
+            );
+        }
+
+        if (printAfter && loadedView != null) {
+            luminexHandler.postDelayed(
+                    () -> printLuminexPagePdf(loadedView),
+                    1200L
+            );
+        }
+    }
+
+    private void printLuminexPagePdf(WebView source) {
+        if (source == null) {
+            statusText.setText("Luminex: nessuna pagina da salvare");
+            return;
+        }
+
+        try {
+            String title = source.getTitle();
+
+            if (TextUtils.isEmpty(title)) {
+                title = "Dan Luminex Chat";
+            }
+
+            title = title
+                    .replace('/', '-')
+                    .replace('\\', '-')
+                    .replace(':', '-')
+                    .trim();
+
+            if (title.length() > 80) {
+                title = title.substring(0, 80);
+            }
+
+            PrintManager printManager =
+                    (PrintManager) getSystemService(Context.PRINT_SERVICE);
+
+            if (printManager == null) {
+                statusText.setText("Luminex: servizio di stampa non disponibile");
+                return;
+            }
+
+            PrintDocumentAdapter adapter =
+                    source.createPrintDocumentAdapter(title);
+
+            PrintAttributes attributes =
+                    new PrintAttributes.Builder().build();
+
+            printManager.print(
+                    title,
+                    adapter,
+                    attributes
+            );
+
+            statusText.setText(
+                    "Luminex: scegli Salva come PDF"
+            );
+
+        } catch (Exception error) {
+            android.util.Log.e(
+                    "DanLuminex",
+                    "Stampa PDF non riuscita",
+                    error
+            );
+
+            statusText.setText(
+                    "Luminex: impossibile aprire il salvataggio PDF"
+            );
+        }
     }
 
     private void clickLuminexText(String text) {
