@@ -132,11 +132,12 @@ public class MainActivity extends Activity {
     private final Runnable luminexSnapshotRunnable = new Runnable() {
         @Override
         public void run() {
-            if (!luminexVisible || luminexWebView == null) return;
+            WebView activeLuminex = getActiveLuminexWebView();
+            if (!luminexVisible || activeLuminex == null) return;
 
             if (!luminexSnapshotInFlight) {
                 luminexSnapshotInFlight = true;
-                sendLuminexPageState(luminexWebView, () -> {
+                sendLuminexPageState(activeLuminex, () -> {
                     luminexSnapshotInFlight = false;
                     if (luminexVisible) {
                         luminexHandler.postDelayed(this, LUMINEX_SNAPSHOT_MS);
@@ -385,7 +386,7 @@ public class MainActivity extends Activity {
 
         reload.setOnClickListener(v -> {
             WebView active = luminexVisible
-                    ? luminexWebView
+                    ? getActiveLuminexWebView()
                     : webView;
 
             if (active != null) active.reload();
@@ -442,6 +443,13 @@ public class MainActivity extends Activity {
         });
     }
 
+    private WebView getActiveLuminexWebView() {
+        if (privateVisible && privateWebView != null) {
+            return privateWebView;
+        }
+        return luminexWebView;
+    }
+
     private void togglePrivateSession() {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             Toast.makeText(
@@ -450,6 +458,10 @@ public class MainActivity extends Activity {
                     Toast.LENGTH_LONG
             ).show();
             return;
+        }
+
+        if (!luminexVisible) {
+            setLuminexVisible(true);
         }
 
         if (privateVisible) {
@@ -486,7 +498,25 @@ public class MainActivity extends Activity {
                     WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             );
 
-            privateWebView.setWebViewClient(new WebViewClient());
+            privateWebView.setWebViewClient(new WebViewClient() {
+                @Override
+                public void onPageFinished(WebView view, String url) {
+                    view.postDelayed(
+                            () -> sendLuminexPageState(view),
+                            1200L
+                    );
+
+                    if (!privateVisible || statusText == null) return;
+
+                    String title = view.getTitle();
+                    statusText.setText(
+                            "Luminex PRIVATA — "
+                                    + (TextUtils.isEmpty(title) ? url : title)
+                    );
+                }
+            });
+
+            privateWebView.setVisibility(View.GONE);
 
             webContainer.addView(
                     privateWebView,
@@ -500,13 +530,18 @@ public class MainActivity extends Activity {
         }
 
         privateVisible = true;
+        luminexVisible = true;
 
         if (webView != null) webView.setVisibility(View.GONE);
         if (luminexWebView != null) luminexWebView.setVisibility(View.GONE);
         privateWebView.setVisibility(View.VISIBLE);
 
+        if (luminexButton != null) luminexButton.setText("D");
         privateButton.setText("X");
-        statusText.setText("Privata — profilo separato attivo");
+        statusText.setText("Luminex PRIVATA — profilo separato attivo");
+
+        luminexHandler.removeCallbacks(luminexSnapshotRunnable);
+        luminexHandler.post(luminexSnapshotRunnable);
     }
 
     private void closePrivateSession() {
@@ -531,18 +566,16 @@ public class MainActivity extends Activity {
             ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE);
         } catch (Exception ignored) {}
 
-        if (webView != null) {
-            webView.setVisibility(luminexVisible ? View.GONE : View.VISIBLE);
-        }
+        luminexVisible = true;
+        if (webView != null) webView.setVisibility(View.GONE);
+        if (luminexWebView != null) luminexWebView.setVisibility(View.VISIBLE);
 
-        if (luminexWebView != null) {
-            luminexWebView.setVisibility(
-                    luminexVisible ? View.VISIBLE : View.GONE
-            );
-        }
-
+        if (luminexButton != null) luminexButton.setText("D");
         privateButton.setText("P");
-        statusText.setText("Sessione privata chiusa e dati eliminati");
+        statusText.setText("Luminex AI — sessione normale");
+
+        luminexHandler.removeCallbacks(luminexSnapshotRunnable);
+        luminexHandler.post(luminexSnapshotRunnable);
     }
 
     private void toggleRecordingSounds() {
@@ -2050,10 +2083,10 @@ public class MainActivity extends Activity {
     }
 
     private void toggleLuminexView() {
-        if (luminexVisible && luminexWebView != null) {
-            // Acquisisce la pagina mentre e ancora visibile; la callback di
-            // evaluateJavascript non viene quindi annullata nascondendo la WebView.
-            sendLuminexPageState(luminexWebView, () -> setLuminexVisible(false));
+        WebView activeLuminex = getActiveLuminexWebView();
+
+        if (luminexVisible && activeLuminex != null) {
+            sendLuminexPageState(activeLuminex, () -> setLuminexVisible(false));
             return;
         }
 
@@ -2071,7 +2104,13 @@ public class MainActivity extends Activity {
 
         if (luminexWebView != null) {
             luminexWebView.setVisibility(
-                    luminexVisible ? View.VISIBLE : View.GONE
+                    luminexVisible && !privateVisible ? View.VISIBLE : View.GONE
+            );
+        }
+
+        if (privateWebView != null) {
+            privateWebView.setVisibility(
+                    luminexVisible && privateVisible ? View.VISIBLE : View.GONE
             );
         }
 
@@ -2084,15 +2123,11 @@ public class MainActivity extends Activity {
         if (statusText != null) {
             statusText.setText(
                     luminexVisible
-                            ? "Luminex AI visibile — premi D per tornare a Dan"
-                            : "Dan visibile — Luminex AI resta collegato"
+                            ? (privateVisible
+                                ? "Luminex PRIVATA visibile — premi D per tornare a Dan"
+                                : "Luminex AI visibile — premi D per tornare a Dan")
+                            : "Dan visibile — premi L per aprire Luminex AI"
             );
-        }
-
-        luminexHandler.removeCallbacks(luminexSnapshotRunnable);
-        luminexSnapshotInFlight = false;
-        if (luminexVisible) {
-            luminexHandler.postDelayed(luminexSnapshotRunnable, 1000L);
         }
     }
 
@@ -2236,7 +2271,8 @@ public class MainActivity extends Activity {
             String action,
             String targetUrl
     ) {
-        if (luminexWebView == null) return;
+        WebView activeLuminex = getActiveLuminexWebView();
+        if (activeLuminex == null) return;
 
         switch (action) {
             case "open":
@@ -2247,31 +2283,31 @@ public class MainActivity extends Activity {
                     return;
                 }
 
-                luminexWebView.loadUrl(targetUrl);
+                activeLuminex.loadUrl(targetUrl);
                 break;
 
             case "new-tab":
-                luminexWebView.loadUrl(LUMINEX_HOME);
+                activeLuminex.loadUrl(LUMINEX_HOME);
                 break;
 
             case "back":
-                if (luminexWebView.canGoBack()) {
-                    luminexWebView.goBack();
+                if (activeLuminex.canGoBack()) {
+                    activeLuminex.goBack();
                 }
                 break;
 
             case "forward":
-                if (luminexWebView.canGoForward()) {
-                    luminexWebView.goForward();
+                if (activeLuminex.canGoForward()) {
+                    activeLuminex.goForward();
                 }
                 break;
 
             case "reload":
-                luminexWebView.reload();
+                activeLuminex.reload();
                 break;
 
             case "home":
-                luminexWebView.loadUrl(LUMINEX_HOME);
+                activeLuminex.loadUrl(LUMINEX_HOME);
                 break;
 
             case "click-text":
@@ -2300,7 +2336,8 @@ public class MainActivity extends Activity {
     }
 
     private void clickLuminexText(String text) {
-        if (luminexWebView == null || TextUtils.isEmpty(text)) return;
+        WebView activeLuminex = getActiveLuminexWebView();
+        if (activeLuminex == null || TextUtils.isEmpty(text)) return;
 
         String escaped = text
                 .replace("\\", "\\\\")
@@ -2325,7 +2362,7 @@ public class MainActivity extends Activity {
                 " return 'CLICKED';" +
                 "})()";
 
-        luminexWebView.evaluateJavascript(script, result -> {
+        activeLuminex.evaluateJavascript(script, result -> {
             runOnUiThread(() -> {
                 if (result != null && result.contains("CLICKED")) {
                     statusText.setText("Luminex: clic eseguito su " + text);
@@ -2337,7 +2374,8 @@ public class MainActivity extends Activity {
     }
 
     private void typeLuminexText(String text) {
-        if (luminexWebView == null || TextUtils.isEmpty(text)) return;
+        WebView activeLuminex = getActiveLuminexWebView();
+        if (activeLuminex == null || TextUtils.isEmpty(text)) return;
 
         String escaped = text
                 .replace("\\", "\\\\")
@@ -2364,7 +2402,7 @@ public class MainActivity extends Activity {
                 " return 'TYPED';" +
                 "})()";
 
-        luminexWebView.evaluateJavascript(script, result -> {
+        activeLuminex.evaluateJavascript(script, result -> {
             runOnUiThread(() -> {
                 if (result != null && result.contains("TYPED")) {
                     statusText.setText("Luminex: messaggio preparato — conferma prima di inviare");
@@ -2376,7 +2414,7 @@ public class MainActivity extends Activity {
     }
 
     private void confirmAndSendLuminexMessage() {
-        if (luminexWebView == null) return;
+        if (getActiveLuminexWebView() == null) return;
 
         new AlertDialog.Builder(this)
                 .setTitle("Conferma invio")
@@ -2391,7 +2429,8 @@ public class MainActivity extends Activity {
     }
 
     private void sendPreparedLuminexMessage() {
-        if (luminexWebView == null) return;
+        WebView activeLuminex = getActiveLuminexWebView();
+        if (activeLuminex == null) return;
 
         String script =
                 "(function(){" +
@@ -2410,7 +2449,7 @@ public class MainActivity extends Activity {
                 " return 'SENT';" +
                 "})()";
 
-        luminexWebView.evaluateJavascript(script, result -> {
+        activeLuminex.evaluateJavascript(script, result -> {
             runOnUiThread(() -> {
                 if (result != null && result.contains("SENT")) {
                     statusText.setText("Luminex: messaggio inviato");
@@ -2424,7 +2463,7 @@ public class MainActivity extends Activity {
     }
 
     private void composeLuminexMessage(String recipient, String message) {
-        if (luminexWebView == null
+        if (getActiveLuminexWebView() == null
                 || TextUtils.isEmpty(recipient)
                 || TextUtils.isEmpty(message)) {
             return;
@@ -3378,9 +3417,9 @@ public class MainActivity extends Activity {
     @Override
     public void onBackPressed() {
         if (luminexVisible) {
-            if (luminexWebView != null
-                    && luminexWebView.canGoBack()) {
-                luminexWebView.goBack();
+            WebView activeLuminex = getActiveLuminexWebView();
+            if (activeLuminex != null && activeLuminex.canGoBack()) {
+                activeLuminex.goBack();
             } else {
                 toggleLuminexView();
             }
@@ -3630,6 +3669,21 @@ public class MainActivity extends Activity {
         if (filePathCallback != null) {
             filePathCallback.onReceiveValue(null);
             filePathCallback = null;
+        }
+
+        if (privateWebView != null) {
+            webContainer.removeView(privateWebView);
+            privateWebView.stopLoading();
+            privateWebView.loadUrl("about:blank");
+            privateWebView.clearHistory();
+            privateWebView.clearCache(true);
+            privateWebView.removeAllViews();
+            privateWebView.destroy();
+            privateWebView = null;
+
+            try {
+                ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE);
+            } catch (Exception ignored) {}
         }
 
         if (luminexWebView != null) {
