@@ -2326,6 +2326,22 @@ public class MainActivity extends Activity {
                 activeLuminex.loadUrl(LUMINEX_HOME);
                 break;
 
+            case "open-private":
+                if (!privateVisible) {
+                    openPrivateSession();
+                } else {
+                    setLuminexVisible(true);
+                }
+                break;
+
+            case "close-private":
+                if (privateVisible) {
+                    closePrivateSession();
+                } else {
+                    setLuminexVisible(true);
+                }
+                break;
+
             case "click-text":
                 clickLuminexText(targetUrl);
                 break;
