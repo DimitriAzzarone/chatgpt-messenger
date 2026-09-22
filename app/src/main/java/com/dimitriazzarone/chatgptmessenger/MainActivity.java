@@ -103,9 +103,15 @@ public class MainActivity extends Activity {
     private WebView webView;
     private WebView luminexWebView;
     private WebView privateWebView;
+    private WebView privateWebView2;
     private Button luminexButton;
     private Button privateButton;
-    private static final String PRIVATE_PROFILE = "dan-incognito";
+
+    private static final String PRIVATE_PROFILE_1 = "dan-incognito-1";
+    private static final String PRIVATE_PROFILE_2 = "dan-incognito-2";
+
+    // 0 = principale, 1 = privata 1, 2 = privata 2
+    private int activePrivateSession = 0;
     private boolean privateVisible = false;
     private boolean luminexVisible = false;
     private boolean luminexPolling = false;
@@ -464,17 +470,23 @@ public class MainActivity extends Activity {
     }
 
     private WebView getActiveLuminexWebView() {
-        if (privateVisible && privateWebView != null) {
-            return privateWebView;
+        if (privateVisible) {
+            if (activePrivateSession == 1 && privateWebView != null) {
+                return privateWebView;
+            }
+            if (activePrivateSession == 2 && privateWebView2 != null) {
+                return privateWebView2;
+            }
         }
         return luminexWebView;
     }
+
 
     private void togglePrivateSession() {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             Toast.makeText(
                     this,
-                    "Sessione privata non supportata da questa WebView",
+                    "Sessioni multiple non supportate da questa WebView",
                     Toast.LENGTH_LONG
             ).show();
             return;
@@ -484,20 +496,39 @@ public class MainActivity extends Activity {
             setLuminexVisible(true);
         }
 
-        if (privateVisible) {
-            closePrivateSession();
+        // P cicla: principale -> privata 1 -> privata 2 -> principale
+        if (!privateVisible) {
+            openPrivateSession(1);
+        } else if (activePrivateSession == 1) {
+            openPrivateSession(2);
         } else {
-            openPrivateSession();
+            closePrivateSession();
         }
     }
 
-    private void openPrivateSession() {
-        if (privateWebView == null) {
-            privateWebView = new WebView(this);
-            WebViewCompat.setProfile(privateWebView, PRIVATE_PROFILE);
-            privateWebView.setBackgroundColor(Color.WHITE);
 
-            WebSettings settings = privateWebView.getSettings();
+    private void openPrivateSession() {
+        openPrivateSession(1);
+    }
+
+
+    private void openPrivateSession(int sessionNumber) {
+        if (sessionNumber != 1 && sessionNumber != 2) return;
+
+        WebView target = sessionNumber == 1 ? privateWebView : privateWebView2;
+
+        if (target == null) {
+            final int session = sessionNumber;
+            target = new WebView(this);
+
+            WebViewCompat.setProfile(
+                    target,
+                    session == 1 ? PRIVATE_PROFILE_1 : PRIVATE_PROFILE_2
+            );
+
+            target.setBackgroundColor(Color.WHITE);
+
+            WebSettings settings = target.getSettings();
             settings.setJavaScriptEnabled(true);
             settings.setDomStorageEnabled(true);
             settings.setDatabaseEnabled(true);
@@ -510,58 +541,88 @@ public class MainActivity extends Activity {
             settings.setUseWideViewPort(true);
             settings.setLoadWithOverviewMode(true);
             settings.setUserAgentString(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-                    "AppleWebKit/537.36 (KHTML, like Gecko) " +
-                    "Chrome/140.0.0.0 Safari/537.36"
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    + "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/140.0.0.0 Safari/537.36"
             );
-            settings.setMixedContentMode(
-                    WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-            );
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
 
-            privateWebView.setWebViewClient(new WebViewClient() {
+            CookieManager cookies = CookieManager.getInstance();
+            cookies.setAcceptCookie(true);
+            cookies.setAcceptThirdPartyCookies(target, true);
+
+            target.setWebViewClient(new WebViewClient() {
                 @Override
                 public void onPageFinished(WebView view, String url) {
-                    view.postDelayed(
-                            () -> sendLuminexPageState(view),
-                            1200L
-                    );
+                    if (privateVisible
+                            && activePrivateSession == session
+                            && view == getActiveLuminexWebView()) {
+                        view.postDelayed(() -> sendLuminexPageState(view), 1200L);
+                    }
 
-                    if (!privateVisible || statusText == null) return;
+                    if (!privateVisible
+                            || activePrivateSession != session
+                            || statusText == null) {
+                        return;
+                    }
 
                     String title = view.getTitle();
                     statusText.setText(
-                            "Luminex PRIVATA — "
+                            "Luminex PRIVATA " + session + " — "
                                     + (TextUtils.isEmpty(title) ? url : title)
                     );
                 }
             });
 
-            privateWebView.setVisibility(View.GONE);
+            target.setVisibility(View.GONE);
 
             webContainer.addView(
-                    privateWebView,
+                    target,
                     new FrameLayout.LayoutParams(
                             FrameLayout.LayoutParams.MATCH_PARENT,
                             FrameLayout.LayoutParams.MATCH_PARENT
                     )
             );
 
-            privateWebView.loadUrl(LUMINEX_HOME);
+            if (session == 1) {
+                privateWebView = target;
+            } else {
+                privateWebView2 = target;
+            }
+
+            target.loadUrl(LUMINEX_HOME);
         }
 
+        activePrivateSession = sessionNumber;
         privateVisible = true;
         luminexVisible = true;
 
         if (webView != null) webView.setVisibility(View.GONE);
         if (luminexWebView != null) luminexWebView.setVisibility(View.GONE);
-        privateWebView.setVisibility(View.VISIBLE);
+
+        if (privateWebView != null) {
+            privateWebView.setVisibility(
+                    sessionNumber == 1 ? View.VISIBLE : View.GONE
+            );
+        }
+
+        if (privateWebView2 != null) {
+            privateWebView2.setVisibility(
+                    sessionNumber == 2 ? View.VISIBLE : View.GONE
+            );
+        }
 
         if (luminexButton != null) luminexButton.setText("D");
+
         if (privateButton != null) {
             privateButton.setVisibility(View.VISIBLE);
-            privateButton.setText("X");
+            privateButton.setText(sessionNumber == 1 ? "P1" : "P2");
         }
-        statusText.setText("Luminex PRIVATA — profilo separato attivo");
+
+        statusText.setText(
+                "Luminex PRIVATA " + sessionNumber
+                        + " — profilo separato attivo"
+        );
 
         luminexHandler.removeCallbacks(luminexSnapshotRunnable);
         luminexHandler.post(luminexSnapshotRunnable);
@@ -569,40 +630,27 @@ public class MainActivity extends Activity {
 
     private void closePrivateSession() {
         privateVisible = false;
-
-        if (privateWebView != null) {
-            webContainer.removeView(privateWebView);
-
-            try {
-                privateWebView.stopLoading();
-                privateWebView.loadUrl("about:blank");
-                privateWebView.clearHistory();
-                privateWebView.clearCache(true);
-                privateWebView.removeAllViews();
-                privateWebView.destroy();
-            } catch (Exception ignored) {}
-
-            privateWebView = null;
-        }
-
-        try {
-            ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE);
-        } catch (Exception ignored) {}
-
+        activePrivateSession = 0;
         luminexVisible = true;
+
         if (webView != null) webView.setVisibility(View.GONE);
+        if (privateWebView != null) privateWebView.setVisibility(View.GONE);
+        if (privateWebView2 != null) privateWebView2.setVisibility(View.GONE);
         if (luminexWebView != null) luminexWebView.setVisibility(View.VISIBLE);
 
         if (luminexButton != null) luminexButton.setText("D");
+
         if (privateButton != null) {
             privateButton.setVisibility(View.VISIBLE);
             privateButton.setText("P");
         }
-        statusText.setText("Luminex AI — sessione normale");
+
+        statusText.setText("Luminex AI — sessione principale");
 
         luminexHandler.removeCallbacks(luminexSnapshotRunnable);
         luminexHandler.post(luminexSnapshotRunnable);
     }
+
 
     private void toggleRecordingSounds() {
         recordingSoundsEnabled = !recordingSoundsEnabled;
@@ -2123,9 +2171,7 @@ public class MainActivity extends Activity {
         luminexVisible = visible;
 
         if (webView != null) {
-            webView.setVisibility(
-                    luminexVisible ? View.GONE : View.VISIBLE
-            );
+            webView.setVisibility(luminexVisible ? View.GONE : View.VISIBLE);
         }
 
         if (luminexWebView != null) {
@@ -2136,35 +2182,48 @@ public class MainActivity extends Activity {
 
         if (privateWebView != null) {
             privateWebView.setVisibility(
-                    luminexVisible && privateVisible ? View.VISIBLE : View.GONE
+                    luminexVisible && privateVisible && activePrivateSession == 1
+                            ? View.VISIBLE : View.GONE
+            );
+        }
+
+        if (privateWebView2 != null) {
+            privateWebView2.setVisibility(
+                    luminexVisible && privateVisible && activePrivateSession == 2
+                            ? View.VISIBLE : View.GONE
             );
         }
 
         if (luminexButton != null) {
-            luminexButton.setText(
-                    luminexVisible ? "D" : "L"
-            );
+            luminexButton.setText(luminexVisible ? "D" : "L");
         }
 
         if (privateButton != null) {
-            privateButton.setVisibility(
-                    luminexVisible ? View.VISIBLE : View.GONE
-            );
-            privateButton.setText(
-                    privateVisible ? "X" : "P"
-            );
+            privateButton.setVisibility(luminexVisible ? View.VISIBLE : View.GONE);
+
+            if (!privateVisible) {
+                privateButton.setText("P");
+            } else {
+                privateButton.setText(
+                        activePrivateSession == 1 ? "P1" : "P2"
+                );
+            }
         }
 
         if (statusText != null) {
-            statusText.setText(
-                    luminexVisible
-                            ? (privateVisible
-                                ? "Luminex PRIVATA visibile — premi D per tornare a Dan"
-                                : "Luminex AI visibile — premi D per tornare a Dan")
-                            : "Dan visibile — premi L per aprire Luminex AI"
-            );
+            if (!luminexVisible) {
+                statusText.setText("Dan visibile — premi L per aprire Luminex AI");
+            } else if (!privateVisible) {
+                statusText.setText("Luminex principale — premi D per tornare a Dan");
+            } else {
+                statusText.setText(
+                        "Luminex PRIVATA " + activePrivateSession
+                                + " — premi D per tornare a Dan"
+                );
+            }
         }
     }
+
 
     private void startLuminexPolling() {
         if (TextUtils.isEmpty(
@@ -3941,7 +4000,22 @@ public class MainActivity extends Activity {
             privateWebView = null;
 
             try {
-                ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE);
+                ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE_1);
+            } catch (Exception ignored) {}
+        }
+
+        if (privateWebView2 != null) {
+            webContainer.removeView(privateWebView2);
+            privateWebView2.stopLoading();
+            privateWebView2.loadUrl("about:blank");
+            privateWebView2.clearHistory();
+            privateWebView2.clearCache(true);
+            privateWebView2.removeAllViews();
+            privateWebView2.destroy();
+            privateWebView2 = null;
+
+            try {
+                ProfileStore.getInstance().deleteProfile(PRIVATE_PROFILE_2);
             } catch (Exception ignored) {}
         }
 
