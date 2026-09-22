@@ -318,7 +318,7 @@ public class MainActivity extends Activity {
         topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
         topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(micWidth), dp(44)));
         topBar.addView(luminexButton, new LinearLayout.LayoutParams(dp(luminexWidth), dp(44)));
-        topBar.addView(privateButton, new LinearLayout.LayoutParams(dp(privateWidth), dp(44)));
+
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(reloadWidth), dp(44)));
 
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -326,6 +326,14 @@ public class MainActivity extends Activity {
         progressBar.setVisibility(View.GONE);
 
         webContainer = new FrameLayout(this);
+
+        FrameLayout.LayoutParams privateLp =
+                new FrameLayout.LayoutParams(dp(privateWidth), dp(44));
+        privateLp.gravity = Gravity.TOP | Gravity.END;
+        privateLp.topMargin = dp(8);
+        privateLp.rightMargin = dp(8);
+        webContainer.addView(privateButton, privateLp);
+        privateButton.bringToFront();
 
         LinearLayout bottomBar = new LinearLayout(this);
         bottomBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -3370,6 +3378,7 @@ public class MainActivity extends Activity {
                 " }" +
 
                 " hideOnlyChatGPT();" +
+                "    setInterval(hideOnlyChatGPT,1500);" +
 
                 " const observer=new MutationObserver(function(){" +
                 "  hideOnlyChatGPT();" +
