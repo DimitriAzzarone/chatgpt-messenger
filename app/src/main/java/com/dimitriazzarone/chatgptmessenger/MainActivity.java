@@ -2159,6 +2159,21 @@ public class MainActivity extends Activity {
                     return;
                 }
 
+                if (source == getActiveLuminexWebView()) {
+                    state.put(
+                            "luminexSession",
+                            activeLuminexSessionLabel()
+                    );
+                    state.put(
+                            "luminexTab",
+                            getActiveLuminexTabIndex() + 1
+                    );
+                    state.put(
+                            "luminexTabCount",
+                            getActiveLuminexTabs().size()
+                    );
+                }
+
                 lastLuminexContext = state.toString();
                 syncLuminexContextToChatGpt();
 
@@ -2382,11 +2397,17 @@ public class MainActivity extends Activity {
                     command.optString("action", "");
             String targetUrl =
                     command.optString("url", null);
+            String targetSession =
+                    command.optString("session", "");
+            int targetTab =
+                    command.optInt("tab", 0);
 
             runOnUiThread(
                     () -> executeLuminexCommand(
                             action,
-                            targetUrl
+                            targetUrl,
+                            targetSession,
+                            targetTab
                     )
             );
 
@@ -2439,10 +2460,120 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void selectLuminexTarget(
+            String requestedSession,
+            int requestedTab
+    ) {
+        String session = requestedSession == null
+                ? ""
+                : requestedSession.trim().toUpperCase(Locale.ROOT);
+
+        int sessionNumber;
+
+        if ("MAIN".equals(session)) {
+            sessionNumber = 0;
+            privateVisible = false;
+            activePrivateSession = 0;
+        } else if ("P1".equals(session)) {
+            sessionNumber = 1;
+            privateVisible = true;
+            activePrivateSession = 1;
+        } else if ("P2".equals(session)) {
+            sessionNumber = 2;
+            privateVisible = true;
+            activePrivateSession = 2;
+        } else {
+            sessionNumber = privateVisible ? activePrivateSession : 0;
+        }
+
+        luminexVisible = true;
+
+        if (webView != null) {
+            webView.setVisibility(View.GONE);
+        }
+
+        List<WebView> tabs =
+                sessionNumber == 0
+                        ? luminexTabs
+                        : (sessionNumber == 1
+                            ? privateTabs1
+                            : privateTabs2);
+
+        if (tabs.isEmpty()) {
+            WebView created = createLuminexTabForSession(sessionNumber);
+
+            if (sessionNumber == 1 && privateWebView == null) {
+                privateWebView = created;
+            } else if (sessionNumber == 2 && privateWebView2 == null) {
+                privateWebView2 = created;
+            }
+        }
+
+        int tabNumber = requestedTab > 0 ? requestedTab : 1;
+
+        while (tabs.size() < tabNumber) {
+            createLuminexTabForSession(sessionNumber);
+        }
+
+        int index = Math.max(
+                0,
+                Math.min(tabNumber - 1, tabs.size() - 1)
+        );
+
+        if (sessionNumber == 0) {
+            privateVisible = false;
+            activePrivateSession = 0;
+            luminexTabIndex = index;
+        } else if (sessionNumber == 1) {
+            privateVisible = true;
+            activePrivateSession = 1;
+            privateTabIndex1 = index;
+        } else {
+            privateVisible = true;
+            activePrivateSession = 2;
+            privateTabIndex2 = index;
+        }
+
+        showActiveLuminexTab();
+
+        if (luminexButton != null) {
+            luminexButton.setText("D");
+        }
+
+        if (privateButton != null) {
+            privateButton.setVisibility(View.VISIBLE);
+            privateButton.setText(
+                    sessionNumber == 0
+                            ? "P"
+                            : (sessionNumber == 1 ? "P1" : "P2")
+            );
+        }
+
+        if (statusText != null) {
+            statusText.setText(
+                    "Luminex " + activeLuminexSessionLabel()
+                            + " — scheda "
+                            + (index + 1)
+                            + "/"
+                            + tabs.size()
+            );
+        }
+    }
+
+
     private void executeLuminexCommand(
             String action,
-            String targetUrl
+            String targetUrl,
+            String targetSession,
+            int targetTab
     ) {
+        if (!TextUtils.isEmpty(targetSession) || targetTab > 0) {
+            selectLuminexTarget(
+                    targetSession,
+                    targetTab
+            );
+        }
+
         WebView activeLuminex = getActiveLuminexWebView();
         if (activeLuminex == null) return;
 
