@@ -2779,7 +2779,9 @@ public class MainActivity extends Activity {
                 "    for(const a of ['placeholder','data-placeholder','aria-label']){" +
                 "     const v=f.getAttribute(a);" +
                 "     if(v && v.toLowerCase().includes('chatgpt')){" +
-                "      f.setAttribute(a,'Chiedi a Dan');" +
+                "          const low=v.toLowerCase();"+
+                "          const danText=low.includes('rispondi')?'Rispondi a Dan':'Chiedi a Dan';"+
+                "          f.setAttribute(a,danText);"+
                 "     }" +
                 "    }" +
                 "   }" +
