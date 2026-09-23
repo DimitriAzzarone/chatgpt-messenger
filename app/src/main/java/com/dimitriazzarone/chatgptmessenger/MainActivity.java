@@ -602,9 +602,19 @@ public class MainActivity extends Activity {
                         + "Chrome/140.0.0.0 Safari/537.36"
         );
 
-        CookieManager cookies = CookieManager.getInstance();
+        CookieManager cookies;
+
+        if (session != 0) {
+            cookies = WebViewCompat
+                    .getProfile(tab)
+                    .getCookieManager();
+        } else {
+            cookies = CookieManager.getInstance();
+        }
+
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(tab, true);
+        cookies.flush();
 
         tab.setWebViewClient(new WebViewClient() {
             @Override
@@ -733,6 +743,10 @@ public class MainActivity extends Activity {
 
 
     private void openPrivateSession() {
+        if (webView != null) {
+            updateActiveDanChat(webView.getUrl());
+        }
+
         ChatPrivateState state = getCurrentPrivateState();
 
         privateVisible = true;
@@ -2513,6 +2527,10 @@ public class MainActivity extends Activity {
             String requestedSession,
             int requestedTab
     ) {
+        if (webView != null) {
+            updateActiveDanChat(webView.getUrl());
+        }
+
         String session = requestedSession == null
                 ? ""
                 : requestedSession.trim().toUpperCase(Locale.ROOT);
@@ -3719,12 +3737,33 @@ public class MainActivity extends Activity {
 
             if (path != null) {
                 String[] parts = path.split("/");
+                String conversationId = null;
+                String gptId = null;
 
+                // La conversazione /c/<id> ha sempre la precedenza.
                 for (int i = 0; i < parts.length - 1; i++) {
-                    if ("c".equals(parts[i]) || "g".equals(parts[i])) {
-                        newKey = parts[i] + "_" + parts[i + 1];
+                    if ("c".equals(parts[i])
+                            && !TextUtils.isEmpty(parts[i + 1])) {
+                        conversationId = parts[i + 1];
                         break;
                     }
+                }
+
+                // Solo fallback se non esiste ancora una conversazione.
+                if (conversationId == null) {
+                    for (int i = 0; i < parts.length - 1; i++) {
+                        if ("g".equals(parts[i])
+                                && !TextUtils.isEmpty(parts[i + 1])) {
+                            gptId = parts[i + 1];
+                            break;
+                        }
+                    }
+                }
+
+                if (conversationId != null) {
+                    newKey = "c_" + conversationId;
+                } else if (gptId != null) {
+                    newKey = "g_" + gptId;
                 }
             }
         } catch (Exception ignored) {
@@ -3733,13 +3772,11 @@ public class MainActivity extends Activity {
         if (!newKey.equals(activeDanChatKey)) {
             activeDanChatKey = newKey;
 
-            // Non trascinare il contesto Luminex nella nuova chat Dan.
             lastLuminexContext = "";
             syncLuminexContextToChatGpt();
 
-            // Ogni chat Dan possiede la propria P.
-            // Cambiando chat torniamo alla MAIN senza distruggere
-            // lo stato privato della chat precedente.
+            // Cambiando chat torniamo alla MAIN.
+            // La P della vecchia chat resta memorizzata.
             privateVisible = false;
 
             if (privateButton != null) {
