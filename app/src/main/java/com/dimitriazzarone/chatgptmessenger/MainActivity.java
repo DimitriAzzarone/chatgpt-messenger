@@ -1024,86 +1024,35 @@ public class MainActivity extends Activity {
     }
 
     private void resolveCurrentDanChatAndOpenPrivate() {
-        if (webView == null) return;
+        if (webView == null) {
+            return;
+        }
 
-        String script =
-                "(function(){"
-                + "function fromHref(h){"
-                + " try{"
-                + "  const u=new URL(h,location.origin);"
-                + "  const parts=(u.pathname||'').split('/').filter(Boolean);"
-                + "  const i=parts.indexOf('c');"
-                + "  return (i>=0 && parts[i+1]) ? 'c_'+parts[i+1] : '';"
-                + " }catch(e){return '';}"
-                + "}"
-                + "let k=fromHref(location.href);"
-                + "if(k)return k;"
+        // La WebView di Dan conosce già l'URL reale della conversazione.
+        // Non usiamo più JavaScript/DOM/sidebar per indovinare la chat.
+        String currentUrl = webView.getUrl();
 
-                + "const links=Array.from("
-                + "document.querySelectorAll('a[href*=\"/c/\"]')"
-                + ");"
+        if (!TextUtils.isEmpty(currentUrl)) {
+            updateActiveDanChat(currentUrl);
+        }
 
-                + "let a=links.find(x=>"
-                + " x.getAttribute('aria-current')==='page'"
-                + " || x.getAttribute('data-active')==='true'"
-                + " || x.getAttribute('data-state')==='active'"
-                + ");"
+        if (TextUtils.isEmpty(activeDanChatKey)) {
+            Toast.makeText(
+                    MainActivity.this,
+                    "Apri prima una conversazione Dan dalla cronologia.",
+                    Toast.LENGTH_LONG
+            ).show();
 
-                + "if(!a){"
-                + " a=links.find(x=>{"
-                + "  try{"
-                + "   const r=x.getBoundingClientRect();"
-                + "   const st=getComputedStyle(x);"
-                + "   return r.width>0 && r.height>0"
-                + "    && st.backgroundColor"
-                + "    && st.backgroundColor!=='rgba(0, 0, 0, 0)'"
-                + "    && st.backgroundColor!=='transparent';"
-                + "  }catch(e){return false;}"
-                + " });"
-                + "}"
+            if (statusText != null) {
+                statusText.setText(
+                        "Luminex: nessuna conversazione Dan attiva"
+                );
+            }
 
-                + "if(a){"
-                + " k=fromHref(a.href);"
-                + " if(k)return k;"
-                + "}"
+            return;
+        }
 
-                + "const msg=document.querySelector('[data-message-id]');"
-                + "if(msg){"
-                + " const id=msg.getAttribute('data-message-id')||'';"
-                + " if(id)return 'm_'+id;"
-                + "}"
-
-                + "return '';"
-                + "})()";
-
-        webView.evaluateJavascript(
-                script,
-                value -> {
-                    String key = decodeJavascriptString(value);
-
-                    if (TextUtils.isEmpty(key)) {
-                        activeDanChatKey = "";
-
-                        Toast.makeText(
-                                MainActivity.this,
-                                "Impossibile identificare questa chat Dan. "
-                                        + "Riaprila dalla cronologia e riprova.",
-                                Toast.LENGTH_LONG
-                        ).show();
-
-                        if (statusText != null) {
-                            statusText.setText(
-                                    "Luminex: chat Dan non identificata"
-                            );
-                        }
-
-                        return;
-                    }
-
-                    activeDanChatKey = key;
-                    openPrivateSessionResolved();
-                }
-        );
+        openPrivateSessionResolved();
     }
 
 
