@@ -208,7 +208,7 @@ public class MainActivity extends Activity {
     private float touchStartY = 0f;
     private float ttsSpeed = 1.0f;
     private String lastUrl = HOME;
-    private String activeDanChatKey = "home";
+    private String activeDanChatKey = "";
 
     private TextToSpeech tts;
     private boolean ttsReady = false;
@@ -496,7 +496,13 @@ public class MainActivity extends Activity {
 
 
     private String privateProfileNameForChat(String chatKey) {
-        String key = TextUtils.isEmpty(chatKey) ? "home" : chatKey;
+        if (TextUtils.isEmpty(chatKey)) {
+            throw new IllegalStateException(
+                    "Chat Dan non identificata"
+            );
+        }
+
+        String key = chatKey;
         String safe = key.replaceAll("[^A-Za-z0-9_-]", "_");
 
         if (safe.length() > 90) {
@@ -507,9 +513,13 @@ public class MainActivity extends Activity {
     }
 
     private ChatPrivateState getCurrentPrivateState() {
-        String key = TextUtils.isEmpty(activeDanChatKey)
-                ? "home"
-                : activeDanChatKey;
+        if (TextUtils.isEmpty(activeDanChatKey)) {
+            throw new IllegalStateException(
+                    "Chat Dan non identificata"
+            );
+        }
+
+        String key = activeDanChatKey;
 
         ChatPrivateState state = privateChats.get(key);
 
@@ -742,11 +752,115 @@ public class MainActivity extends Activity {
     }
 
 
-    private void openPrivateSession() {
-        if (webView != null) {
-            updateActiveDanChat(webView.getUrl());
+    private String decodeJavascriptString(String value) {
+        if (value == null) return "";
+
+        String v = value.trim();
+
+        if ("null".equals(v) || "undefined".equals(v)) {
+            return "";
         }
 
+        if (v.length() >= 2
+                && v.startsWith("\"")
+                && v.endsWith("\"")) {
+
+            v = v.substring(1, v.length() - 1);
+            v = v.replace("\\\"", "\"");
+            v = v.replace("\\\\", "\\");
+        }
+
+        return v.trim();
+    }
+
+    private void resolveCurrentDanChatAndOpenPrivate() {
+        if (webView == null) return;
+
+        String script =
+                "(function(){"
+                + "function fromHref(h){"
+                + " try{"
+                + "  const u=new URL(h,location.origin);"
+                + "  const m=(u.pathname||'').match(/\\\\/c\\\\/([^\\\\/?#]+)/);"
+                + "  return m?'c_'+m[1]:'';"
+                + " }catch(e){return '';}"
+                + "}"
+                + "let k=fromHref(location.href);"
+                + "if(k)return k;"
+
+                + "const links=Array.from("
+                + "document.querySelectorAll('a[href*=\"/c/\"]')"
+                + ");"
+
+                + "let a=links.find(x=>"
+                + " x.getAttribute('aria-current')==='page'"
+                + " || x.getAttribute('data-active')==='true'"
+                + " || x.getAttribute('data-state')==='active'"
+                + ");"
+
+                + "if(!a){"
+                + " a=links.find(x=>{"
+                + "  try{"
+                + "   const r=x.getBoundingClientRect();"
+                + "   const st=getComputedStyle(x);"
+                + "   return r.width>0 && r.height>0"
+                + "    && st.backgroundColor"
+                + "    && st.backgroundColor!=='rgba(0, 0, 0, 0)'"
+                + "    && st.backgroundColor!=='transparent';"
+                + "  }catch(e){return false;}"
+                + " });"
+                + "}"
+
+                + "if(a){"
+                + " k=fromHref(a.href);"
+                + " if(k)return k;"
+                + "}"
+
+                + "const msg=document.querySelector('[data-message-id]');"
+                + "if(msg){"
+                + " const id=msg.getAttribute('data-message-id')||'';"
+                + " if(id)return 'm_'+id;"
+                + "}"
+
+                + "return '';"
+                + "})()";
+
+        webView.evaluateJavascript(
+                script,
+                value -> {
+                    String key = decodeJavascriptString(value);
+
+                    if (TextUtils.isEmpty(key)) {
+                        activeDanChatKey = "";
+
+                        Toast.makeText(
+                                MainActivity.this,
+                                "Impossibile identificare questa chat Dan. "
+                                        + "Riaprila dalla cronologia e riprova.",
+                                Toast.LENGTH_LONG
+                        ).show();
+
+                        if (statusText != null) {
+                            statusText.setText(
+                                    "Luminex: chat Dan non identificata"
+                            );
+                        }
+
+                        return;
+                    }
+
+                    activeDanChatKey = key;
+                    openPrivateSessionResolved();
+                }
+        );
+    }
+
+
+    private void openPrivateSession() {
+        resolveCurrentDanChatAndOpenPrivate();
+    }
+
+    private void openPrivateSessionResolved() {
         ChatPrivateState state = getCurrentPrivateState();
 
         privateVisible = true;
@@ -2542,6 +2656,15 @@ public class MainActivity extends Activity {
                         || "P1".equals(session)
                         || "P2".equals(session)
         ) {
+            if (TextUtils.isEmpty(activeDanChatKey)) {
+                if (statusText != null) {
+                    statusText.setText(
+                            "Luminex: nessuna chat Dan identificata"
+                    );
+                }
+                return;
+            }
+
             privateVisible = true;
         }
 
@@ -3727,9 +3850,9 @@ public class MainActivity extends Activity {
     }
 
     private void updateActiveDanChat(String url) {
-        if (url == null) return;
+        if (TextUtils.isEmpty(url)) return;
 
-        String newKey = "home";
+        String newKey = "";
 
         try {
             Uri uri = Uri.parse(url);
@@ -3737,36 +3860,20 @@ public class MainActivity extends Activity {
 
             if (path != null) {
                 String[] parts = path.split("/");
-                String conversationId = null;
-                String gptId = null;
 
-                // La conversazione /c/<id> ha sempre la precedenza.
                 for (int i = 0; i < parts.length - 1; i++) {
                     if ("c".equals(parts[i])
                             && !TextUtils.isEmpty(parts[i + 1])) {
-                        conversationId = parts[i + 1];
+                        newKey = "c_" + parts[i + 1];
                         break;
                     }
                 }
-
-                // Solo fallback se non esiste ancora una conversazione.
-                if (conversationId == null) {
-                    for (int i = 0; i < parts.length - 1; i++) {
-                        if ("g".equals(parts[i])
-                                && !TextUtils.isEmpty(parts[i + 1])) {
-                            gptId = parts[i + 1];
-                            break;
-                        }
-                    }
-                }
-
-                if (conversationId != null) {
-                    newKey = "c_" + conversationId;
-                } else if (gptId != null) {
-                    newKey = "g_" + gptId;
-                }
             }
         } catch (Exception ignored) {
+        }
+
+        if (TextUtils.isEmpty(newKey)) {
+            return;
         }
 
         if (!newKey.equals(activeDanChatKey)) {
@@ -3775,8 +3882,6 @@ public class MainActivity extends Activity {
             lastLuminexContext = "";
             syncLuminexContextToChatGpt();
 
-            // Cambiando chat torniamo alla MAIN.
-            // La P della vecchia chat resta memorizzata.
             privateVisible = false;
 
             if (privateButton != null) {
