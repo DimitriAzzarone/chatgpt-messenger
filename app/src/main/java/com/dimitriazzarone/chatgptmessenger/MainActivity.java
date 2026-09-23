@@ -209,7 +209,6 @@ public class MainActivity extends Activity {
     private float ttsSpeed = 1.0f;
     private String lastUrl = HOME;
     private String activeDanChatKey = "home";
-    private String activeDanChatKey = "home";
 
     private TextToSpeech tts;
     private boolean ttsReady = false;
@@ -3482,15 +3481,6 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void danChatChanged(String url) {
             if (url == null) return;
-
-            runOnUiThread(() -> {
-                updateActiveDanChat(url);
-            });
-        }
-
-        @JavascriptInterface
-        public void danChatChanged(String url) {
-            if (url == null) return;
             runOnUiThread(() -> updateActiveDanChat(url));
         }
 
@@ -3714,71 +3704,6 @@ public class MainActivity extends Activity {
                 "  attributeFilter:['placeholder','data-placeholder','aria-label']" +
                 " });" +
                 "})();";
-
-        webView.evaluateJavascript(script, null);
-    }
-
-    private void updateActiveDanChat(String url) {
-        if (url == null) return;
-
-        try {
-            Uri uri = Uri.parse(url);
-            String path = uri.getPath();
-
-            if (path == null) return;
-
-            String[] parts = path.split("/");
-
-            for (int i = 0; i < parts.length - 1; i++) {
-                if ("c".equals(parts[i]) || "g".equals(parts[i])) {
-                    String key = parts[i] + "_" + parts[i + 1];
-
-                    if (!TextUtils.isEmpty(key)) {
-                        activeDanChatKey = key;
-                    }
-                    return;
-                }
-            }
-
-            activeDanChatKey = "home";
-
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void injectDanChatWatcher() {
-        if (webView == null) return;
-
-        String script =
-                "(function(){"
-                + " if(window.__danChatWatcherInstalled)return;"
-                + " window.__danChatWatcherInstalled=true;"
-                + " let last='';"
-                + " function send(){"
-                + "  const u=location.href||'';"
-                + "  if(u===last)return;"
-                + "  last=u;"
-                + "  try{"
-                + "   if(window.AndroidRadio&&window.AndroidRadio.danChatChanged)"
-                + "    window.AndroidRadio.danChatChanged(u);"
-                + "  }catch(e){}"
-                + " }"
-                + " const push=history.pushState;"
-                + " history.pushState=function(){"
-                + "  const r=push.apply(this,arguments);"
-                + "  setTimeout(send,0);"
-                + "  return r;"
-                + " };"
-                + " const replace=history.replaceState;"
-                + " history.replaceState=function(){"
-                + "  const r=replace.apply(this,arguments);"
-                + "  setTimeout(send,0);"
-                + "  return r;"
-                + " };"
-                + " window.addEventListener('popstate',send);"
-                + " setInterval(send,700);"
-                + " send();"
-                + "})();";
 
         webView.evaluateJavascript(script, null);
     }
