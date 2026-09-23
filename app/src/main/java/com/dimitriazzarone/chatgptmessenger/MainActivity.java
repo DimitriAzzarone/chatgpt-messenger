@@ -77,6 +77,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Set;
 
@@ -102,25 +104,28 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private WebView luminexWebView;
-    private WebView privateWebView;
-    private WebView privateWebView2;
-    private Button luminexButton;
+     private Button luminexButton;
     private Button privateButton;
 
-    private static final String PRIVATE_PROFILE_1 = "dan-incognito-1";
-    private static final String PRIVATE_PROFILE_2 = "dan-incognito-2";
+    private static class ChatPrivateState {
+        final String profileName;
+        final List<WebView> tabs = new ArrayList<>();
+        int tabIndex = 0;
 
-    // 0 = principale, 1 = privata 1, 2 = privata 2
-    private int activePrivateSession = 0;
+        ChatPrivateState(String profileName) {
+            this.profileName = profileName;
+        }
+    }
+
     private boolean privateVisible = false;
     private boolean luminexVisible = false;
 
     private final List<WebView> luminexTabs = new ArrayList<>();
-    private final List<WebView> privateTabs1 = new ArrayList<>();
-    private final List<WebView> privateTabs2 = new ArrayList<>();
     private int luminexTabIndex = 0;
-    private int privateTabIndex1 = 0;
-    private int privateTabIndex2 = 0;
+
+    // Ogni chat Dan possiede la propria P e le proprie schede.
+    private final Map<String, ChatPrivateState> privateChats =
+            new HashMap<>();
     private boolean luminexPolling = false;
     private boolean luminexSnapshotInFlight = false;
     private String lastLuminexContext = "";
@@ -203,6 +208,8 @@ public class MainActivity extends Activity {
     private float touchStartY = 0f;
     private float ttsSpeed = 1.0f;
     private String lastUrl = HOME;
+    private String activeDanChatKey = "home";
+    private String activeDanChatKey = "home";
 
     private TextToSpeech tts;
     private boolean ttsReady = false;
@@ -489,35 +496,67 @@ public class MainActivity extends Activity {
 
 
 
+    private String privateProfileNameForChat(String chatKey) {
+        String key = TextUtils.isEmpty(chatKey) ? "home" : chatKey;
+        String safe = key.replaceAll("[^A-Za-z0-9_-]", "_");
+
+        if (safe.length() > 90) {
+            safe = safe.substring(0, 90);
+        }
+
+        return "dan-chat-" + safe;
+    }
+
+    private ChatPrivateState getCurrentPrivateState() {
+        String key = TextUtils.isEmpty(activeDanChatKey)
+                ? "home"
+                : activeDanChatKey;
+
+        ChatPrivateState state = privateChats.get(key);
+
+        if (state == null) {
+            state = new ChatPrivateState(
+                    privateProfileNameForChat(key)
+            );
+            privateChats.put(key, state);
+        }
+
+        return state;
+    }
+
+
     private List<WebView> getActiveLuminexTabs() {
         if (!privateVisible) return luminexTabs;
-        return activePrivateSession == 2 ? privateTabs2 : privateTabs1;
+        return getCurrentPrivateState().tabs;
     }
 
     private int getActiveLuminexTabIndex() {
         if (!privateVisible) return luminexTabIndex;
-        return activePrivateSession == 2 ? privateTabIndex2 : privateTabIndex1;
+        return getCurrentPrivateState().tabIndex;
     }
 
     private void setActiveLuminexTabIndex(int index) {
         if (!privateVisible) {
             luminexTabIndex = index;
-        } else if (activePrivateSession == 2) {
-            privateTabIndex2 = index;
         } else {
-            privateTabIndex1 = index;
+            getCurrentPrivateState().tabIndex = index;
         }
     }
 
     private String activeLuminexSessionLabel() {
-        if (!privateVisible) return "MAIN";
-        return activePrivateSession == 2 ? "P2" : "P1";
+        return privateVisible ? "P" : "MAIN";
     }
 
     private void hideAllLuminexTabs() {
-        for (WebView tab : luminexTabs) if (tab != null) tab.setVisibility(View.GONE);
-        for (WebView tab : privateTabs1) if (tab != null) tab.setVisibility(View.GONE);
-        for (WebView tab : privateTabs2) if (tab != null) tab.setVisibility(View.GONE);
+        for (WebView tab : luminexTabs) {
+            if (tab != null) tab.setVisibility(View.GONE);
+        }
+
+        for (ChatPrivateState state : privateChats.values()) {
+            for (WebView tab : state.tabs) {
+                if (tab != null) tab.setVisibility(View.GONE);
+            }
+        }
     }
 
     private void showActiveLuminexTab() {
@@ -537,10 +576,11 @@ public class MainActivity extends Activity {
     private WebView createLuminexTabForSession(int session) {
         WebView tab = new WebView(this);
 
-        if (session == 1) {
-            WebViewCompat.setProfile(tab, PRIVATE_PROFILE_1);
-        } else if (session == 2) {
-            WebViewCompat.setProfile(tab, PRIVATE_PROFILE_2);
+        if (session != 0) {
+            WebViewCompat.setProfile(
+                    tab,
+                    getCurrentPrivateState().profileName
+            );
         }
 
         tab.setBackgroundColor(Color.WHITE);
@@ -593,14 +633,20 @@ public class MainActivity extends Activity {
         );
 
         List<WebView> tabs;
-        if (session == 0) tabs = luminexTabs;
-        else if (session == 1) tabs = privateTabs1;
-        else tabs = privateTabs2;
+
+        if (session == 0) {
+            tabs = luminexTabs;
+        } else {
+            tabs = getCurrentPrivateState().tabs;
+        }
 
         tabs.add(tab);
-        if (session == 0) luminexTabIndex = tabs.size() - 1;
-        else if (session == 1) privateTabIndex1 = tabs.size() - 1;
-        else privateTabIndex2 = tabs.size() - 1;
+
+        if (session == 0) {
+            luminexTabIndex = tabs.size() - 1;
+        } else {
+            getCurrentPrivateState().tabIndex = tabs.size() - 1;
+        }
 
         tab.loadUrl(LUMINEX_HOME);
         showActiveLuminexTab();
@@ -608,7 +654,7 @@ public class MainActivity extends Activity {
     }
 
     private void newLuminexTab() {
-        int session = privateVisible ? activePrivateSession : 0;
+        int session = privateVisible ? 1 : 0;
         createLuminexTabForSession(session);
         statusText.setText(
                 "Luminex " + activeLuminexSessionLabel()
@@ -664,7 +710,9 @@ public class MainActivity extends Activity {
     }
 
     private void togglePrivateSession() {
-        if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
+        if (!WebViewFeature.isFeatureSupported(
+                WebViewFeature.MULTI_PROFILE
+        )) {
             Toast.makeText(
                     this,
                     "Sessioni multiple non supportate da questa WebView",
@@ -677,52 +725,45 @@ public class MainActivity extends Activity {
             setLuminexVisible(true);
         }
 
-        // P cicla: principale -> privata 1 -> privata 2 -> principale
-        if (!privateVisible) {
-            openPrivateSession(1);
-        } else if (activePrivateSession == 1) {
-            openPrivateSession(2);
-        } else {
+        if (privateVisible) {
             closePrivateSession();
+        } else {
+            openPrivateSession();
         }
     }
 
 
     private void openPrivateSession() {
-        openPrivateSession(1);
-    }
+        ChatPrivateState state = getCurrentPrivateState();
 
+        privateVisible = true;
 
-    private void openPrivateSession(int sessionNumber) {
-        if (sessionNumber != 1 && sessionNumber != 2) return;
-
-        List<WebView> tabs = sessionNumber == 1 ? privateTabs1 : privateTabs2;
-        if (tabs.isEmpty()) {
-            activePrivateSession = sessionNumber;
-            privateVisible = true;
-            createLuminexTabForSession(sessionNumber);
-            WebView first = getActiveLuminexWebView();
-            if (sessionNumber == 1) privateWebView = first;
-            else privateWebView2 = first;
-        } else {
-            activePrivateSession = sessionNumber;
-            privateVisible = true;
+        if (state.tabs.isEmpty()) {
+            createLuminexTabForSession(1);
         }
 
         luminexVisible = true;
-        if (webView != null) webView.setVisibility(View.GONE);
+
+        if (webView != null) {
+            webView.setVisibility(View.GONE);
+        }
+
         showActiveLuminexTab();
 
-        if (luminexButton != null) luminexButton.setText("D");
+        if (luminexButton != null) {
+            luminexButton.setText("D");
+        }
+
         if (privateButton != null) {
             privateButton.setVisibility(View.VISIBLE);
-            privateButton.setText(sessionNumber == 1 ? "P1" : "P2");
+            privateButton.setText("P");
         }
 
         statusText.setText(
-                "Luminex " + activeLuminexSessionLabel()
-                        + " — scheda " + (getActiveLuminexTabIndex() + 1)
-                        + "/" + getActiveLuminexTabs().size()
+                "Luminex P — scheda "
+                        + (getActiveLuminexTabIndex() + 1)
+                        + "/"
+                        + getActiveLuminexTabs().size()
         );
 
         luminexHandler.removeCallbacks(luminexSnapshotRunnable);
@@ -730,9 +771,13 @@ public class MainActivity extends Activity {
     }
 
 
+    private void openPrivateSession(int ignoredSessionNumber) {
+        openPrivateSession();
+    }
+
+
     private void closePrivateSession() {
         privateVisible = false;
-        activePrivateSession = 0;
         luminexVisible = true;
         if (webView != null) webView.setVisibility(View.GONE);
         showActiveLuminexTab();
@@ -2302,9 +2347,10 @@ public class MainActivity extends Activity {
         if (luminexButton != null) luminexButton.setText(luminexVisible ? "D" : "L");
 
         if (privateButton != null) {
-            privateButton.setVisibility(luminexVisible ? View.VISIBLE : View.GONE);
-            if (!privateVisible) privateButton.setText("P");
-            else privateButton.setText(activePrivateSession == 1 ? "P1" : "P2");
+            privateButton.setVisibility(
+                    luminexVisible ? View.VISIBLE : View.GONE
+            );
+            privateButton.setText("P");
         }
 
         if (statusText != null) {
@@ -2472,22 +2518,14 @@ public class MainActivity extends Activity {
                 ? ""
                 : requestedSession.trim().toUpperCase(Locale.ROOT);
 
-        int sessionNumber;
-
         if ("MAIN".equals(session)) {
-            sessionNumber = 0;
             privateVisible = false;
-            activePrivateSession = 0;
-        } else if ("P1".equals(session)) {
-            sessionNumber = 1;
+        } else if (
+                "P".equals(session)
+                        || "P1".equals(session)
+                        || "P2".equals(session)
+        ) {
             privateVisible = true;
-            activePrivateSession = 1;
-        } else if ("P2".equals(session)) {
-            sessionNumber = 2;
-            privateVisible = true;
-            activePrivateSession = 2;
-        } else {
-            sessionNumber = privateVisible ? activePrivateSession : 0;
         }
 
         luminexVisible = true;
@@ -2496,27 +2534,24 @@ public class MainActivity extends Activity {
             webView.setVisibility(View.GONE);
         }
 
-        List<WebView> tabs =
-                sessionNumber == 0
-                        ? luminexTabs
-                        : (sessionNumber == 1
-                            ? privateTabs1
-                            : privateTabs2);
+        List<WebView> tabs = getActiveLuminexTabs();
 
         if (tabs.isEmpty()) {
-            WebView created = createLuminexTabForSession(sessionNumber);
-
-            if (sessionNumber == 1 && privateWebView == null) {
-                privateWebView = created;
-            } else if (sessionNumber == 2 && privateWebView2 == null) {
-                privateWebView2 = created;
-            }
+            createLuminexTabForSession(
+                    privateVisible ? 1 : 0
+            );
+            tabs = getActiveLuminexTabs();
         }
 
-        int tabNumber = requestedTab > 0 ? requestedTab : 1;
+        int tabNumber = requestedTab > 0
+                ? requestedTab
+                : 1;
 
         while (tabs.size() < tabNumber) {
-            createLuminexTabForSession(sessionNumber);
+            createLuminexTabForSession(
+                    privateVisible ? 1 : 0
+            );
+            tabs = getActiveLuminexTabs();
         }
 
         int index = Math.max(
@@ -2524,20 +2559,7 @@ public class MainActivity extends Activity {
                 Math.min(tabNumber - 1, tabs.size() - 1)
         );
 
-        if (sessionNumber == 0) {
-            privateVisible = false;
-            activePrivateSession = 0;
-            luminexTabIndex = index;
-        } else if (sessionNumber == 1) {
-            privateVisible = true;
-            activePrivateSession = 1;
-            privateTabIndex1 = index;
-        } else {
-            privateVisible = true;
-            activePrivateSession = 2;
-            privateTabIndex2 = index;
-        }
-
+        setActiveLuminexTabIndex(index);
         showActiveLuminexTab();
 
         if (luminexButton != null) {
@@ -2546,16 +2568,13 @@ public class MainActivity extends Activity {
 
         if (privateButton != null) {
             privateButton.setVisibility(View.VISIBLE);
-            privateButton.setText(
-                    sessionNumber == 0
-                            ? "P"
-                            : (sessionNumber == 1 ? "P1" : "P2")
-            );
+            privateButton.setText("P");
         }
 
         if (statusText != null) {
             statusText.setText(
-                    "Luminex " + activeLuminexSessionLabel()
+                    "Luminex "
+                            + activeLuminexSessionLabel()
                             + " — scheda "
                             + (index + 1)
                             + "/"
@@ -3368,11 +3387,13 @@ public class MainActivity extends Activity {
                     android.graphics.Bitmap favicon
             ) {
                 lastUrl = url;
+                updateActiveDanChat(url);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 lastUrl = url;
+                updateActiveDanChat(url);
                 injectPageBehaviors();
                 try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
             }
@@ -3456,6 +3477,21 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void nativeReadStarted() {
             runOnUiThread(() -> statusText.setText("🔊 Voce ChatGPT…"));
+        }
+
+        @JavascriptInterface
+        public void danChatChanged(String url) {
+            if (url == null) return;
+
+            runOnUiThread(() -> {
+                updateActiveDanChat(url);
+            });
+        }
+
+        @JavascriptInterface
+        public void danChatChanged(String url) {
+            if (url == null) return;
+            runOnUiThread(() -> updateActiveDanChat(url));
         }
 
         @JavascriptInterface
@@ -3682,7 +3718,150 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(script, null);
     }
 
+    private void updateActiveDanChat(String url) {
+        if (url == null) return;
+
+        try {
+            Uri uri = Uri.parse(url);
+            String path = uri.getPath();
+
+            if (path == null) return;
+
+            String[] parts = path.split("/");
+
+            for (int i = 0; i < parts.length - 1; i++) {
+                if ("c".equals(parts[i]) || "g".equals(parts[i])) {
+                    String key = parts[i] + "_" + parts[i + 1];
+
+                    if (!TextUtils.isEmpty(key)) {
+                        activeDanChatKey = key;
+                    }
+                    return;
+                }
+            }
+
+            activeDanChatKey = "home";
+
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void injectDanChatWatcher() {
+        if (webView == null) return;
+
+        String script =
+                "(function(){"
+                + " if(window.__danChatWatcherInstalled)return;"
+                + " window.__danChatWatcherInstalled=true;"
+                + " let last='';"
+                + " function send(){"
+                + "  const u=location.href||'';"
+                + "  if(u===last)return;"
+                + "  last=u;"
+                + "  try{"
+                + "   if(window.AndroidRadio&&window.AndroidRadio.danChatChanged)"
+                + "    window.AndroidRadio.danChatChanged(u);"
+                + "  }catch(e){}"
+                + " }"
+                + " const push=history.pushState;"
+                + " history.pushState=function(){"
+                + "  const r=push.apply(this,arguments);"
+                + "  setTimeout(send,0);"
+                + "  return r;"
+                + " };"
+                + " const replace=history.replaceState;"
+                + " history.replaceState=function(){"
+                + "  const r=replace.apply(this,arguments);"
+                + "  setTimeout(send,0);"
+                + "  return r;"
+                + " };"
+                + " window.addEventListener('popstate',send);"
+                + " setInterval(send,700);"
+                + " send();"
+                + "})();";
+
+        webView.evaluateJavascript(script, null);
+    }
+
+    private void updateActiveDanChat(String url) {
+        if (url == null) return;
+
+        String newKey = "home";
+
+        try {
+            Uri uri = Uri.parse(url);
+            String path = uri.getPath();
+
+            if (path != null) {
+                String[] parts = path.split("/");
+
+                for (int i = 0; i < parts.length - 1; i++) {
+                    if ("c".equals(parts[i]) || "g".equals(parts[i])) {
+                        newKey = parts[i] + "_" + parts[i + 1];
+                        break;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        if (!newKey.equals(activeDanChatKey)) {
+            activeDanChatKey = newKey;
+
+            // Non trascinare il contesto Luminex nella nuova chat Dan.
+            lastLuminexContext = "";
+            syncLuminexContextToChatGpt();
+
+            // Ogni chat Dan possiede la propria P.
+            // Cambiando chat torniamo alla MAIN senza distruggere
+            // lo stato privato della chat precedente.
+            privateVisible = false;
+
+            if (privateButton != null) {
+                privateButton.setText("P");
+            }
+        }
+    }
+
+    private void injectDanChatWatcher() {
+        if (webView == null) return;
+
+        String script =
+                "(function(){"
+                + "if(window.__danChatWatcherInstalled)return;"
+                + "window.__danChatWatcherInstalled=true;"
+                + "let last='';"
+                + "function send(){"
+                + " const u=location.href||'';"
+                + " if(u===last)return;"
+                + " last=u;"
+                + " try{"
+                + "  if(window.AndroidRadio&&window.AndroidRadio.danChatChanged)"
+                + "   window.AndroidRadio.danChatChanged(u);"
+                + " }catch(e){}"
+                + "}"
+                + "const oldPush=history.pushState;"
+                + "history.pushState=function(){"
+                + " const r=oldPush.apply(this,arguments);"
+                + " setTimeout(send,0);"
+                + " return r;"
+                + "};"
+                + "const oldReplace=history.replaceState;"
+                + "history.replaceState=function(){"
+                + " const r=oldReplace.apply(this,arguments);"
+                + " setTimeout(send,0);"
+                + " return r;"
+                + "};"
+                + "window.addEventListener('popstate',send);"
+                + "setInterval(send,700);"
+                + "send();"
+                + "})();";
+
+        webView.evaluateJavascript(script, null);
+    }
+
     private void injectPageBehaviors() {
+        injectDanChatWatcher();
         injectDanBranding();
         injectEnterToSend();
         injectManualLuminexContext();
@@ -4227,55 +4406,27 @@ public class MainActivity extends Activity {
         }
         luminexTabs.clear();
 
-        for (WebView tab : new ArrayList<>(privateTabs1)) {
-            if (tab == null || tab == privateWebView) continue;
-            try {
-                webContainer.removeView(tab);
-                tab.stopLoading();
-                tab.loadUrl("about:blank");
-                tab.clearHistory();
-                tab.removeAllViews();
-                tab.destroy();
-            } catch (Exception ignored) {}
-        }
-        privateTabs1.clear();
+        for (ChatPrivateState state :
+                new ArrayList<>(privateChats.values())) {
 
-        for (WebView tab : new ArrayList<>(privateTabs2)) {
-            if (tab == null || tab == privateWebView2) continue;
-            try {
-                webContainer.removeView(tab);
-                tab.stopLoading();
-                tab.loadUrl("about:blank");
-                tab.clearHistory();
-                tab.removeAllViews();
-                tab.destroy();
-            } catch (Exception ignored) {}
-        }
-        privateTabs2.clear();
+            for (WebView tab : new ArrayList<>(state.tabs)) {
+                if (tab == null) continue;
 
-        if (privateWebView != null) {
-            webContainer.removeView(privateWebView);
-            privateWebView.stopLoading();
-            privateWebView.loadUrl("about:blank");
-            privateWebView.clearHistory();
-            privateWebView.clearCache(true);
-            privateWebView.removeAllViews();
-            privateWebView.destroy();
-            privateWebView = null;
+                try {
+                    webContainer.removeView(tab);
+                    tab.stopLoading();
+                    tab.loadUrl("about:blank");
+                    tab.clearHistory();
+                    tab.removeAllViews();
+                    tab.destroy();
+                } catch (Exception ignored) {
+                }
+            }
 
+            state.tabs.clear();
         }
 
-        if (privateWebView2 != null) {
-            webContainer.removeView(privateWebView2);
-            privateWebView2.stopLoading();
-            privateWebView2.loadUrl("about:blank");
-            privateWebView2.clearHistory();
-            privateWebView2.clearCache(true);
-            privateWebView2.removeAllViews();
-            privateWebView2.destroy();
-            privateWebView2 = null;
-
-        }
+        privateChats.clear();
 
         if (luminexWebView != null) {
             webContainer.removeView(luminexWebView);
