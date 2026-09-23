@@ -3023,6 +3023,22 @@ public class MainActivity extends Activity {
                 loadFullLuminexPage(true);
                 return;
 
+            case "scroll-up":
+                scrollLuminex("up");
+                return;
+
+            case "scroll-down":
+                scrollLuminex("down");
+                return;
+
+            case "scroll-top":
+                scrollLuminex("top");
+                return;
+
+            case "scroll-bottom":
+                scrollLuminex("bottom");
+                return;
+
             case "click-text":
                 clickLuminexText(targetUrl);
                 break;
@@ -3047,6 +3063,175 @@ public class MainActivity extends Activity {
                 "Luminex AI ha eseguito: " + action
         );
     }
+
+    private void scrollLuminex(String direction) {
+        WebView active = getActiveLuminexWebView();
+
+        if (active == null) {
+            if (statusText != null) {
+                statusText.setText(
+                        "Luminex: nessuna pagina attiva"
+                );
+            }
+            return;
+        }
+
+        String safeDirection =
+                direction == null
+                        ? ""
+                        : direction.trim().toLowerCase(Locale.ROOT);
+
+        String script =
+                "(function(){"
+                + " const dir='" + safeDirection + "';"
+                + " const all=["
+                + "   document.scrollingElement,"
+                + "   document.documentElement,"
+                + "   document.body"
+                + " ].concat(Array.from(document.querySelectorAll('*')))"
+                + "  .filter(Boolean);"
+
+                + " let best=null;"
+                + " let bestScore=-1;"
+
+                + " for(const e of all){"
+                + "  try{"
+                + "   const sh=e.scrollHeight||0;"
+                + "   const ch=e.clientHeight||0;"
+                + "   const overflow=sh-ch;"
+                + "   if(overflow<=80)continue;"
+
+                + "   const style=getComputedStyle(e);"
+                + "   const oy=(style.overflowY||'').toLowerCase();"
+                + "   const scrollable="
+                + "     oy==='auto'||oy==='scroll'||oy==='overlay'"
+                + "     || e===document.scrollingElement"
+                + "     || e===document.documentElement"
+                + "     || e===document.body;"
+
+                + "   if(!scrollable)continue;"
+
+                + "   const r=e.getBoundingClientRect"
+                + "     ? e.getBoundingClientRect()"
+                + "     : {width:0,height:0};"
+
+                + "   const visibleArea="
+                + "     Math.max(1,r.width||1)"
+                + "     * Math.max(1,r.height||ch||1);"
+
+                + "   const score=overflow+visibleArea;"
+                + "   if(score>bestScore){"
+                + "    bestScore=score;"
+                + "    best=e;"
+                + "   }"
+                + "  }catch(x){}"
+                + " }"
+
+                + " if(!best){"
+                + "  best=document.scrollingElement"
+                + "   || document.documentElement"
+                + "   || document.body;"
+                + " }"
+
+                + " if(!best)return 'NO_SCROLL_TARGET';"
+
+                + " const before=best.scrollTop||0;"
+                + " const max=Math.max("
+                + "   0,"
+                + "   (best.scrollHeight||0)-(best.clientHeight||0)"
+                + " );"
+
+                + " const step=Math.max("
+                + "   300,"
+                + "   Math.floor((best.clientHeight||window.innerHeight||600)*0.72)"
+                + " );"
+
+                + " let target=before;"
+
+                + " if(dir==='up') target=Math.max(0,before-step);"
+                + " else if(dir==='down') target=Math.min(max,before+step);"
+                + " else if(dir==='top') target=0;"
+                + " else if(dir==='bottom') target=max;"
+                + " else return 'BAD_DIRECTION';"
+
+                + " try{"
+                + "  best.scrollTo({top:target,behavior:'smooth'});"
+                + " }catch(x){"
+                + "  try{best.scrollTop=target;}catch(y){}"
+                + " }"
+
+                + " if(best===document.body"
+                + "   || best===document.documentElement"
+                + "   || best===document.scrollingElement){"
+                + "  try{window.scrollTo({top:target,behavior:'smooth'});}catch(x){}"
+                + " }"
+
+                + " return JSON.stringify({"
+                + "  ok:true,"
+                + "  before:before,"
+                + "  target:target,"
+                + "  max:max,"
+                + "  direction:dir"
+                + " });"
+                + "})()";
+
+        active.evaluateJavascript(
+                script,
+                result -> runOnUiThread(() -> {
+                    if (statusText == null) return;
+
+                    if (result == null
+                            || result.contains("NO_SCROLL_TARGET")) {
+
+                        statusText.setText(
+                                "Luminex: area scorrevole non trovata"
+                        );
+
+                    } else if (result.contains("BAD_DIRECTION")) {
+
+                        statusText.setText(
+                                "Luminex: direzione scroll non valida"
+                        );
+
+                    } else {
+
+                        String label;
+
+                        switch (safeDirection) {
+                            case "up":
+                                label = "scorrimento verso l'alto";
+                                break;
+
+                            case "down":
+                                label = "scorrimento verso il basso";
+                                break;
+
+                            case "top":
+                                label = "inizio pagina";
+                                break;
+
+                            case "bottom":
+                                label = "fine pagina";
+                                break;
+
+                            default:
+                                label = "scroll";
+                                break;
+                        }
+
+                        statusText.setText(
+                                "Luminex: " + label
+                        );
+
+                        active.postDelayed(
+                                () -> sendLuminexPageState(active),
+                                500L
+                        );
+                    }
+                })
+        );
+    }
+
 
     private void loadFullLuminexPage(boolean printAfterLoad) {
         WebView active = getActiveLuminexWebView();
