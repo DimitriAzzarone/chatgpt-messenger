@@ -111,6 +111,7 @@ public class MainActivity extends Activity {
         final String profileName;
         final List<WebView> tabs = new ArrayList<>();
         int tabIndex = 0;
+        boolean restored = false;
 
         ChatPrivateState(String profileName) {
             this.profileName = profileName;
@@ -512,6 +513,212 @@ public class MainActivity extends Activity {
         return "dan-chat-" + safe;
     }
 
+    private String privatePrefsKey(
+            String chatKey,
+            String suffix
+    ) {
+        String safe = chatKey == null
+                ? ""
+                : chatKey.replaceAll(
+                        "[^A-Za-z0-9_-]",
+                        "_"
+                );
+
+        return "luminex_private_"
+                + safe
+                + "_"
+                + suffix;
+    }
+
+
+    private void savePrivateState(
+            String chatKey,
+            ChatPrivateState state
+    ) {
+        if (TextUtils.isEmpty(chatKey)
+                || state == null) {
+            return;
+        }
+
+        try {
+            org.json.JSONArray urls =
+                    new org.json.JSONArray();
+
+            for (WebView tab : state.tabs) {
+                if (tab == null) continue;
+
+                String url = tab.getUrl();
+
+                if (!isLuminexHttpUrl(url)) {
+                    url = LUMINEX_HOME;
+                }
+
+                urls.put(url);
+            }
+
+            int index = state.tabIndex;
+
+            if (!state.tabs.isEmpty()) {
+                index = Math.max(
+                        0,
+                        Math.min(
+                                index,
+                                state.tabs.size() - 1
+                        )
+                );
+            } else {
+                index = 0;
+            }
+
+            getSharedPreferences(
+                    PREFS,
+                    MODE_PRIVATE
+            )
+                    .edit()
+                    .putString(
+                            privatePrefsKey(
+                                    chatKey,
+                                    "urls"
+                            ),
+                            urls.toString()
+                    )
+                    .putInt(
+                            privatePrefsKey(
+                                    chatKey,
+                                    "index"
+                            ),
+                            index
+                    )
+                    .apply();
+
+        } catch (Exception e) {
+            android.util.Log.w(
+                    "DanLuminex",
+                    "Salvataggio sessione P fallito",
+                    e
+            );
+        }
+    }
+
+
+    private void saveCurrentPrivateState() {
+        if (TextUtils.isEmpty(activeDanChatKey)) {
+            return;
+        }
+
+        ChatPrivateState state =
+                privateChats.get(activeDanChatKey);
+
+        if (state != null) {
+            savePrivateState(
+                    activeDanChatKey,
+                    state
+            );
+        }
+    }
+
+
+    private void savePrivateStateForWebView(
+            WebView view
+    ) {
+        if (view == null) return;
+
+        for (Map.Entry<String, ChatPrivateState> entry
+                : privateChats.entrySet()) {
+
+            ChatPrivateState state =
+                    entry.getValue();
+
+            if (state != null
+                    && state.tabs.contains(view)) {
+
+                savePrivateState(
+                        entry.getKey(),
+                        state
+                );
+
+                return;
+            }
+        }
+    }
+
+
+    private void restoreCurrentPrivateState(
+            ChatPrivateState state
+    ) {
+        if (state == null
+                || state.restored
+                || TextUtils.isEmpty(activeDanChatKey)) {
+            return;
+        }
+
+        state.restored = true;
+
+        SharedPreferences prefs =
+                getSharedPreferences(
+                        PREFS,
+                        MODE_PRIVATE
+                );
+
+        String json = prefs.getString(
+                privatePrefsKey(
+                        activeDanChatKey,
+                        "urls"
+                ),
+                ""
+        );
+
+        int wantedIndex = prefs.getInt(
+                privatePrefsKey(
+                        activeDanChatKey,
+                        "index"
+                ),
+                0
+        );
+
+        if (!TextUtils.isEmpty(json)) {
+            try {
+                org.json.JSONArray urls =
+                        new org.json.JSONArray(json);
+
+                for (int i = 0;
+                     i < urls.length();
+                     i++) {
+
+                    String url =
+                            urls.optString(i, "");
+
+                    if (!isLuminexHttpUrl(url)) {
+                        continue;
+                    }
+
+                    createLuminexTabForSession(
+                            1,
+                            url
+                    );
+                }
+
+            } catch (Exception e) {
+                android.util.Log.w(
+                        "DanLuminex",
+                        "Ripristino sessione P fallito",
+                        e
+                );
+            }
+        }
+
+        if (!state.tabs.isEmpty()) {
+            state.tabIndex = Math.max(
+                    0,
+                    Math.min(
+                            wantedIndex,
+                            state.tabs.size() - 1
+                    )
+            );
+        }
+    }
+
+
     private ChatPrivateState getCurrentPrivateState() {
         if (TextUtils.isEmpty(activeDanChatKey)) {
             throw new IllegalStateException(
@@ -582,7 +789,20 @@ public class MainActivity extends Activity {
         }
     }
 
-    private WebView createLuminexTabForSession(int session) {
+    private WebView createLuminexTabForSession(
+            int session
+    ) {
+        return createLuminexTabForSession(
+                session,
+                LUMINEX_HOME
+        );
+    }
+
+
+    private WebView createLuminexTabForSession(
+            int session,
+            String initialUrl
+    ) {
         WebView tab = new WebView(this);
 
         if (session != 0) {
@@ -629,6 +849,10 @@ public class MainActivity extends Activity {
         tab.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView view, String url) {
+                if (session != 0) {
+                    savePrivateStateForWebView(view);
+                }
+
                 if (luminexVisible && view == getActiveLuminexWebView()) {
                     view.postDelayed(() -> sendLuminexPageState(view), 1200L);
                 }
@@ -667,14 +891,25 @@ public class MainActivity extends Activity {
             getCurrentPrivateState().tabIndex = tabs.size() - 1;
         }
 
-        tab.loadUrl(LUMINEX_HOME);
+        String urlToLoad =
+                isLuminexHttpUrl(initialUrl)
+                        ? initialUrl
+                        : LUMINEX_HOME;
+
+        tab.loadUrl(urlToLoad);
         showActiveLuminexTab();
         return tab;
     }
 
     private void newLuminexTab() {
         int session = privateVisible ? 1 : 0;
+
         createLuminexTabForSession(session);
+
+        if (privateVisible) {
+            saveCurrentPrivateState();
+        }
+
         statusText.setText(
                 "Luminex " + activeLuminexSessionLabel()
                         + " — nuova scheda " + getActiveLuminexTabs().size()
@@ -686,6 +921,11 @@ public class MainActivity extends Activity {
         if (tabs.size() <= 1) return;
         int index = (getActiveLuminexTabIndex() + 1) % tabs.size();
         setActiveLuminexTabIndex(index);
+
+        if (privateVisible) {
+            saveCurrentPrivateState();
+        }
+
         showActiveLuminexTab();
         statusText.setText("Luminex " + activeLuminexSessionLabel()
                 + " — scheda " + (index + 1) + "/" + tabs.size());
@@ -697,6 +937,11 @@ public class MainActivity extends Activity {
         int index = getActiveLuminexTabIndex() - 1;
         if (index < 0) index = tabs.size() - 1;
         setActiveLuminexTabIndex(index);
+
+        if (privateVisible) {
+            saveCurrentPrivateState();
+        }
+
         showActiveLuminexTab();
         statusText.setText("Luminex " + activeLuminexSessionLabel()
                 + " — scheda " + (index + 1) + "/" + tabs.size());
@@ -723,6 +968,11 @@ public class MainActivity extends Activity {
 
         if (index >= tabs.size()) index = tabs.size() - 1;
         setActiveLuminexTabIndex(index);
+
+        if (privateVisible) {
+            saveCurrentPrivateState();
+        }
+
         showActiveLuminexTab();
         statusText.setText("Luminex " + activeLuminexSessionLabel()
                 + " — scheda " + (index + 1) + "/" + tabs.size());
@@ -865,8 +1115,13 @@ public class MainActivity extends Activity {
 
         privateVisible = true;
 
+        restoreCurrentPrivateState(state);
+
         if (state.tabs.isEmpty()) {
-            createLuminexTabForSession(1);
+            createLuminexTabForSession(
+                    1,
+                    LUMINEX_HOME
+            );
         }
 
         luminexVisible = true;
@@ -904,6 +1159,8 @@ public class MainActivity extends Activity {
 
 
     private void closePrivateSession() {
+        saveCurrentPrivateState();
+
         privateVisible = false;
         luminexVisible = true;
         if (webView != null) webView.setVisibility(View.GONE);
@@ -4430,6 +4687,15 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        for (Map.Entry<String, ChatPrivateState> entry
+                : privateChats.entrySet()) {
+
+            savePrivateState(
+                    entry.getKey(),
+                    entry.getValue()
+            );
+        }
+
         stopLuminexPolling();
         closePopupWebView();
         handsFreeEnabled = false;
