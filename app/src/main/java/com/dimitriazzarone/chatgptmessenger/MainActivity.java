@@ -528,6 +528,10 @@ public class MainActivity extends Activity {
             active.setVisibility(View.VISIBLE);
             active.bringToFront();
         }
+
+        if (privateButton != null && luminexVisible) {
+            privateButton.bringToFront();
+        }
     }
 
     private WebView createLuminexTabForSession(int session) {
