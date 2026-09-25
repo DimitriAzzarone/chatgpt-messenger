@@ -1,4 +1,5 @@
 name: Build Dan APK
+run-name: Dan 1.42
 
 on:
   workflow_dispatch:
