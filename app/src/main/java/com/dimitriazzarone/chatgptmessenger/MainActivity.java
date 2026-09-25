@@ -1212,21 +1212,99 @@ public class MainActivity extends Activity {
     }
 
     private void replayLastSpeech() {
-        String text = lastSpokenText == null ? "" : lastSpokenText.trim();
-        if (text.isEmpty()) {
-            statusText.setText("▶ Nessuna lettura da ripetere");
+        String text =
+                lastSpokenText == null
+                        ? ""
+                        : lastSpokenText.trim();
+
+        if (!text.isEmpty()) {
+            replaySpeechText(text);
             return;
         }
+
+        if (webView == null) {
+            statusText.setText(
+                    "▶ Nessuna lettura da ripetere"
+            );
+            return;
+        }
+
+        String script =
+                "(function(){"
+                + " const msgs=Array.from("
+                + "  document.querySelectorAll(\"[data-message-author-role='assistant']\")"
+                + " );"
+                + " if(!msgs.length)return '';"
+                + " const m=msgs[msgs.length-1];"
+                + " return (m.innerText||m.textContent||'').trim();"
+                + "})()";
+
+        webView.evaluateJavascript(
+                script,
+                value -> runOnUiThread(() -> {
+                    String recovered = "";
+
+                    try {
+                        if (value != null
+                                && !"null".equals(value)
+                                && !"\"\"".equals(value)) {
+
+                            recovered =
+                                    new org.json.JSONArray(
+                                            "[" + value + "]"
+                                    ).getString(0);
+                        }
+                    } catch (Exception ignored) {}
+
+                    recovered =
+                            stripEmojis(recovered).trim();
+
+                    if (recovered.isEmpty()) {
+                        statusText.setText(
+                                "▶ Nessuna lettura da ripetere"
+                        );
+                        return;
+                    }
+
+                    lastSpokenText = recovered;
+                    replaySpeechText(recovered);
+                })
+        );
+    }
+
+    private void replaySpeechText(String text) {
+        if (TextUtils.isEmpty(text)) {
+            statusText.setText(
+                    "▶ Nessuna lettura da ripetere"
+            );
+            return;
+        }
+
         if (!ttsReady || tts == null) {
-            statusText.setText("Sintesi vocale non pronta");
+            statusText.setText(
+                    "Sintesi vocale non pronta"
+            );
             return;
         }
+
         try {
             tts.stop();
-            tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "chatgpt_replay");
-            statusText.setText("▶ Lettura dall'inizio");
+
+            tts.speak(
+                    text,
+                    TextToSpeech.QUEUE_FLUSH,
+                    null,
+                    "chatgpt_replay"
+            );
+
+            statusText.setText(
+                    "▶ Lettura dall'inizio"
+            );
+
         } catch (Exception e) {
-            statusText.setText("Impossibile avviare la lettura");
+            statusText.setText(
+                    "Impossibile avviare la lettura"
+            );
         }
     }
 
@@ -4435,36 +4513,84 @@ public class MainActivity extends Activity {
         if (webView == null) return;
 
         String script =
-                "(function(){" +
-                " if(window.__radioEnterInstalled)return;" +
-                " window.__radioEnterInstalled=true;" +
+                "(function(){"
+                + " if(window.__radioEnterInstalledV2)return;"
+                + " window.__radioEnterInstalledV2=true;"
 
-                " function isEditor(el){" +
-                "  if(!el)return false;" +
-                "  if(el.id==='prompt-textarea')return true;" +
-                "  if(el.getAttribute&&el.getAttribute('data-testid')==='prompt-textarea')return true;" +
-                "  return !!(el.closest&&el.closest('#prompt-textarea,[data-testid=\"prompt-textarea\"]'));" +
-                " }" +
+                + " function editorFromTarget(target){"
+                + "  if(!target)return null;"
+                + "  if(target.matches&&target.matches("
+                + "   '#prompt-textarea,textarea,[contenteditable=\"true\"],[role=\"textbox\"]'"
+                + "  ))return target;"
+                + "  return target.closest"
+                + "   ? target.closest('#prompt-textarea,textarea,[contenteditable=\"true\"],[role=\"textbox\"]')"
+                + "   : null;"
+                + " }"
 
-                " function findSend(){" +
-                "  return document.querySelector(\"button[data-testid='send-button']\") ||" +
-                "   Array.from(document.querySelectorAll('button')).find(b=>{" +
-                "    const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
-                "    return a.includes('send')||a.includes('invia');" +
-                "   });" +
-                " }" +
+                + " function looksLikeComposer(ed){"
+                + "  if(!ed)return false;"
+                + "  if(ed.id==='prompt-textarea')return true;"
+                + "  const tid=(ed.getAttribute('data-testid')||'').toLowerCase();"
+                + "  if(tid.includes('prompt'))return true;"
+                + "  const ph=((ed.getAttribute('placeholder')||'')+' '+"
+                + "            (ed.getAttribute('aria-label')||'')).toLowerCase();"
+                + "  if(ph.includes('message')||ph.includes('messaggio')||"
+                + "     ph.includes('chiedi')||ph.includes('ask'))return true;"
+                + "  return !!ed.closest('form');"
+                + " }"
 
-                " document.addEventListener('keydown',function(e){" +
-                "  if(e.key!=='Enter'||e.shiftKey||e.isComposing)return;" +
-                "  if(!isEditor(e.target))return;" +
-                "  e.preventDefault();" +
-                "  e.stopPropagation();" +
-                "  setTimeout(()=>{" +
-                "   const send=findSend();" +
-                "   if(send&&!send.disabled)send.click();" +
-                "  },0);" +
-                " },true);" +
-                "})();";
+                + " function findSend(ed){"
+                + "  const form=ed&&ed.closest?ed.closest('form'):null;"
+                + "  const scopes=[form,document].filter(Boolean);"
+
+                + "  for(const scope of scopes){"
+                + "   const direct="
+                + "    scope.querySelector(\"button[data-testid='send-button']\") ||"
+                + "    scope.querySelector(\"button[data-testid*='send']\") ||"
+                + "    scope.querySelector(\"button[aria-label*='Send' i]\") ||"
+                + "    scope.querySelector(\"button[aria-label*='Invia' i]\");"
+                + "   if(direct)return direct;"
+
+                + "   const buttons=Array.from(scope.querySelectorAll('button'));"
+                + "   const named=buttons.find(b=>{"
+                + "    const a=("
+                + "     (b.getAttribute('aria-label')||'')+' '+"
+                + "     (b.getAttribute('title')||'')+' '+"
+                + "     (b.getAttribute('data-testid')||'')"
+                + "    ).toLowerCase();"
+                + "    return a.includes('send')||a.includes('invia');"
+                + "   });"
+                + "   if(named)return named;"
+
+                + "   const submit=buttons.find(b=>"
+                + "    (b.getAttribute('type')||'').toLowerCase()==='submit'"
+                + "   );"
+                + "   if(submit)return submit;"
+                + "  }"
+
+                + "  return null;"
+                + " }"
+
+                + " document.addEventListener('keydown',function(e){"
+                + "  if(e.key!=='Enter'||e.shiftKey||e.isComposing)return;"
+
+                + "  const ed=editorFromTarget(e.target);"
+                + "  if(!looksLikeComposer(ed))return;"
+
+                + "  const send=findSend(ed);"
+
+                + "  if(send&&!send.disabled){"
+                + "   e.preventDefault();"
+                + "   e.stopImmediatePropagation();"
+                + "   send.click();"
+                + "   return;"
+                + "  }"
+
+                // IMPORTANTISSIMO:
+                // se Dan non riconosce il nuovo pulsante,
+                // NON blocca Enter. Lo lascia gestire a ChatGPT.
+                + " },true);"
+                + "})();";
 
         webView.evaluateJavascript(script, null);
     }
@@ -4524,73 +4650,85 @@ public class MainActivity extends Activity {
         if (webView == null) return;
 
         String script =
-                "(function(){" +
-                " if(window.__danHybridReadInstalled)return;" +
-                " window.__danHybridReadInstalled=true;" +
-                " let timer=null;" +
+                "(function(){"
+                + " if(window.__danStableReadInstalled)return;"
+                + " window.__danStableReadInstalled=true;"
 
-                " function generating(){" +
-                "  return Array.from(document.querySelectorAll('button')).some(b=>{" +
-                "   const a=((b.getAttribute('aria-label')||'')+' '+(b.innerText||'')).toLowerCase();" +
-                "   return a.includes('stop generating')||a.includes('interrompi generazione')||a.includes('stop streaming');" +
-                "  });" +
-                " }" +
+                + " let timer=null;"
+                + " let stableText='';"
+                + " let stableSince=0;"
 
-                " function latestAssistant(){" +
-                "  const msgs=Array.from(document.querySelectorAll(\"[data-message-author-role='assistant']\"));" +
-                "  return msgs.length?msgs[msgs.length-1]:null;" +
-                " }" +
+                + " function latestAssistant(){"
+                + "  const direct=Array.from("
+                + "   document.querySelectorAll(\"[data-message-author-role='assistant']\")"
+                + "  );"
+                + "  if(direct.length)return direct[direct.length-1];"
 
-                " function latestAssistantText(){" +
-                "  const m=latestAssistant();" +
-                "  return m?(m.innerText||'').trim():'';" +
-                " }" +
+                + "  const turns=Array.from(document.querySelectorAll("
+                + "   \"article,[data-testid^='conversation-turn'],[data-testid*='conversation-turn']\""
+                + "  ));"
 
-                " function isReadButton(b){" +
-                "  if(!b)return false;" +
-                "  const s=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')+' '+(b.innerText||'')).toLowerCase();" +
-                "  return s.includes('read aloud')||s.includes('leggi ad alta voce')||s.includes('lettura ad alta voce')||s.includes('read-aloud');" +
-                " }" +
+                + "  for(let i=turns.length-1;i>=0;i--){"
+                + "   const t=turns[i];"
+                + "   const assistant=t.querySelector"
+                + "    ? t.querySelector(\"[data-message-author-role='assistant']\")"
+                + "    : null;"
+                + "   if(assistant)return assistant;"
+                + "  }"
 
-                " function findReadButton(){" +
-                "  const msg=latestAssistant();" +
-                "  if(msg){" +
-                "   let scope=msg;" +
-                "   for(let i=0;i<5&&scope;i++,scope=scope.parentElement){" +
-                "    const local=Array.from(scope.querySelectorAll('button')).find(isReadButton);" +
-                "    if(local)return local;" +
-                "   }" +
-                "  }" +
-                "  const all=Array.from(document.querySelectorAll('button')).filter(isReadButton);" +
-                "  return all.length?all[all.length-1]:null;" +
-                " }" +
+                + "  return null;"
+                + " }"
 
-                " let lastHandled=latestAssistantText();" +
+                + " function latestAssistantText(){"
+                + "  const m=latestAssistant();"
+                + "  if(!m)return '';"
+                + "  return (m.innerText||m.textContent||'').trim();"
+                + " }"
 
-                " function check(){" +
-                "  if(generating()){schedule();return;}" +
-                "  const text=latestAssistantText();" +
-                "  if(!text||text===lastHandled)return;" +
-                "  lastHandled=text;" +
-                "  let clicked=false;" +
-                "  const btn=findReadButton();" +
-                "  if(btn&&!btn.disabled){" +
-                "   try{" +
-                "    btn.click();" +
-                "    clicked=true;" +
-                "    if(window.AndroidRadio&&window.AndroidRadio.nativeReadStarted)window.AndroidRadio.nativeReadStarted();" +
-                "   }catch(e){}" +
-                "  }" +
-                "  if(!clicked){" +
-                "   try{" +
-                "    if(window.AndroidRadio&&window.AndroidRadio.assistantReady)window.AndroidRadio.assistantReady(text);" +
-                "   }catch(e){}" +
-                "  }" +
-                " }" +
+                + " let lastHandled=latestAssistantText();"
+                + " stableText=lastHandled;"
+                + " stableSince=Date.now();"
 
-                " function schedule(){clearTimeout(timer);timer=setTimeout(check,1600);}" +
-                " new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true,characterData:true});" +
-                "})();";
+                + " function check(){"
+                + "  const text=latestAssistantText();"
+                + "  if(!text)return;"
+
+                + "  if(text!==stableText){"
+                + "   stableText=text;"
+                + "   stableSince=Date.now();"
+                + "   schedule(1200);"
+                + "   return;"
+                + "  }"
+
+                + "  if(Date.now()-stableSince<1100){"
+                + "   schedule(500);"
+                + "   return;"
+                + "  }"
+
+                + "  if(text===lastHandled)return;"
+                + "  lastHandled=text;"
+
+                + "  try{"
+                + "   if(window.AndroidRadio&&window.AndroidRadio.assistantReady){"
+                + "    window.AndroidRadio.assistantReady(text);"
+                + "   }"
+                + "  }catch(e){}"
+                + " }"
+
+                + " function schedule(delay){"
+                + "  clearTimeout(timer);"
+                + "  timer=setTimeout(check,delay||1400);"
+                + " }"
+
+                + " new MutationObserver(function(){"
+                + "  schedule(1400);"
+                + " }).observe(document.documentElement,{"
+                + "  childList:true,"
+                + "  subtree:true,"
+                + "  characterData:true"
+                + " });"
+
+                + "})();";
 
         webView.evaluateJavascript(script, null);
     }
