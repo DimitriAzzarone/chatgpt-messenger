@@ -1213,9 +1213,7 @@ public class MainActivity extends Activity {
 
     private void replayLastSpeech() {
         if (webView == null) {
-            statusText.setText(
-                    "▶ Pagina non disponibile"
-            );
+            statusText.setText("▶ Pagina non disponibile");
             return;
         }
 
@@ -1228,26 +1226,8 @@ public class MainActivity extends Activity {
                 + "   .trim();"
                 + " }"
 
-                + " function visible(e){"
-                + "  if(!e)return false;"
-                + "  const r=e.getBoundingClientRect();"
-                + "  const s=getComputedStyle(e);"
-                + "  return r.width>20 && r.height>10"
-                + "   && s.display!=='none'"
-                + "   && s.visibility!=='hidden';"
-                + " }"
-
-                + " function excluded(e){"
-                + "  return !!e.closest("
-                + "   'nav,aside,form,footer,"
-                + "   [role=\"navigation\"],"
-                + "   [role=\"dialog\"],"
-                + "   [contenteditable=\"true\"]'"
-                + "  );"
-                + " }"
-
                 + " const root=document.querySelector('main')||document.body;"
-                + " if(!root)return JSON.stringify({source:'NONE',text:''});"
+                + " if(!root)return '';"
 
                 + " const buttons=Array.from(root.querySelectorAll('button'));"
 
@@ -1269,137 +1249,57 @@ public class MainActivity extends Activity {
                 + "   meta.includes('bad-response')"
                 + "  ))continue;"
 
-                + "  const br=b.getBoundingClientRect();"
+                + "  let e=b.parentElement;"
 
-                + "  const near=Array.from(root.querySelectorAll("
-                + "   'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
-                + "  )).filter(e=>{"
-                + "   if(!visible(e)||excluded(e))return false;"
-                + "   const r=e.getBoundingClientRect();"
-                + "   return r.bottom<=br.top+20"
-                + "    && r.bottom>=br.top-2200"
-                + "    && txt(e).length>0;"
-                + "  });"
+                + "  for(let level=0;e&&level<6;level++,e=e.parentElement){"
+                + "   if(e===root)break;"
 
-                + "  near.sort((a,c)=>"
-                + "   a.getBoundingClientRect().bottom"
-                + "   - c.getBoundingClientRect().bottom"
-                + "  );"
+                + "   const blocks=Array.from(e.querySelectorAll("
+                + "    'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "   )).filter(x=>txt(x).length>0);"
 
-                + "  const picked=[];"
-                + "  let lastTop=br.top;"
+                + "   if(!blocks.length)continue;"
 
-                + "  for(let j=near.length-1;j>=0;j--){"
-                + "   const e=near[j];"
-                + "   const r=e.getBoundingClientRect();"
-                + "   const gap=lastTop-r.bottom;"
+                + "   const answer=blocks.map(txt).join(' ').trim();"
 
-                + "   if(picked.length>0 && gap>180)break;"
-
-                + "   picked.unshift(txt(e));"
-                + "   lastTop=r.top;"
-
-                + "   if(picked.join(' ').length>12000)break;"
-                + "  }"
-
-                + "  const answer=picked.join(' ').trim();"
-
-                + "  if(answer.length>=20){"
-                + "   return JSON.stringify({source:'ACTION',text:answer});"
+                + "   if(answer.length>=20 && answer.length<=12000){"
+                + "    return answer;"
+                + "   }"
                 + "  }"
                 + " }"
 
-                + " const blocks=Array.from(root.querySelectorAll("
-                + "  'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
-                + " )).filter(e=>"
-                + "  visible(e)"
-                + "  && !excluded(e)"
-                + "  && txt(e).length>=20"
-                + " );"
-
-                + " if(!blocks.length)"
-                + "  return JSON.stringify({source:'NONE',text:''});"
-
-                + " blocks.sort((a,b)=>"
-                + "  a.getBoundingClientRect().bottom"
-                + "  - b.getBoundingClientRect().bottom"
-                + " );"
-
-                + " let best=blocks[blocks.length-1];"
-                + " let e=best.parentElement;"
-
-                + " for(let level=0;e&&level<7;level++,e=e.parentElement){"
-                + "  if(e===root)break;"
-                + "  if(excluded(e))break;"
-
-                + "  const t=txt(e);"
-                + "  const count=e.querySelectorAll("
-                + "   'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
-                + "  ).length;"
-
-                + "  if(t.length>=txt(best).length"
-                + "     && t.length<=12000"
-                + "     && count<=40){"
-                + "   best=e;"
-                + "  }"
-                + " }"
-
-                + " return JSON.stringify({"
-                + "  source:'GENERIC',"
-                + "  text:txt(best)"
-                + " });"
+                + " return '';"
                 + "})()";
 
         webView.evaluateJavascript(
                 script,
                 value -> runOnUiThread(() -> {
+                    String recovered = "";
+
                     try {
-                        String decoded =
-                                new org.json.JSONArray(
-                                        "[" + value + "]"
-                                ).getString(0);
+                        if (value != null
+                                && !"null".equals(value)
+                                && !"\"\"".equals(value)) {
 
-                        JSONObject result =
-                                new JSONObject(decoded);
-
-                        String source =
-                                result.optString(
-                                        "source",
-                                        "NONE"
-                                );
-
-                        String recovered =
-                                stripEmojis(
-                                        result.optString(
-                                                "text",
-                                                ""
-                                        )
-                                ).trim();
-
-                        if (recovered.isEmpty()) {
-                            statusText.setText(
-                                    "▶ Nessun testo trovato"
-                            );
-                            return;
+                            recovered =
+                                    new org.json.JSONArray(
+                                            "[" + value + "]"
+                                    ).getString(0);
                         }
+                    } catch (Exception ignored) {}
 
-                        lastSpokenText = recovered;
+                    recovered =
+                            stripEmojis(recovered).trim();
 
+                    if (recovered.isEmpty()) {
                         statusText.setText(
-                                "▶ "
-                                        + source
-                                        + " — "
-                                        + recovered.length()
-                                        + " caratteri"
+                                "▶ Risposta non individuata"
                         );
-
-                        replaySpeechText(recovered);
-
-                    } catch (Exception e) {
-                        statusText.setText(
-                                "▶ Errore lettura pagina"
-                        );
+                        return;
                     }
+
+                    lastSpokenText = recovered;
+                    replaySpeechText(recovered);
                 })
         );
     }
@@ -4927,43 +4827,23 @@ public class MainActivity extends Activity {
                 + "    meta.includes('bad-response')"
                 + "   ))continue;"
 
-                + "   const br=b.getBoundingClientRect();"
+                + "   let e=b.parentElement;"
 
-                + "   const blocks=Array.from(root.querySelectorAll("
-                + "    'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
-                + "   )).filter(e=>{"
-                + "    if(!visible(e)||excluded(e))return false;"
-                + "    const r=e.getBoundingClientRect();"
-                + "    return r.bottom<=br.top+20"
-                + "      && r.bottom>=br.top-2200"
-                + "      && txt(e).length>0;"
-                + "   });"
+                + "   for(let level=0;e&&level<6;level++,e=e.parentElement){"
+                + "    if(e===root)break;"
 
-                + "   if(!blocks.length)continue;"
+                + "    const blocks=Array.from(e.querySelectorAll("
+                + "     'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "    )).filter(x=>txt(x).length>0);"
 
-                + "   blocks.sort((a,c)=>"
-                + "    a.getBoundingClientRect().bottom"
-                + "    - c.getBoundingClientRect().bottom"
-                + "   );"
+                + "    if(!blocks.length)continue;"
 
-                + "   const picked=[];"
-                + "   let lastTop=br.top;"
+                + "    const answer=blocks.map(txt).join(' ').trim();"
 
-                + "   for(let j=blocks.length-1;j>=0;j--){"
-                + "    const e=blocks[j];"
-                + "    const r=e.getBoundingClientRect();"
-                + "    const gap=lastTop-r.bottom;"
-
-                + "    if(picked.length>0 && gap>180)break;"
-
-                + "    picked.unshift(txt(e));"
-                + "    lastTop=r.top;"
-
-                + "    if(picked.join(' ').length>12000)break;"
+                + "    if(answer.length>=20 && answer.length<=12000){"
+                + "     return answer;"
+                + "    }"
                 + "   }"
-
-                + "   const answer=picked.join(' ').trim();"
-                + "   if(answer.length>=20)return answer;"
                 + "  }"
 
                 + "  return '';"
@@ -5016,7 +4896,7 @@ public class MainActivity extends Activity {
                 + "  const byButton=fromActionButtons(root);"
                 + "  if(byButton)return byButton;"
 
-                + "  return genericBottomText(root);"
+                + "  return '';"
                 + " }"
 
                 + " let lastHandled=latestResponse();"
