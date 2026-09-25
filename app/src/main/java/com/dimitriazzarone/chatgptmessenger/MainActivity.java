@@ -272,7 +272,7 @@ public class MainActivity extends Activity {
         logo.setBackgroundColor(Color.rgb(0, 168, 132));
 
         TextView title = new TextView(this);
-        title.setText("  Dan 1.31");
+        title.setText("  Dan 1.36");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
@@ -319,7 +319,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText(" Dan 1.31");
+            title.setText(" Dan 1.36");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);
@@ -1233,19 +1233,29 @@ public class MainActivity extends Activity {
                 "(function(){"
                 + " function txt(e){"
                 + "  return e"
-                + "   ? (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim()"
+                + "   ? (e.innerText||e.textContent||'')"
+                + "      .replace(/\\s+/g,' ').trim()"
                 + "   : '';"
                 + " }"
 
-                + " let list=Array.from(document.querySelectorAll("
+                + " let nodes=Array.from(document.querySelectorAll("
                 + "  \"[data-message-author-role='assistant'],\"+"
                 + "  \"[data-author='assistant'],\"+"
                 + "  \"[data-role='assistant'],\"+"
                 + "  \"[data-testid*='assistant-message'],\"+"
                 + "  \"[data-testid*='assistant-response']\""
-                + " ));"
+                + " )).filter(e=>txt(e).length>0);"
 
-                + " if(list.length)return txt(list[list.length-1]);"
+                + " if(nodes.length)return txt(nodes[nodes.length-1]);"
+
+                + " nodes=Array.from(document.querySelectorAll("
+                + "  '.markdown,[class*=\"markdown\"],"
+                + "  .prose,[class*=\"prose\"],"
+                + "  [data-testid*=\"response-content\"],"
+                + "  [data-testid*=\"message-content\"]'"
+                + " )).filter(e=>txt(e).length>0);"
+
+                + " if(nodes.length)return txt(nodes[nodes.length-1]);"
 
                 + " const turns=Array.from(document.querySelectorAll("
                 + "  \"article,\"+"
@@ -1255,9 +1265,13 @@ public class MainActivity extends Activity {
 
                 + " for(let i=turns.length-1;i>=0;i--){"
                 + "  const t=turns[i];"
+                + "  if(txt(t).length<20)continue;"
 
-                + "  if(t.querySelector('.markdown,[class*=\"markdown\"]'))"
-                + "   return txt(t);"
+                + "  const md=t.querySelector("
+                + "   '.markdown,[class*=\"markdown\"],.prose,[class*=\"prose\"]'"
+                + "  );"
+
+                + "  if(md)return txt(md);"
 
                 + "  const buttons=Array.from(t.querySelectorAll('button'));"
 
@@ -4785,63 +4799,40 @@ public class MainActivity extends Activity {
 
         String script =
                 "(function(){"
-                + " if(window.__danReadV3Installed)return;"
-                + " window.__danReadV3Installed=true;"
+                + " if(window.__danReadV4Installed)return;"
+                + " window.__danReadV4Installed=true;"
 
                 + " let timer=null;"
                 + " let candidate='';"
                 + " let candidateSince=0;"
 
-                + " function textOf(el){"
-                + "  if(!el)return '';"
-                + "  return (el.innerText||el.textContent||'')"
+                + " function txt(e){"
+                + "  if(!e)return '';"
+                + "  return (e.innerText||e.textContent||'')"
                 + "   .replace(/\\s+/g,' ')"
                 + "   .trim();"
                 + " }"
 
-                + " function explicitAssistants(){"
-                + "  return Array.from(document.querySelectorAll("
+                + " function latestAssistant(){"
+
+                + "  let nodes=Array.from(document.querySelectorAll("
                 + "   \"[data-message-author-role='assistant'],\"+"
                 + "   \"[data-author='assistant'],\"+"
                 + "   \"[data-role='assistant'],\"+"
                 + "   \"[data-testid*='assistant-message'],\"+"
                 + "   \"[data-testid*='assistant-response']\""
-                + "  ));"
-                + " }"
+                + "  )).filter(e=>txt(e).length>0);"
 
-                + " function looksAssistantTurn(turn){"
-                + "  if(!turn)return false;"
+                + "  if(nodes.length)return nodes[nodes.length-1];"
 
-                + "  if(turn.querySelector("
-                + "   \"[data-message-author-role='assistant'],\"+"
-                + "   \"[data-author='assistant'],\"+"
-                + "   \"[data-role='assistant']\""
-                + "  ))return true;"
+                + "  nodes=Array.from(document.querySelectorAll("
+                + "   '.markdown,[class*=\"markdown\"],"
+                + "   .prose,[class*=\"prose\"],"
+                + "   [data-testid*=\"response-content\"],"
+                + "   [data-testid*=\"message-content\"]'"
+                + "  )).filter(e=>txt(e).length>0);"
 
-                + "  if(turn.querySelector('.markdown,[class*=\"markdown\"]'))"
-                + "   return true;"
-
-                + "  const buttons=Array.from(turn.querySelectorAll('button'));"
-                + "  return buttons.some(b=>{"
-                + "   const a=("
-                + "    (b.getAttribute('aria-label')||'')+' '+"
-                + "    (b.getAttribute('title')||'')+' '+"
-                + "    (b.getAttribute('data-testid')||'')"
-                + "   ).toLowerCase();"
-
-                + "   return "
-                + "    a.includes('read aloud')||"
-                + "    a.includes('leggi ad alta voce')||"
-                + "    a.includes('copy')||"
-                + "    a.includes('copia')||"
-                + "    a.includes('good-response')||"
-                + "    a.includes('bad-response');"
-                + "  });"
-                + " }"
-
-                + " function latestAssistant(){"
-                + "  const explicit=explicitAssistants();"
-                + "  if(explicit.length)return explicit[explicit.length-1];"
+                + "  if(nodes.length)return nodes[nodes.length-1];"
 
                 + "  const turns=Array.from(document.querySelectorAll("
                 + "   \"article,\"+"
@@ -4850,14 +4841,39 @@ public class MainActivity extends Activity {
                 + "  ));"
 
                 + "  for(let i=turns.length-1;i>=0;i--){"
-                + "   if(looksAssistantTurn(turns[i]))return turns[i];"
+                + "   const t=turns[i];"
+                + "   if(txt(t).length<20)continue;"
+
+                + "   const markdown=t.querySelector("
+                + "    '.markdown,[class*=\"markdown\"],.prose,[class*=\"prose\"]'"
+                + "   );"
+                + "   if(markdown)return markdown;"
+
+                + "   const buttons=Array.from(t.querySelectorAll('button'));"
+                + "   const assistant=buttons.some(b=>{"
+                + "    const a=("
+                + "     (b.getAttribute('aria-label')||'')+' '+"
+                + "     (b.getAttribute('title')||'')+' '+"
+                + "     (b.getAttribute('data-testid')||'')"
+                + "    ).toLowerCase();"
+
+                + "    return "
+                + "     a.includes('read aloud')||"
+                + "     a.includes('leggi ad alta voce')||"
+                + "     a.includes('copy')||"
+                + "     a.includes('copia')||"
+                + "     a.includes('good-response')||"
+                + "     a.includes('bad-response');"
+                + "   });"
+
+                + "   if(assistant)return t;"
                 + "  }"
 
                 + "  return null;"
                 + " }"
 
                 + " function latestText(){"
-                + "  return textOf(latestAssistant());"
+                + "  return txt(latestAssistant());"
                 + " }"
 
                 + " let lastHandled=latestText();"
@@ -4868,24 +4884,23 @@ public class MainActivity extends Activity {
                 + "  const text=latestText();"
 
                 + "  if(!text){"
-                + "   schedule(900);"
+                + "   schedule(800);"
                 + "   return;"
                 + "  }"
 
                 + "  if(text!==candidate){"
                 + "   candidate=text;"
                 + "   candidateSince=Date.now();"
-                + "   schedule(1200);"
+                + "   schedule(1000);"
                 + "   return;"
                 + "  }"
 
-                + "  if(Date.now()-candidateSince<1400){"
-                + "   schedule(500);"
+                + "  if(Date.now()-candidateSince<1200){"
+                + "   schedule(400);"
                 + "   return;"
                 + "  }"
 
                 + "  if(text===lastHandled)return;"
-
                 + "  lastHandled=text;"
 
                 + "  try{"
@@ -4897,18 +4912,18 @@ public class MainActivity extends Activity {
 
                 + " function schedule(ms){"
                 + "  clearTimeout(timer);"
-                + "  timer=setTimeout(check,ms||1200);"
+                + "  timer=setTimeout(check,ms||1000);"
                 + " }"
 
                 + " new MutationObserver(function(){"
-                + "  schedule(1200);"
+                + "  schedule(1000);"
                 + " }).observe(document.documentElement,{"
                 + "  childList:true,"
                 + "  subtree:true,"
                 + "  characterData:true"
                 + " });"
 
-                + " setInterval(check,2500);"
+                + " setInterval(check,2000);"
                 + "})();";
 
         webView.evaluateJavascript(script, null);
