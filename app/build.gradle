@@ -10,8 +10,8 @@ android {
         applicationId "com.dimitriazzarone.danluminexai"
         minSdk 24
         targetSdk 35
-        versionCode 40
-        versionName "1.40"
+        versionCode Integer.parseInt(project.findProperty("DAN_VERSION_CODE") ?: "44")
+        versionName project.findProperty("DAN_VERSION_NAME") ?: "1.41"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }

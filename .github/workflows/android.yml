@@ -35,6 +35,12 @@ jobs:
         run: |
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > app/dan-release.jks
 
+      - name: Read Dan version
+        run: |
+          source version.properties
+          echo "DAN_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "DAN_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+
       - name: Build Dan Luminex AI Integration
         env:
           LUMINEX_DEVICE_TOKEN: ${{ secrets.DEVICE_TOKEN }}
@@ -42,14 +48,14 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle assembleRelease --stacktrace
+        run: gradle assembleRelease --stacktrace -PDAN_VERSION_NAME="$DAN_VERSION_NAME" -PDAN_VERSION_CODE="$DAN_VERSION_CODE"
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Dan-1.40.apk
+        run: cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Dan-${DAN_VERSION_NAME}.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Dan-APK-1.40
-          path: app/build/outputs/apk/release/Dan-1.40.apk
+          name: Dan-APK-${{ env.DAN_VERSION_NAME }}
+          path: app/build/outputs/apk/release/Dan-${{ env.DAN_VERSION_NAME }}.apk
           if-no-files-found: error
