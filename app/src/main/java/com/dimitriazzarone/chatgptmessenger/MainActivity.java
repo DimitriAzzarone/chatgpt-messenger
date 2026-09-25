@@ -1212,13 +1212,13 @@ public class MainActivity extends Activity {
     }
 
     private void replayLastSpeech() {
-        String text =
+        String cached =
                 lastSpokenText == null
                         ? ""
                         : lastSpokenText.trim();
 
-        if (!text.isEmpty()) {
-            replaySpeechText(text);
+        if (!cached.isEmpty()) {
+            replaySpeechText(cached);
             return;
         }
 
@@ -1231,12 +1231,54 @@ public class MainActivity extends Activity {
 
         String script =
                 "(function(){"
-                + " const msgs=Array.from("
-                + "  document.querySelectorAll(\"[data-message-author-role='assistant']\")"
-                + " );"
-                + " if(!msgs.length)return '';"
-                + " const m=msgs[msgs.length-1];"
-                + " return (m.innerText||m.textContent||'').trim();"
+                + " function txt(e){"
+                + "  return e"
+                + "   ? (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim()"
+                + "   : '';"
+                + " }"
+
+                + " let list=Array.from(document.querySelectorAll("
+                + "  \"[data-message-author-role='assistant'],\"+"
+                + "  \"[data-author='assistant'],\"+"
+                + "  \"[data-role='assistant'],\"+"
+                + "  \"[data-testid*='assistant-message'],\"+"
+                + "  \"[data-testid*='assistant-response']\""
+                + " ));"
+
+                + " if(list.length)return txt(list[list.length-1]);"
+
+                + " const turns=Array.from(document.querySelectorAll("
+                + "  \"article,\"+"
+                + "  \"[data-testid^='conversation-turn'],\"+"
+                + "  \"[data-testid*='conversation-turn']\""
+                + " ));"
+
+                + " for(let i=turns.length-1;i>=0;i--){"
+                + "  const t=turns[i];"
+
+                + "  if(t.querySelector('.markdown,[class*=\"markdown\"]'))"
+                + "   return txt(t);"
+
+                + "  const buttons=Array.from(t.querySelectorAll('button'));"
+
+                + "  const assistant=buttons.some(b=>{"
+                + "   const a=("
+                + "    (b.getAttribute('aria-label')||'')+' '+"
+                + "    (b.getAttribute('title')||'')+' '+"
+                + "    (b.getAttribute('data-testid')||'')"
+                + "   ).toLowerCase();"
+
+                + "   return "
+                + "    a.includes('read aloud')||"
+                + "    a.includes('leggi ad alta voce')||"
+                + "    a.includes('copy')||"
+                + "    a.includes('copia');"
+                + "  });"
+
+                + "  if(assistant)return txt(t);"
+                + " }"
+
+                + " return '';"
                 + "})()";
 
         webView.evaluateJavascript(
@@ -1267,6 +1309,7 @@ public class MainActivity extends Activity {
                     }
 
                     lastSpokenText = recovered;
+
                     replaySpeechText(recovered);
                 })
         );
@@ -1287,25 +1330,14 @@ public class MainActivity extends Activity {
             return;
         }
 
-        try {
-            tts.stop();
+        speakLongText(
+                text,
+                "chatgpt_replay"
+        );
 
-            tts.speak(
-                    text,
-                    TextToSpeech.QUEUE_FLUSH,
-                    null,
-                    "chatgpt_replay"
-            );
-
-            statusText.setText(
-                    "▶ Lettura dall'inizio"
-            );
-
-        } catch (Exception e) {
-            statusText.setText(
-                    "Impossibile avviare la lettura"
-            );
-        }
+        statusText.setText(
+                "▶ Lettura dall'inizio"
+        );
     }
 
     private String chooseBestRecognition(Bundle results) {
@@ -1529,6 +1561,13 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onDone(String utteranceId) {
+                    if (utteranceId != null
+                            && (utteranceId.startsWith("chatgpt_response_")
+                            || utteranceId.startsWith("chatgpt_replay_"))
+                            && !utteranceId.endsWith("_last")) {
+                        return;
+                    }
+
                     ttsSpeaking = false;
                     runOnUiThread(() -> {
                         playReadingFinishedSound();
@@ -1781,8 +1820,13 @@ public class MainActivity extends Activity {
     private void speakAssistantText(String text) {
         if (text == null) return;
 
-        String cleaned = stripEmojis(text).trim();
-        if (cleaned.isEmpty() || cleaned.equals(lastSpokenText)) return;
+        String cleaned =
+                stripEmojis(text).trim();
+
+        if (cleaned.isEmpty()
+                || cleaned.equals(lastSpokenText)) {
+            return;
+        }
 
         lastSpokenText = cleaned;
 
@@ -1792,13 +1836,103 @@ public class MainActivity extends Activity {
                 return;
             }
 
-            tts.speak(
+            speakLongText(
                     cleaned,
-                    TextToSpeech.QUEUE_FLUSH,
-                    null,
                     "chatgpt_response"
             );
         });
+    }
+
+    private void speakLongText(
+            String text,
+            String idPrefix
+    ) {
+        if (tts == null || TextUtils.isEmpty(text)) {
+            return;
+        }
+
+        String remaining = text.trim();
+
+        int systemMax =
+                TextToSpeech.getMaxSpeechInputLength();
+
+        int max =
+                Math.min(
+                        3200,
+                        Math.max(800, systemMax - 200)
+                );
+
+        List<String> chunks =
+                new ArrayList<>();
+
+        while (!remaining.isEmpty()) {
+            if (remaining.length() <= max) {
+                chunks.add(remaining);
+                break;
+            }
+
+            int cut = max;
+
+            int dot =
+                    remaining.lastIndexOf(". ", max);
+
+            int question =
+                    remaining.lastIndexOf("? ", max);
+
+            int exclamation =
+                    remaining.lastIndexOf("! ", max);
+
+            int semicolon =
+                    remaining.lastIndexOf("; ", max);
+
+            int best =
+                    Math.max(
+                            Math.max(dot, question),
+                            Math.max(exclamation, semicolon)
+                    );
+
+            if (best > max / 2) {
+                cut = best + 1;
+            } else {
+                int space =
+                        remaining.lastIndexOf(' ', max);
+
+                if (space > max / 2) {
+                    cut = space;
+                }
+            }
+
+            chunks.add(
+                    remaining.substring(0, cut).trim()
+            );
+
+            remaining =
+                    remaining.substring(cut).trim();
+        }
+
+        if (chunks.isEmpty()) return;
+
+        tts.stop();
+
+        for (int i = 0; i < chunks.size(); i++) {
+            boolean last =
+                    i == chunks.size() - 1;
+
+            String utteranceId =
+                    idPrefix
+                            + "_"
+                            + i
+                            + (last ? "_last" : "");
+
+            tts.speak(
+                    chunks.get(i),
+                    i == 0
+                            ? TextToSpeech.QUEUE_FLUSH
+                            : TextToSpeech.QUEUE_ADD,
+                    null,
+                    utteranceId
+            );
+        }
     }
 
     private void createHeadsetMediaSession() {
@@ -4651,61 +4785,107 @@ public class MainActivity extends Activity {
 
         String script =
                 "(function(){"
-                + " if(window.__danStableReadInstalled)return;"
-                + " window.__danStableReadInstalled=true;"
+                + " if(window.__danReadV3Installed)return;"
+                + " window.__danReadV3Installed=true;"
 
                 + " let timer=null;"
-                + " let stableText='';"
-                + " let stableSince=0;"
+                + " let candidate='';"
+                + " let candidateSince=0;"
+
+                + " function textOf(el){"
+                + "  if(!el)return '';"
+                + "  return (el.innerText||el.textContent||'')"
+                + "   .replace(/\\s+/g,' ')"
+                + "   .trim();"
+                + " }"
+
+                + " function explicitAssistants(){"
+                + "  return Array.from(document.querySelectorAll("
+                + "   \"[data-message-author-role='assistant'],\"+"
+                + "   \"[data-author='assistant'],\"+"
+                + "   \"[data-role='assistant'],\"+"
+                + "   \"[data-testid*='assistant-message'],\"+"
+                + "   \"[data-testid*='assistant-response']\""
+                + "  ));"
+                + " }"
+
+                + " function looksAssistantTurn(turn){"
+                + "  if(!turn)return false;"
+
+                + "  if(turn.querySelector("
+                + "   \"[data-message-author-role='assistant'],\"+"
+                + "   \"[data-author='assistant'],\"+"
+                + "   \"[data-role='assistant']\""
+                + "  ))return true;"
+
+                + "  if(turn.querySelector('.markdown,[class*=\"markdown\"]'))"
+                + "   return true;"
+
+                + "  const buttons=Array.from(turn.querySelectorAll('button'));"
+                + "  return buttons.some(b=>{"
+                + "   const a=("
+                + "    (b.getAttribute('aria-label')||'')+' '+"
+                + "    (b.getAttribute('title')||'')+' '+"
+                + "    (b.getAttribute('data-testid')||'')"
+                + "   ).toLowerCase();"
+
+                + "   return "
+                + "    a.includes('read aloud')||"
+                + "    a.includes('leggi ad alta voce')||"
+                + "    a.includes('copy')||"
+                + "    a.includes('copia')||"
+                + "    a.includes('good-response')||"
+                + "    a.includes('bad-response');"
+                + "  });"
+                + " }"
 
                 + " function latestAssistant(){"
-                + "  const direct=Array.from("
-                + "   document.querySelectorAll(\"[data-message-author-role='assistant']\")"
-                + "  );"
-                + "  if(direct.length)return direct[direct.length-1];"
+                + "  const explicit=explicitAssistants();"
+                + "  if(explicit.length)return explicit[explicit.length-1];"
 
                 + "  const turns=Array.from(document.querySelectorAll("
-                + "   \"article,[data-testid^='conversation-turn'],[data-testid*='conversation-turn']\""
+                + "   \"article,\"+"
+                + "   \"[data-testid^='conversation-turn'],\"+"
+                + "   \"[data-testid*='conversation-turn']\""
                 + "  ));"
 
                 + "  for(let i=turns.length-1;i>=0;i--){"
-                + "   const t=turns[i];"
-                + "   const assistant=t.querySelector"
-                + "    ? t.querySelector(\"[data-message-author-role='assistant']\")"
-                + "    : null;"
-                + "   if(assistant)return assistant;"
+                + "   if(looksAssistantTurn(turns[i]))return turns[i];"
                 + "  }"
 
                 + "  return null;"
                 + " }"
 
-                + " function latestAssistantText(){"
-                + "  const m=latestAssistant();"
-                + "  if(!m)return '';"
-                + "  return (m.innerText||m.textContent||'').trim();"
+                + " function latestText(){"
+                + "  return textOf(latestAssistant());"
                 + " }"
 
-                + " let lastHandled=latestAssistantText();"
-                + " stableText=lastHandled;"
-                + " stableSince=Date.now();"
+                + " let lastHandled=latestText();"
+                + " candidate=lastHandled;"
+                + " candidateSince=Date.now();"
 
                 + " function check(){"
-                + "  const text=latestAssistantText();"
-                + "  if(!text)return;"
+                + "  const text=latestText();"
 
-                + "  if(text!==stableText){"
-                + "   stableText=text;"
-                + "   stableSince=Date.now();"
+                + "  if(!text){"
+                + "   schedule(900);"
+                + "   return;"
+                + "  }"
+
+                + "  if(text!==candidate){"
+                + "   candidate=text;"
+                + "   candidateSince=Date.now();"
                 + "   schedule(1200);"
                 + "   return;"
                 + "  }"
 
-                + "  if(Date.now()-stableSince<1100){"
+                + "  if(Date.now()-candidateSince<1400){"
                 + "   schedule(500);"
                 + "   return;"
                 + "  }"
 
                 + "  if(text===lastHandled)return;"
+
                 + "  lastHandled=text;"
 
                 + "  try{"
@@ -4715,19 +4895,20 @@ public class MainActivity extends Activity {
                 + "  }catch(e){}"
                 + " }"
 
-                + " function schedule(delay){"
+                + " function schedule(ms){"
                 + "  clearTimeout(timer);"
-                + "  timer=setTimeout(check,delay||1400);"
+                + "  timer=setTimeout(check,ms||1200);"
                 + " }"
 
                 + " new MutationObserver(function(){"
-                + "  schedule(1400);"
+                + "  schedule(1200);"
                 + " }).observe(document.documentElement,{"
                 + "  childList:true,"
                 + "  subtree:true,"
                 + "  characterData:true"
                 + " });"
 
+                + " setInterval(check,2500);"
                 + "})();";
 
         webView.evaluateJavascript(script, null);
