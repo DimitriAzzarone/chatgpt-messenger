@@ -272,7 +272,7 @@ public class MainActivity extends Activity {
         logo.setBackgroundColor(Color.rgb(0, 168, 132));
 
         TextView title = new TextView(this);
-        title.setText("  Dan 1.39");
+        title.setText("  Dan 1.40");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
@@ -319,7 +319,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText(" Dan 1.39");
+            title.setText(" Dan 1.40");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);

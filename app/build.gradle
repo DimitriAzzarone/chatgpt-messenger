@@ -10,8 +10,8 @@ android {
         applicationId "com.dimitriazzarone.danluminexai"
         minSdk 24
         targetSdk 35
-        versionCode 43
-        versionName "1.31-audio-test"
+        versionCode 40
+        versionName "1.40"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }

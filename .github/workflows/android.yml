@@ -45,11 +45,11 @@ jobs:
         run: gradle assembleRelease --stacktrace
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Dan-v1.31-Audio-Test.apk
+        run: cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/Dan-1.40.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Dan-APK-v1.31-Audio-Test
-          path: app/build/outputs/apk/release/Dan-v1.31-Audio-Test.apk
+          name: Dan-APK-1.40
+          path: app/build/outputs/apk/release/Dan-1.40.apk
           if-no-files-found: error
