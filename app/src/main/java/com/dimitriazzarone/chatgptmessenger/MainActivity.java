@@ -4889,21 +4889,37 @@ public class MainActivity extends Activity {
                 + "  return txt(best);"
                 + " }"
 
-                + " function latestResponse(){"
-                + "  const root=document.querySelector('main')||document.body;"
-                + "  if(!root)return '';"
+                + " function latestResponse(){
+  const root=document.querySelector('main')||document.body;
 
-                + "  const byButton=fromActionButtons(root);"
-                + "  if(byButton)return byButton;"
+  const turns=Array.from(root.querySelectorAll(
+    '[data-message-author-role="assistant"],[data-testid*="assistant"]'
+  ));
 
-                + "  return '';"
-                + " }"
+  for(let i=turns.length-1;i>=0;i--){
+    const turn=turns[i];
 
-                + " let lastHandled=latestResponse();"
-                + " candidate=lastHandled;"
-                + " candidateSince=Date.now();"
+    if(turn.getAttribute('data-message-author-role')==='user') continue;
 
-                + " function check(){"
+    const blocks=Array.from(turn.querySelectorAll(
+      '.markdown,.prose,[data-testid="response-content"],[data-testid="message-content"]'
+    ));
+
+    const text=(blocks.length ? blocks : [turn])
+      .map(e=>(e.innerText||'').trim())
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+
+    if(text.length>0 && text.length<12000){
+      return text;
+    }
+  }
+
+  return '';
+}
+
+function check(){"
                 + "  const text=latestResponse();"
 
                 + "  if(!text){"
