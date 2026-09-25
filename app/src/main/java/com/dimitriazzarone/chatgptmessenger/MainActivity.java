@@ -272,7 +272,7 @@ public class MainActivity extends Activity {
         logo.setBackgroundColor(Color.rgb(0, 168, 132));
 
         TextView title = new TextView(this);
-        title.setText("  Dan 1.38");
+        title.setText("  Dan 1.39");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
@@ -319,7 +319,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText(" Dan 1.38");
+            title.setText(" Dan 1.39");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);
@@ -1269,19 +1269,43 @@ public class MainActivity extends Activity {
                 + "   meta.includes('bad-response')"
                 + "  ))continue;"
 
-                + "  let e=b.parentElement;"
+                + "  const br=b.getBoundingClientRect();"
 
-                + "  for(let level=0;e&&level<8;level++,e=e.parentElement){"
-                + "   if(e===root)break;"
+                + "  const near=Array.from(root.querySelectorAll("
+                + "   'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "  )).filter(e=>{"
+                + "   if(!visible(e)||excluded(e))return false;"
+                + "   const r=e.getBoundingClientRect();"
+                + "   return r.bottom<=br.top+20"
+                + "    && r.bottom>=br.top-2200"
+                + "    && txt(e).length>0;"
+                + "  });"
 
-                + "   const t=txt(e);"
-                + "   const blocks=e.querySelectorAll("
-                + "    'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
-                + "   ).length;"
+                + "  near.sort((a,c)=>"
+                + "   a.getBoundingClientRect().bottom"
+                + "   - c.getBoundingClientRect().bottom"
+                + "  );"
 
-                + "   if(t.length>=40 && t.length<=12000 && blocks>0){"
-                + "    return JSON.stringify({source:'ACTION',text:t});"
-                + "   }"
+                + "  const picked=[];"
+                + "  let lastTop=br.top;"
+
+                + "  for(let j=near.length-1;j>=0;j--){"
+                + "   const e=near[j];"
+                + "   const r=e.getBoundingClientRect();"
+                + "   const gap=lastTop-r.bottom;"
+
+                + "   if(picked.length>0 && gap>180)break;"
+
+                + "   picked.unshift(txt(e));"
+                + "   lastTop=r.top;"
+
+                + "   if(picked.join(' ').length>12000)break;"
+                + "  }"
+
+                + "  const answer=picked.join(' ').trim();"
+
+                + "  if(answer.length>=20){"
+                + "   return JSON.stringify({source:'ACTION',text:answer});"
                 + "  }"
                 + " }"
 
@@ -4903,21 +4927,43 @@ public class MainActivity extends Activity {
                 + "    meta.includes('bad-response')"
                 + "   ))continue;"
 
-                + "   let e=b.parentElement;"
+                + "   const br=b.getBoundingClientRect();"
 
-                + "   for(let level=0;e&&level<8;level++,e=e.parentElement){"
-                + "    if(e===root)break;"
+                + "   const blocks=Array.from(root.querySelectorAll("
+                + "    'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "   )).filter(e=>{"
+                + "    if(!visible(e)||excluded(e))return false;"
+                + "    const r=e.getBoundingClientRect();"
+                + "    return r.bottom<=br.top+20"
+                + "      && r.bottom>=br.top-2200"
+                + "      && txt(e).length>0;"
+                + "   });"
 
-                + "    const t=txt(e);"
+                + "   if(!blocks.length)continue;"
 
-                + "    if(t.length>=40 && t.length<=12000){"
-                + "     const blocks=e.querySelectorAll("
-                + "      'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
-                + "     ).length;"
+                + "   blocks.sort((a,c)=>"
+                + "    a.getBoundingClientRect().bottom"
+                + "    - c.getBoundingClientRect().bottom"
+                + "   );"
 
-                + "     if(blocks>0)return t;"
-                + "    }"
+                + "   const picked=[];"
+                + "   let lastTop=br.top;"
+
+                + "   for(let j=blocks.length-1;j>=0;j--){"
+                + "    const e=blocks[j];"
+                + "    const r=e.getBoundingClientRect();"
+                + "    const gap=lastTop-r.bottom;"
+
+                + "    if(picked.length>0 && gap>180)break;"
+
+                + "    picked.unshift(txt(e));"
+                + "    lastTop=r.top;"
+
+                + "    if(picked.join(' ').length>12000)break;"
                 + "   }"
+
+                + "   const answer=picked.join(' ').trim();"
+                + "   if(answer.length>=20)return answer;"
                 + "  }"
 
                 + "  return '';"
