@@ -4889,55 +4889,17 @@ public class MainActivity extends Activity {
                 + "  return txt(best);"
                 + " }"
 
-                + " function latestResponse(){
-  const root=document.querySelector('main')||document.body;
-
-  const turns=Array.from(root.querySelectorAll(
-    '[data-message-author-role="assistant"],[data-testid*="assistant"]'
-  ));
-
-  for(let i=turns.length-1;i>=0;i--){
-    const turn=turns[i];
-
-    if(turn.getAttribute('data-message-author-role')==='user') continue;
-
-    const blocks=Array.from(turn.querySelectorAll(
-      '.markdown,.prose,[data-testid="response-content"],[data-testid="message-content"]'
-    ));
-
-    const text=(blocks.length ? blocks : [turn])
-      .map(e=>(e.innerText||'').trim())
-      .filter(Boolean)
-      .join('\n')
-      .trim();
-
-    if(text.length>0 && text.length<12000){
-      return text;
-    }
-  }
-
-  return '';
-}
-
-function check(){"
-                + "  const text=latestResponse();"
-
-                + "  if(!text){"
-                + "   schedule(800);"
-                + "   return;"
-                + "  }"
-
-                + "  if(text!==candidate){"
-                + "   candidate=text;"
-                + "   candidateSince=Date.now();"
-                + "   schedule(1000);"
-                + "   return;"
-                + "  }"
-
-                + "  if(Date.now()-candidateSince<1300){"
-                + "   schedule(400);"
-                + "   return;"
-                + "  }"
+        + " function latestResponse(){"
+        + "   const root=document.querySelector('main')||document.body;"
+        + "   const turns=Array.from(root.querySelectorAll('[data-message-author-role=\\\"assistant\\\"],[data-testid=\\\"assistant\\\"]'));"
+        + "   for(let i=turns.length-1;i>=0;i--){"
+        + "     const turn=turns[i];"
+        + "     const blocks=Array.from(turn.querySelectorAll('.markdown,.prose,[data-testid=\\\"response-content\\\"],[data-testid=\\\"message-content\\\"]'));"
+        + "     const text=(blocks.length?blocks:[turn]).map(e=>(e.innerText||'').trim()).filter(Boolean).join('\\n').trim();"
+        + "     if(text.length>0 && text.length<12000){ return text; }"
+        + "   }"
+        + "   return '';"
+        + " }"
 
                 + "  if(text===lastHandled)return;"
 
