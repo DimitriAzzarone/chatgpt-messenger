@@ -272,7 +272,7 @@ public class MainActivity extends Activity {
         logo.setBackgroundColor(Color.rgb(0, 168, 132));
 
         TextView title = new TextView(this);
-        title.setText("  Dan 1.37");
+        title.setText("  Dan 1.38");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
@@ -319,7 +319,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText(" Dan 1.37");
+            title.setText(" Dan 1.38");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);
@@ -1213,58 +1213,116 @@ public class MainActivity extends Activity {
 
     private void replayLastSpeech() {
         if (webView == null) {
-            statusText.setText("DEBUG: webView nulla");
+            statusText.setText(
+                    "▶ Pagina non disponibile"
+            );
             return;
         }
 
         String script =
                 "(function(){"
                 + " function txt(e){"
-                + "  return e ? (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim() : '';"
+                + "  if(!e)return '';"
+                + "  return (e.innerText||e.textContent||'')"
+                + "   .replace(/\\s+/g,' ')"
+                + "   .trim();"
                 + " }"
 
-                + " const assistant=Array.from(document.querySelectorAll("
-                + "  \"[data-message-author-role='assistant'],\"+"
-                + "  \"[data-author='assistant'],\"+"
-                + "  \"[data-role='assistant'],\"+"
-                + "  \"[data-testid*='assistant-message'],\"+"
-                + "  \"[data-testid*='assistant-response']\""
-                + " ));"
-
-                + " const markdown=Array.from(document.querySelectorAll("
-                + "  '.markdown,[class*=\"markdown\"],.prose,[class*=\"prose\"]'"
-                + " ));"
-
-                + " const turns=Array.from(document.querySelectorAll("
-                + "  \"article,\"+"
-                + "  \"[data-testid^='conversation-turn'],\"+"
-                + "  \"[data-testid*='conversation-turn']\""
-                + " ));"
-
-                + " let chosen='';"
-                + " let source='NONE';"
-
-                + " if(assistant.length){"
-                + "  chosen=txt(assistant[assistant.length-1]);"
-                + "  source='ASSISTANT';"
+                + " function visible(e){"
+                + "  if(!e)return false;"
+                + "  const r=e.getBoundingClientRect();"
+                + "  const s=getComputedStyle(e);"
+                + "  return r.width>20 && r.height>10"
+                + "   && s.display!=='none'"
+                + "   && s.visibility!=='hidden';"
                 + " }"
 
-                + " if(!chosen && markdown.length){"
-                + "  chosen=txt(markdown[markdown.length-1]);"
-                + "  source='MARKDOWN';"
+                + " function excluded(e){"
+                + "  return !!e.closest("
+                + "   'nav,aside,form,footer,"
+                + "   [role=\"navigation\"],"
+                + "   [role=\"dialog\"],"
+                + "   [contenteditable=\"true\"]'"
+                + "  );"
                 + " }"
 
-                + " if(!chosen && turns.length){"
-                + "  chosen=txt(turns[turns.length-1]);"
-                + "  source='TURN';"
+                + " const root=document.querySelector('main')||document.body;"
+                + " if(!root)return JSON.stringify({source:'NONE',text:''});"
+
+                + " const buttons=Array.from(root.querySelectorAll('button'));"
+
+                + " for(let i=buttons.length-1;i>=0;i--){"
+                + "  const b=buttons[i];"
+
+                + "  const meta=("
+                + "   (b.getAttribute('aria-label')||'')+' '+"
+                + "   (b.getAttribute('title')||'')+' '+"
+                + "   (b.getAttribute('data-testid')||'')"
+                + "  ).toLowerCase();"
+
+                + "  if(!("
+                + "   meta.includes('copy')||"
+                + "   meta.includes('copia')||"
+                + "   meta.includes('read aloud')||"
+                + "   meta.includes('leggi')||"
+                + "   meta.includes('good-response')||"
+                + "   meta.includes('bad-response')"
+                + "  ))continue;"
+
+                + "  let e=b.parentElement;"
+
+                + "  for(let level=0;e&&level<8;level++,e=e.parentElement){"
+                + "   if(e===root)break;"
+
+                + "   const t=txt(e);"
+                + "   const blocks=e.querySelectorAll("
+                + "    'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "   ).length;"
+
+                + "   if(t.length>=40 && t.length<=12000 && blocks>0){"
+                + "    return JSON.stringify({source:'ACTION',text:t});"
+                + "   }"
+                + "  }"
+                + " }"
+
+                + " const blocks=Array.from(root.querySelectorAll("
+                + "  'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + " )).filter(e=>"
+                + "  visible(e)"
+                + "  && !excluded(e)"
+                + "  && txt(e).length>=20"
+                + " );"
+
+                + " if(!blocks.length)"
+                + "  return JSON.stringify({source:'NONE',text:''});"
+
+                + " blocks.sort((a,b)=>"
+                + "  a.getBoundingClientRect().bottom"
+                + "  - b.getBoundingClientRect().bottom"
+                + " );"
+
+                + " let best=blocks[blocks.length-1];"
+                + " let e=best.parentElement;"
+
+                + " for(let level=0;e&&level<7;level++,e=e.parentElement){"
+                + "  if(e===root)break;"
+                + "  if(excluded(e))break;"
+
+                + "  const t=txt(e);"
+                + "  const count=e.querySelectorAll("
+                + "   'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "  ).length;"
+
+                + "  if(t.length>=txt(best).length"
+                + "     && t.length<=12000"
+                + "     && count<=40){"
+                + "   best=e;"
+                + "  }"
                 + " }"
 
                 + " return JSON.stringify({"
-                + "  assistantCount:assistant.length,"
-                + "  markdownCount:markdown.length,"
-                + "  turnCount:turns.length,"
-                + "  source:source,"
-                + "  text:chosen.slice(0,12000)"
+                + "  source:'GENERIC',"
+                + "  text:txt(best)"
                 + " });"
                 + "})()";
 
@@ -1277,36 +1335,18 @@ public class MainActivity extends Activity {
                                         "[" + value + "]"
                                 ).getString(0);
 
-                        JSONObject debug =
+                        JSONObject result =
                                 new JSONObject(decoded);
 
-                        int a =
-                                debug.optInt(
-                                        "assistantCount",
-                                        -1
-                                );
-
-                        int m =
-                                debug.optInt(
-                                        "markdownCount",
-                                        -1
-                                );
-
-                        int t =
-                                debug.optInt(
-                                        "turnCount",
-                                        -1
-                                );
-
                         String source =
-                                debug.optString(
+                                result.optString(
                                         "source",
-                                        "?"
+                                        "NONE"
                                 );
 
                         String recovered =
                                 stripEmojis(
-                                        debug.optString(
+                                        result.optString(
                                                 "text",
                                                 ""
                                         )
@@ -1314,14 +1354,7 @@ public class MainActivity extends Activity {
 
                         if (recovered.isEmpty()) {
                             statusText.setText(
-                                    "DEBUG A="
-                                            + a
-                                            + " M="
-                                            + m
-                                            + " T="
-                                            + t
-                                            + " SRC="
-                                            + source
+                                    "▶ Nessun testo trovato"
                             );
                             return;
                         }
@@ -1329,17 +1362,18 @@ public class MainActivity extends Activity {
                         lastSpokenText = recovered;
 
                         statusText.setText(
-                                "DEBUG OK "
+                                "▶ "
                                         + source
-                                        + " len="
+                                        + " — "
                                         + recovered.length()
+                                        + " caratteri"
                         );
 
                         replaySpeechText(recovered);
 
                     } catch (Exception e) {
                         statusText.setText(
-                                "DEBUG errore DOM"
+                                "▶ Errore lettura pagina"
                         );
                     }
                 })
@@ -4816,8 +4850,8 @@ public class MainActivity extends Activity {
 
         String script =
                 "(function(){"
-                + " if(window.__danReadV4Installed)return;"
-                + " window.__danReadV4Installed=true;"
+                + " if(window.__danGenericReadInstalled)return;"
+                + " window.__danGenericReadInstalled=true;"
 
                 + " let timer=null;"
                 + " let candidate='';"
@@ -4830,75 +4864,121 @@ public class MainActivity extends Activity {
                 + "   .trim();"
                 + " }"
 
-                + " function latestAssistant(){"
+                + " function visible(e){"
+                + "  if(!e)return false;"
+                + "  const r=e.getBoundingClientRect();"
+                + "  const s=getComputedStyle(e);"
+                + "  return r.width>20 && r.height>10"
+                + "   && s.display!=='none'"
+                + "   && s.visibility!=='hidden';"
+                + " }"
 
-                + "  let nodes=Array.from(document.querySelectorAll("
-                + "   \"[data-message-author-role='assistant'],\"+"
-                + "   \"[data-author='assistant'],\"+"
-                + "   \"[data-role='assistant'],\"+"
-                + "   \"[data-testid*='assistant-message'],\"+"
-                + "   \"[data-testid*='assistant-response']\""
-                + "  )).filter(e=>txt(e).length>0);"
+                + " function excluded(e){"
+                + "  return !!e.closest("
+                + "   'nav,aside,form,footer,"
+                + "   [role=\"navigation\"],"
+                + "   [role=\"dialog\"],"
+                + "   [contenteditable=\"true\"]'"
+                + "  );"
+                + " }"
 
-                + "  if(nodes.length)return nodes[nodes.length-1];"
+                + " function fromActionButtons(root){"
+                + "  const buttons=Array.from(root.querySelectorAll('button'));"
 
-                + "  nodes=Array.from(document.querySelectorAll("
-                + "   '.markdown,[class*=\"markdown\"],"
-                + "   .prose,[class*=\"prose\"],"
-                + "   [data-testid*=\"response-content\"],"
-                + "   [data-testid*=\"message-content\"]'"
-                + "  )).filter(e=>txt(e).length>0);"
+                + "  for(let i=buttons.length-1;i>=0;i--){"
+                + "   const b=buttons[i];"
 
-                + "  if(nodes.length)return nodes[nodes.length-1];"
+                + "   const meta=("
+                + "    (b.getAttribute('aria-label')||'')+' '+"
+                + "    (b.getAttribute('title')||'')+' '+"
+                + "    (b.getAttribute('data-testid')||'')"
+                + "   ).toLowerCase();"
 
-                + "  const turns=Array.from(document.querySelectorAll("
-                + "   \"article,\"+"
-                + "   \"[data-testid^='conversation-turn'],\"+"
-                + "   \"[data-testid*='conversation-turn']\""
-                + "  ));"
+                + "   if(!("
+                + "    meta.includes('copy')||"
+                + "    meta.includes('copia')||"
+                + "    meta.includes('read aloud')||"
+                + "    meta.includes('leggi')||"
+                + "    meta.includes('good-response')||"
+                + "    meta.includes('bad-response')"
+                + "   ))continue;"
 
-                + "  for(let i=turns.length-1;i>=0;i--){"
-                + "   const t=turns[i];"
-                + "   if(txt(t).length<20)continue;"
+                + "   let e=b.parentElement;"
 
-                + "   const markdown=t.querySelector("
-                + "    '.markdown,[class*=\"markdown\"],.prose,[class*=\"prose\"]'"
-                + "   );"
-                + "   if(markdown)return markdown;"
+                + "   for(let level=0;e&&level<8;level++,e=e.parentElement){"
+                + "    if(e===root)break;"
 
-                + "   const buttons=Array.from(t.querySelectorAll('button'));"
-                + "   const assistant=buttons.some(b=>{"
-                + "    const a=("
-                + "     (b.getAttribute('aria-label')||'')+' '+"
-                + "     (b.getAttribute('title')||'')+' '+"
-                + "     (b.getAttribute('data-testid')||'')"
-                + "    ).toLowerCase();"
+                + "    const t=txt(e);"
 
-                + "    return "
-                + "     a.includes('read aloud')||"
-                + "     a.includes('leggi ad alta voce')||"
-                + "     a.includes('copy')||"
-                + "     a.includes('copia')||"
-                + "     a.includes('good-response')||"
-                + "     a.includes('bad-response');"
-                + "   });"
+                + "    if(t.length>=40 && t.length<=12000){"
+                + "     const blocks=e.querySelectorAll("
+                + "      'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "     ).length;"
 
-                + "   if(assistant)return t;"
+                + "     if(blocks>0)return t;"
+                + "    }"
+                + "   }"
                 + "  }"
 
-                + "  return null;"
+                + "  return '';"
                 + " }"
 
-                + " function latestText(){"
-                + "  return txt(latestAssistant());"
+                + " function genericBottomText(root){"
+                + "  const blocks=Array.from(root.querySelectorAll("
+                + "   'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "  )).filter(e=>"
+                + "   visible(e)"
+                + "   && !excluded(e)"
+                + "   && txt(e).length>=20"
+                + "  );"
+
+                + "  if(!blocks.length)return '';"
+
+                + "  blocks.sort((a,b)=>{"
+                + "   const ra=a.getBoundingClientRect();"
+                + "   const rb=b.getBoundingClientRect();"
+                + "   return ra.bottom-rb.bottom;"
+                + "  });"
+
+                + "  const leaf=blocks[blocks.length-1];"
+                + "  let best=leaf;"
+                + "  let e=leaf.parentElement;"
+
+                + "  for(let level=0;e&&level<7;level++,e=e.parentElement){"
+                + "   if(e===root)break;"
+                + "   if(excluded(e))break;"
+
+                + "   const t=txt(e);"
+                + "   const count=e.querySelectorAll("
+                + "    'p,li,pre,blockquote,h1,h2,h3,h4,h5,h6'"
+                + "   ).length;"
+
+                + "   if(t.length>=txt(best).length"
+                + "      && t.length<=12000"
+                + "      && count<=40){"
+                + "    best=e;"
+                + "   }"
+                + "  }"
+
+                + "  return txt(best);"
                 + " }"
 
-                + " let lastHandled=latestText();"
+                + " function latestResponse(){"
+                + "  const root=document.querySelector('main')||document.body;"
+                + "  if(!root)return '';"
+
+                + "  const byButton=fromActionButtons(root);"
+                + "  if(byButton)return byButton;"
+
+                + "  return genericBottomText(root);"
+                + " }"
+
+                + " let lastHandled=latestResponse();"
                 + " candidate=lastHandled;"
                 + " candidateSince=Date.now();"
 
                 + " function check(){"
-                + "  const text=latestText();"
+                + "  const text=latestResponse();"
 
                 + "  if(!text){"
                 + "   schedule(800);"
@@ -4912,12 +4992,13 @@ public class MainActivity extends Activity {
                 + "   return;"
                 + "  }"
 
-                + "  if(Date.now()-candidateSince<1200){"
+                + "  if(Date.now()-candidateSince<1300){"
                 + "   schedule(400);"
                 + "   return;"
                 + "  }"
 
                 + "  if(text===lastHandled)return;"
+
                 + "  lastHandled=text;"
 
                 + "  try{"
@@ -4933,7 +5014,7 @@ public class MainActivity extends Activity {
                 + " }"
 
                 + " new MutationObserver(function(){"
-                + "  schedule(1000);"
+                + "  schedule(900);"
                 + " }).observe(document.documentElement,{"
                 + "  childList:true,"
                 + "  subtree:true,"
