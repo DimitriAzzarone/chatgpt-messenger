@@ -272,7 +272,7 @@ public class MainActivity extends Activity {
         logo.setBackgroundColor(Color.rgb(0, 168, 132));
 
         TextView title = new TextView(this);
-        title.setText("  Dan 1.36");
+        title.setText("  Dan 1.37");
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
 
@@ -319,7 +319,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText(" Dan 1.36");
+            title.setText(" Dan 1.37");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);
@@ -1212,50 +1212,28 @@ public class MainActivity extends Activity {
     }
 
     private void replayLastSpeech() {
-        String cached =
-                lastSpokenText == null
-                        ? ""
-                        : lastSpokenText.trim();
-
-        if (!cached.isEmpty()) {
-            replaySpeechText(cached);
-            return;
-        }
-
         if (webView == null) {
-            statusText.setText(
-                    "▶ Nessuna lettura da ripetere"
-            );
+            statusText.setText("DEBUG: webView nulla");
             return;
         }
 
         String script =
                 "(function(){"
                 + " function txt(e){"
-                + "  return e"
-                + "   ? (e.innerText||e.textContent||'')"
-                + "      .replace(/\\s+/g,' ').trim()"
-                + "   : '';"
+                + "  return e ? (e.innerText||e.textContent||'').replace(/\\s+/g,' ').trim() : '';"
                 + " }"
 
-                + " let nodes=Array.from(document.querySelectorAll("
+                + " const assistant=Array.from(document.querySelectorAll("
                 + "  \"[data-message-author-role='assistant'],\"+"
                 + "  \"[data-author='assistant'],\"+"
                 + "  \"[data-role='assistant'],\"+"
                 + "  \"[data-testid*='assistant-message'],\"+"
                 + "  \"[data-testid*='assistant-response']\""
-                + " )).filter(e=>txt(e).length>0);"
+                + " ));"
 
-                + " if(nodes.length)return txt(nodes[nodes.length-1]);"
-
-                + " nodes=Array.from(document.querySelectorAll("
-                + "  '.markdown,[class*=\"markdown\"],"
-                + "  .prose,[class*=\"prose\"],"
-                + "  [data-testid*=\"response-content\"],"
-                + "  [data-testid*=\"message-content\"]'"
-                + " )).filter(e=>txt(e).length>0);"
-
-                + " if(nodes.length)return txt(nodes[nodes.length-1]);"
+                + " const markdown=Array.from(document.querySelectorAll("
+                + "  '.markdown,[class*=\"markdown\"],.prose,[class*=\"prose\"]'"
+                + " ));"
 
                 + " const turns=Array.from(document.querySelectorAll("
                 + "  \"article,\"+"
@@ -1263,68 +1241,107 @@ public class MainActivity extends Activity {
                 + "  \"[data-testid*='conversation-turn']\""
                 + " ));"
 
-                + " for(let i=turns.length-1;i>=0;i--){"
-                + "  const t=turns[i];"
-                + "  if(txt(t).length<20)continue;"
+                + " let chosen='';"
+                + " let source='NONE';"
 
-                + "  const md=t.querySelector("
-                + "   '.markdown,[class*=\"markdown\"],.prose,[class*=\"prose\"]'"
-                + "  );"
-
-                + "  if(md)return txt(md);"
-
-                + "  const buttons=Array.from(t.querySelectorAll('button'));"
-
-                + "  const assistant=buttons.some(b=>{"
-                + "   const a=("
-                + "    (b.getAttribute('aria-label')||'')+' '+"
-                + "    (b.getAttribute('title')||'')+' '+"
-                + "    (b.getAttribute('data-testid')||'')"
-                + "   ).toLowerCase();"
-
-                + "   return "
-                + "    a.includes('read aloud')||"
-                + "    a.includes('leggi ad alta voce')||"
-                + "    a.includes('copy')||"
-                + "    a.includes('copia');"
-                + "  });"
-
-                + "  if(assistant)return txt(t);"
+                + " if(assistant.length){"
+                + "  chosen=txt(assistant[assistant.length-1]);"
+                + "  source='ASSISTANT';"
                 + " }"
 
-                + " return '';"
+                + " if(!chosen && markdown.length){"
+                + "  chosen=txt(markdown[markdown.length-1]);"
+                + "  source='MARKDOWN';"
+                + " }"
+
+                + " if(!chosen && turns.length){"
+                + "  chosen=txt(turns[turns.length-1]);"
+                + "  source='TURN';"
+                + " }"
+
+                + " return JSON.stringify({"
+                + "  assistantCount:assistant.length,"
+                + "  markdownCount:markdown.length,"
+                + "  turnCount:turns.length,"
+                + "  source:source,"
+                + "  text:chosen.slice(0,12000)"
+                + " });"
                 + "})()";
 
         webView.evaluateJavascript(
                 script,
                 value -> runOnUiThread(() -> {
-                    String recovered = "";
-
                     try {
-                        if (value != null
-                                && !"null".equals(value)
-                                && !"\"\"".equals(value)) {
+                        String decoded =
+                                new org.json.JSONArray(
+                                        "[" + value + "]"
+                                ).getString(0);
 
-                            recovered =
-                                    new org.json.JSONArray(
-                                            "[" + value + "]"
-                                    ).getString(0);
+                        JSONObject debug =
+                                new JSONObject(decoded);
+
+                        int a =
+                                debug.optInt(
+                                        "assistantCount",
+                                        -1
+                                );
+
+                        int m =
+                                debug.optInt(
+                                        "markdownCount",
+                                        -1
+                                );
+
+                        int t =
+                                debug.optInt(
+                                        "turnCount",
+                                        -1
+                                );
+
+                        String source =
+                                debug.optString(
+                                        "source",
+                                        "?"
+                                );
+
+                        String recovered =
+                                stripEmojis(
+                                        debug.optString(
+                                                "text",
+                                                ""
+                                        )
+                                ).trim();
+
+                        if (recovered.isEmpty()) {
+                            statusText.setText(
+                                    "DEBUG A="
+                                            + a
+                                            + " M="
+                                            + m
+                                            + " T="
+                                            + t
+                                            + " SRC="
+                                            + source
+                            );
+                            return;
                         }
-                    } catch (Exception ignored) {}
 
-                    recovered =
-                            stripEmojis(recovered).trim();
+                        lastSpokenText = recovered;
 
-                    if (recovered.isEmpty()) {
                         statusText.setText(
-                                "▶ Nessuna lettura da ripetere"
+                                "DEBUG OK "
+                                        + source
+                                        + " len="
+                                        + recovered.length()
                         );
-                        return;
+
+                        replaySpeechText(recovered);
+
+                    } catch (Exception e) {
+                        statusText.setText(
+                                "DEBUG errore DOM"
+                        );
                     }
-
-                    lastSpokenText = recovered;
-
-                    replaySpeechText(recovered);
                 })
         );
     }
