@@ -4889,80 +4889,19 @@ public class MainActivity extends Activity {
                 + "  return txt(best);"
                 + " }"
 
-        + " function latestResponse(){
-    const root=document.querySelector('main')||document.body;
+        + " function latestResponse(){"
+        + "   const root=document.querySelector('main')||document.body;"
+        + "   const turns=Array.from(root.querySelectorAll('[data-message-author-role=\\\"assistant\\\"],[data-testid=\\\"assistant\\\"]'));"
+        + "   for(let i=turns.length-1;i>=0;i--){"
+        + "     const turn=turns[i];"
+        + "     const blocks=Array.from(turn.querySelectorAll('.markdown,.prose,[data-testid=\\\"response-content\\\"],[data-testid=\\\"message-content\\\"]'));"
+        + "     const text=(blocks.length?blocks:[turn]).map(e=>(e.innerText||'').trim()).filter(Boolean).join('\\n').trim();"
+        + "     if(text.length>0 && text.length<12000){ return text; }"
+        + "   }"
+      + "  return genericBottomText(root);"
+        + " }"
 
-    /*
-     * Cerchiamo i messaggi dell'assistente dal più recente.
-     * NON usiamo genericBottomText(root), perché può includere
-     * anche la domanda dell'utente.
-     */
-    const selectors=[
-      '[data-message-author-role="assistant"]',
-      '[data-testid^="conversation-turn-"]'
-    ];
-
-    let candidates=[];
-
-    for(const sel of selectors){
-      try{
-        candidates=Array.from(root.querySelectorAll(sel));
-        if(candidates.length) break;
-      }catch(e){}
-    }
-
-    for(let i=candidates.length-1;i>=0;i--){
-      const turn=candidates[i];
-
-      /*
-       * Se è un conversation-turn generico, scartiamo
-       * esplicitamente i turn dell'utente.
-       */
-      const userNode=turn.matches &&
-        turn.matches('[data-message-author-role="user"]');
-
-      if(userNode) continue;
-
-      const assistantInside=turn.querySelector ?
-        turn.querySelector('[data-message-author-role="assistant"]') : null;
-
-      let source=assistantInside || turn;
-
-      /*
-       * Se il turn dichiara esplicitamente di essere USER,
-       * non deve mai essere letto.
-       */
-      const role=source.getAttribute ?
-        source.getAttribute('data-message-author-role') : null;
-
-      if(role && role!=='assistant') continue;
-
-      const blocks=Array.from(source.querySelectorAll(
-        '.markdown,.prose,[data-testid="response-content"],[data-message-author-role="assistant"]'
-      ));
-
-      let text=blocks
-        .map(e=>(e.innerText||'').trim())
-        .filter(Boolean)
-        .join('\n')
-        .trim();
-
-      /*
-       * Fallback SOLO dentro il blocco dell'assistente,
-       * mai sull'intera pagina.
-       */
-      if(!text){
-        text=(source.innerText||'').trim();
-      }
-
-      if(text && text.length>0 && text.length<12000){
-        return text;
-      }
-    }
-
-    return "";
-}
-if(text===lastHandled)return;"
+                + "  if(text===lastHandled)return;"
 
                 + "  lastHandled=text;"
 
