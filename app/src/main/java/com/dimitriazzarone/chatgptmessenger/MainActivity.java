@@ -4898,7 +4898,7 @@ public class MainActivity extends Activity {
         + "     const text=(blocks.length?blocks:[turn]).map(e=>(e.innerText||'').trim()).filter(Boolean).join('\\n').trim();"
         + "     if(text.length>0 && text.length<12000){ return text; }"
         + "   }"
-        + "   return '';"
+      + "  return genericBottomText(root);"
         + " }"
 
                 + "  if(text===lastHandled)return;"
