@@ -10,6 +10,7 @@ on:
       - dan-luminex-ai-v1.26
       - dan-agf-v1.31
       - dan-v1.31-audio-test
+      - dan-v1.48-answer-only
 
 jobs:
   build:
