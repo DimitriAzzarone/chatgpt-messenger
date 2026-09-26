@@ -4901,6 +4901,8 @@ public class MainActivity extends Activity {
       + "  return genericBottomText(root);"
         + " }"
 
+                + "function check(){"
+                + "  const text=latestResponse();"
                 + "  if(text===lastHandled)return;"
 
                 + "  lastHandled=text;"
