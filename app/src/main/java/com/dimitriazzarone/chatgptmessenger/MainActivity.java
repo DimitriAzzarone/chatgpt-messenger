@@ -4799,7 +4799,7 @@ public class MainActivity extends Activity {
 
                 + " function excluded(e){"
                 + "  return !!e.closest("
-                + "   'nav,aside,form,footer,"
+                + "   'textarea,input,nav,aside,form,footer,"
                 + "   [role=\"navigation\"],"
                 + "   [role=\"dialog\"],"
                 + "   [contenteditable=\"true\"]'"
