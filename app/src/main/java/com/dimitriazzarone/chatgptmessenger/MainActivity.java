@@ -4780,6 +4780,7 @@ public class MainActivity extends Activity {
                 + " let timer=null;"
                 + " let candidate='';"
                 + " let candidateSince=0;"
+                + " let lastHandled='';"
 
                 + " function txt(e){"
                 + "  if(!e)return '';"
@@ -4898,12 +4899,19 @@ public class MainActivity extends Activity {
         + "     const text=(blocks.length?blocks:[turn]).map(e=>(e.innerText||'').trim()).filter(Boolean).join('\\n').trim();"
         + "     if(text.length>0 && text.length<12000){ return text; }"
         + "   }"
-      + "  return genericBottomText(root);"
+      + "  return '';"
         + " }"
 
                 + "function check(){"
                 + "  const text=latestResponse();"
-                + "  if(text===lastHandled)return;"
+                + "  if(!text||text===lastHandled)return;"
+                + "  if(text!==candidate){"
+                + "   candidate=text;"
+                + "   candidateSince=Date.now();"
+                + "   schedule(1500);"
+                + "   return;"
+                + "  }"
+                + "  if(Date.now()-candidateSince<1400){schedule(500);return;}"
 
                 + "  lastHandled=text;"
 
@@ -4927,6 +4935,7 @@ public class MainActivity extends Activity {
                 + "  characterData:true"
                 + " });"
 
+                + " lastHandled=latestResponse();"
                 + " setInterval(check,2000);"
                 + "})();";
 
