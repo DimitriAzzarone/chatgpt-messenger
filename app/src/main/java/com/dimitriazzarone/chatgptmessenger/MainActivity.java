@@ -1810,7 +1810,10 @@ public class MainActivity extends Activity {
         if (text == null) return;
 
         String cleaned =
-                stripEmojis(text).trim();
+                stripEmojis(text).trim()
+                        .replaceFirst("(?iu)^\\s*hai detto\\s*[:：,.!?–—-]?\\s*", "")
+                        .replaceFirst("(?iu)^\\s*chat(?:gpt)? ha detto\\s*[:：,.!?–—-]?\\s*", "")
+                        .trim();
 
         if (cleaned.isEmpty()
                 || cleaned.equals(lastSpokenText)) {
