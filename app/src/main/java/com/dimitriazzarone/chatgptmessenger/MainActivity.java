@@ -4523,9 +4523,45 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(script, null);
     }
 
+    private void injectPinnedChatOrder() {
+        if (webView == null) return;
+        String script =
+                "(function(){\n" +
+                "if(window.__danPinnedOrderInstalled)return;\n" +
+                "window.__danPinnedOrderInstalled=true;\n" +
+                "const names=['File Pen Name Drive','Associazione Gruppo Form','Avvisi email KDP','Calendario Accesso Googl','Apertura sito 2+2 Lezioni','Aprire sessione privata Alievi','Apri WhatsApp Web Associ','WhatsApp Web Luminex','Dan 3.0'];\n" +
+                "const norm=s=>(s||'').replace(/\\s+/g,' ').trim().toLocaleLowerCase();\n" +
+                "function leaf(words){return Array.from(document.querySelectorAll('nav *,aside *')).find(e=>!e.children.length&&words.includes(norm(e.textContent)));}\n" +
+                "function fix(){\n" +
+                " const head=leaf(['fissati in alto','bloccate','pinned']);\n" +
+                " if(!head)return;\n" +
+                " const scope=head.closest('nav,aside')||document.body;\n" +
+                " const recent=Array.from(scope.querySelectorAll('*')).find(e=>!e.children.length&&['recenti','recents'].includes(norm(e.textContent)));\n" +
+                " const links=Array.from(scope.querySelectorAll('a[href*=\"/c/\"]')).filter(a=>(head.compareDocumentPosition(a)&Node.DOCUMENT_POSITION_FOLLOWING)&&(!recent||(a.compareDocumentPosition(recent)&Node.DOCUMENT_POSITION_FOLLOWING)));\n" +
+                " const found=names.map(n=>links.find(a=>norm(a.textContent||a.getAttribute('aria-label')).startsWith(norm(n))));\n" +
+                " if(found.some(a=>!a)||new Set(found).size!==names.length)return;\n" +
+                " let parent=found[0].parentElement;\n" +
+                " while(parent&&!found.every(a=>parent.contains(a)))parent=parent.parentElement;\n" +
+                " if(!parent||(recent&&parent.contains(recent)))return;\n" +
+                " const rows=found.map(a=>{let r=a;while(r.parentElement&&r.parentElement!==parent)r=r.parentElement;return r;});\n" +
+                " if(new Set(rows).size!==names.length)return;\n" +
+                " if(rows.some(r=>(r.matches('a[href*=\"/c/\"]')?1:0)+r.querySelectorAll('a[href*=\"/c/\"]').length!==1))return;\n" +
+                " const current=Array.from(parent.children).filter(x=>rows.includes(x));\n" +
+                " if(current.length!==names.length||current.every((x,i)=>x===rows[i]))return;\n" +
+                " rows.forEach(r=>parent.appendChild(r));\n" +
+                "}\n" +
+                "let timer;\n" +
+                "new MutationObserver(()=>{clearTimeout(timer);timer=setTimeout(fix,300);}).observe(document.documentElement,{childList:true,subtree:true});\n" +
+                "setInterval(fix,2000);\n" +
+                "fix();\n" +
+                "})();";
+        webView.evaluateJavascript(script, null);
+    }
+
     private void injectPageBehaviors() {
         injectDanChatWatcher();
         injectDanBranding();
+        injectPinnedChatOrder();
         injectEnterToSend();
         injectManualLuminexContext();
         syncLuminexContextToChatGpt();
