@@ -11,6 +11,7 @@ on:
       - dan-agf-v1.31
       - dan-v1.31-audio-test
       - dan-v1.48-answer-only
+      - dan-v1.49-pinned-order
 
 jobs:
   build:
