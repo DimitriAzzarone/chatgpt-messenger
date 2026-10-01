@@ -292,7 +292,7 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("application/x-ndjson");
-            intent.putExtra(Intent.EXTRA_TITLE, "Dan-memory-1.57.jsonl");
+            intent.putExtra(Intent.EXTRA_TITLE, "Dan-memory-" + BuildConfig.VERSION_NAME + ".jsonl");
             startActivityForResult(intent, REQ_MEMORY_EXPORT);
             return true;
         });
@@ -1157,6 +1157,11 @@ public class MainActivity extends Activity {
     private void toggleRecordingSounds() {
         recordingSoundsEnabled = !recordingSoundsEnabled;
 
+        if (!recordingSoundsEnabled && tts != null) {
+            try { tts.stop(); } catch (Exception ignored) {}
+            ttsSpeaking = false;
+        }
+
         getSharedPreferences(PREFS, MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_RECORDING_SOUNDS, recordingSoundsEnabled)
@@ -1168,7 +1173,7 @@ public class MainActivity extends Activity {
 
         Toast.makeText(
                 this,
-                recordingSoundsEnabled ? "Suoni registrazione attivi" : "Suoni registrazione disattivati",
+                recordingSoundsEnabled ? "Audio di Dan attivo" : "Audio di Dan disattivato",
                 Toast.LENGTH_SHORT
         ).show();
     }
@@ -1233,6 +1238,10 @@ public class MainActivity extends Activity {
     }
 
     private void replayLastSpeech() {
+        if (!recordingSoundsEnabled) {
+            statusText.setText("🔕 Audio di Dan disattivato");
+            return;
+        }
         if (webView == null) {
             statusText.setText("▶ Pagina non disponibile");
             return;
@@ -1326,6 +1335,10 @@ public class MainActivity extends Activity {
     }
 
     private void replaySpeechText(String text) {
+        if (!recordingSoundsEnabled) {
+            statusText.setText("🔕 Audio di Dan disattivato");
+            return;
+        }
         if (TextUtils.isEmpty(text)) {
             statusText.setText(
                     "▶ Nessuna lettura da ripetere"
@@ -1696,7 +1709,7 @@ public class MainActivity extends Activity {
                 .putString(PREF_SAGE_BASE_VOICE, baseVoice.getName())
                 .apply();
 
-        if (preview) {
+        if (preview && recordingSoundsEnabled) {
             tts.speak(
                     "Questa è la modalità Saggio. Più calma, lenta e decisamente più profonda.",
                     TextToSpeech.QUEUE_FLUSH,
@@ -1807,12 +1820,14 @@ public class MainActivity extends Activity {
                                 .putString(PREF_TTS_VOICE, selected.getName())
                                 .apply();
 
-                        tts.speak(
-                                "Questa è la voce selezionata. Ascoltala e scegli solo se ti piace.",
-                                TextToSpeech.QUEUE_FLUSH,
-                                null,
-                                "voice_preview"
-                        );
+                        if (recordingSoundsEnabled) {
+                            tts.speak(
+                                    "Questa è la voce selezionata. Ascoltala e scegli solo se ti piace.",
+                                    TextToSpeech.QUEUE_FLUSH,
+                                    null,
+                                    "voice_preview"
+                            );
+                        }
                     } else {
                         Toast.makeText(
                                 MainActivity.this,
@@ -1844,6 +1859,10 @@ public class MainActivity extends Activity {
         lastSpokenText = cleaned;
 
         runOnUiThread(() -> {
+            if (!recordingSoundsEnabled) {
+                statusText.setText("🔕 Audio di Dan disattivato");
+                return;
+            }
             if (!ttsReady || tts == null) {
                 statusText.setText("Risposta pronta");
                 return;
@@ -1860,7 +1879,7 @@ public class MainActivity extends Activity {
             String text,
             String idPrefix
     ) {
-        if (tts == null || TextUtils.isEmpty(text)) {
+        if (!recordingSoundsEnabled || tts == null || TextUtils.isEmpty(text)) {
             return;
         }
 
