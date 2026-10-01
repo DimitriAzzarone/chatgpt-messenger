@@ -3812,7 +3812,7 @@ public class MainActivity extends Activity {
                 "   }" +
 
                 "   const fields=Array.from(document.querySelectorAll(" +
-                "    'textarea,input,[contenteditable=true]'+" +
+                "    'textarea,input,[contenteditable=true],[placeholder],[data-placeholder],[aria-label]'+" +
                 "   ));" +
                 "   for(const f of fields){" +
                 "    for(const a of ['placeholder','data-placeholder','aria-label']){" +
@@ -4411,7 +4411,7 @@ public class MainActivity extends Activity {
                 "   }" +
 
                 "   const fields=Array.from(document.querySelectorAll(" +
-                "    'textarea,input,[contenteditable=true]'" +
+                "    'textarea,input,[contenteditable=true],[placeholder],[data-placeholder],[aria-label]'" +
                 "   ));" +
 
                 "   for(const f of fields){" +
