@@ -66,7 +66,9 @@ import androidx.webkit.WebViewFeature;
 import java.io.File;
 import java.io.BufferedReader;
 import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -81,6 +83,8 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
 
@@ -92,6 +96,7 @@ public class MainActivity extends Activity {
     private static final long LUMINEX_SNAPSHOT_MS = 4000L;
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_FILE_CHOOSER = 4001;
+    private static final int REQ_MEMORY_EXPORT = 4002;
     private static final String PREFS = "radio_prefs";
     private static final String PREF_TTS_VOICE = "tts_voice";
     private static final String PREF_TTS_MODE = "tts_mode";
@@ -103,6 +108,12 @@ public class MainActivity extends Activity {
     private static final String PREF_RECORDING_SOUNDS = "recording_sounds_enabled";
 
     private WebView webView;
+    private volatile String memoryPageUrl = "";
+    private DanMemoryStore memoryStore;
+    private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
+    private String pendingMemoryId = "";
+    private String pendingMemoryText = "";
+    private long pendingMemoryAt = 0L;
     private WebView luminexWebView;
      private Button luminexButton;
     private Button privateButton;
@@ -225,6 +236,8 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        memoryStore = new DanMemoryStore(getApplicationContext());
+
         SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
 
         // v1.23: conserva l'ultimo stato AUTO scelto dall'utente.
@@ -275,6 +288,14 @@ public class MainActivity extends Activity {
         title.setText("  Dan " + BuildConfig.VERSION_NAME);
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
+        title.setOnLongClickListener(view -> {
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("application/x-ndjson");
+            intent.putExtra(Intent.EXTRA_TITLE, "Dan-memory-1.57.jsonl");
+            startActivityForResult(intent, REQ_MEMORY_EXPORT);
+            return true;
+        });
 
         voiceButton = makeButton("🔊");
         voiceButton.setTextSize(18);
@@ -4123,12 +4144,14 @@ public class MainActivity extends Activity {
                     android.graphics.Bitmap favicon
             ) {
                 lastUrl = url;
+                memoryPageUrl = url;
                 updateActiveDanChat(url);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 lastUrl = url;
+                memoryPageUrl = url;
                 updateActiveDanChat(url);
                 injectPageBehaviors();
                 try { CookieManager.getInstance().flush(); } catch (Exception ignored) {}
@@ -4180,6 +4203,25 @@ public class MainActivity extends Activity {
     ) {
         super.onActivityResult(requestCode, resultCode, data);
 
+        if (requestCode == REQ_MEMORY_EXPORT) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri destination = data.getData();
+                memoryExecutor.execute(() -> {
+                    try (OutputStream output = getContentResolver().openOutputStream(destination)) {
+                        if (output == null) throw new java.io.IOException("Destinazione non scrivibile");
+                        int count = memoryStore.exportJsonl(output);
+                        runOnUiThread(() -> Toast.makeText(this,
+                                "Memoria esportata: " + count + " messaggi", Toast.LENGTH_LONG).show());
+                    } catch (Exception e) {
+                        android.util.Log.e("DanMemory", "Esportazione fallita", e);
+                        runOnUiThread(() -> Toast.makeText(this,
+                                "Esportazione memoria non riuscita", Toast.LENGTH_LONG).show());
+                    }
+                });
+            }
+            return;
+        }
+
         if (requestCode == REQ_FILE_CHOOSER) {
             if (filePathCallback == null) return;
 
@@ -4205,6 +4247,43 @@ public class MainActivity extends Activity {
     }
 
     private class NativeBridge {
+        @JavascriptInterface
+        public void rememberMemoryPending(String id, String text) {
+            if (!isDanChatGptPage()) return;
+            if (id == null || text == null || id.length() > 100 || text.isEmpty()) return;
+            synchronized (MainActivity.this) {
+                pendingMemoryId = id;
+                pendingMemoryText = text;
+                pendingMemoryAt = System.currentTimeMillis();
+            }
+        }
+
+        @JavascriptInterface
+        public void clearMemoryPending(String id) {
+            if (!isDanChatGptPage()) return;
+            synchronized (MainActivity.this) {
+                if (pendingMemoryId.equals(id)) {
+                    pendingMemoryId = "";
+                    pendingMemoryText = "";
+                    pendingMemoryAt = 0L;
+                }
+            }
+        }
+
+        @JavascriptInterface
+        public void recordMemoryTurn(String url, String role, String eventId, String text) {
+            if (url == null || role == null || eventId == null || text == null ||
+                    text.trim().isEmpty() || !eventId.matches("dan-[A-Za-z0-9.-]+:(user|assistant)")) return;
+            if (!"user".equals(role) && !"assistant".equals(role)) return;
+            Uri parsed = Uri.parse(url);
+            if (!"https".equals(parsed.getScheme()) ||
+                    !"chatgpt.com".equals(parsed.getHost()) ||
+                    parsed.getPath() == null ||
+                    !parsed.getPath().matches("/(?:g/[^/]+/)?c/[^/]+")) return;
+            if (!isDanChatGptPage()) return;
+            memoryExecutor.execute(() -> memoryStore.record(eventId, url, role, text));
+        }
+
         @JavascriptInterface
         public void assistantReady(String text) {
             speakAssistantText(text);
@@ -4567,6 +4646,44 @@ public class MainActivity extends Activity {
         syncLuminexContextToChatGpt();
         injectDownloadNameCapture();
         injectAssistantObserver();
+        injectMemoryObserver();
+    }
+
+    private void injectMemoryObserver() {
+        if (webView == null || webView.getUrl() == null ||
+                !webView.getUrl().startsWith("https://chatgpt.com/")) return;
+        try (InputStream input = getAssets().open("dan_memory_observer.js");
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int n;
+            while ((n = input.read(buffer)) != -1) {
+                output.write(buffer, 0, n);
+            }
+            webView.evaluateJavascript("window.__danMemoryPending=" +
+                    pendingMemoryJson() + ";\n" +
+                    new String(output.toByteArray(), StandardCharsets.UTF_8), null);
+        } catch (Exception e) {
+            android.util.Log.e("DanMemory", "Osservatore non installato", e);
+        }
+    }
+
+    private boolean isDanChatGptPage() {
+        Uri uri = Uri.parse(memoryPageUrl);
+        return "https".equals(uri.getScheme()) && "chatgpt.com".equals(uri.getHost());
+    }
+
+    private synchronized String pendingMemoryJson() {
+        if (pendingMemoryId.isEmpty() ||
+                System.currentTimeMillis() - pendingMemoryAt > 10 * 60 * 1000) return "null";
+        JSONObject value = new JSONObject();
+        try {
+            value.put("id", pendingMemoryId);
+            value.put("text", pendingMemoryText);
+            value.put("started", pendingMemoryAt);
+            return value.toString();
+        } catch (Exception e) {
+            return "null";
+        }
     }
 
     private void syncLuminexContextToChatGpt() {

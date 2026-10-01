@@ -12,6 +12,7 @@ on:
       - dan-v1.31-audio-test
       - dan-v1.48-answer-only
       - dan-v1.49-pinned-order
+      - dan-v1.57-local-memory
 
 jobs:
   build:
