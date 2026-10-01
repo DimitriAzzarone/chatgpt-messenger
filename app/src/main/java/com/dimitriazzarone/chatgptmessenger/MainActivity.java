@@ -3793,12 +3793,8 @@ public class MainActivity extends Activity {
                 "  try{" +
                 "   const nodes=Array.from(document.querySelectorAll('body *'));" +
                 "   for(const n of nodes){" +
-                "    const label=(n.textContent||'').trim();" +
-                "    if(n.children.length===0 && label==='ChatGPT' && n.getBoundingClientRect().top<160){" +
-                "     n.textContent='Dan';" +
-                "    }" +
-                "    if(n.children.length===0 && /^(Rispondi|Chiedi|Scrivi) a ChatGPT/i.test(label) && n.getBoundingClientRect().top>window.innerHeight*0.65){" +
-                "     n.textContent=label.replace(/ChatGPT/ig,'Dan');" +
+                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT'){" +
+                "     n.style.display='none';" +
                 "    }" +
                 "   }" +
 
@@ -3816,7 +3812,7 @@ public class MainActivity extends Activity {
                 "   }" +
 
                 "   const fields=Array.from(document.querySelectorAll(" +
-                "    '[placeholder],[data-placeholder],[aria-label]'+" +
+                "    'textarea,input,[contenteditable=true]'+" +
                 "   ));" +
                 "   for(const f of fields){" +
                 "    for(const a of ['placeholder','data-placeholder','aria-label']){" +
@@ -4394,12 +4390,8 @@ public class MainActivity extends Activity {
                 "  try{" +
                 "   const nodes=Array.from(document.querySelectorAll('body *'));" +
                 "   for(const n of nodes){" +
-                "    const label=(n.textContent||'').trim();" +
-                "    if(n.children.length===0 && label==='ChatGPT' && n.getBoundingClientRect().top<160){" +
-                "     n.textContent='Dan';" +
-                "    }" +
-                "    if(n.children.length===0 && /^(Rispondi|Chiedi|Scrivi) a ChatGPT/i.test(label) && n.getBoundingClientRect().top>window.innerHeight*0.65){" +
-                "     n.textContent=label.replace(/ChatGPT/ig,'Dan');" +
+                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT'){" +
+                "     n.style.display='none';" +
                 "    }" +
                 "   }" +
 
@@ -4419,7 +4411,7 @@ public class MainActivity extends Activity {
                 "   }" +
 
                 "   const fields=Array.from(document.querySelectorAll(" +
-                "    '[placeholder],[data-placeholder],[aria-label]'" +
+                "    'textarea,input,[contenteditable=true]'" +
                 "   ));" +
 
                 "   for(const f of fields){" +
@@ -4427,7 +4419,7 @@ public class MainActivity extends Activity {
                 "    for(const a of attrs){" +
                 "     const v=f.getAttribute(a);" +
                 "     if(v && v.toLowerCase().includes('chatgpt')){" +
-                "      f.setAttribute(a,v.replace(/chatgpt/ig,'Dan'));" +
+                "      f.setAttribute(a,'Chiedi a Dan');" +
                 "     }" +
                 "    }" +
                 "   }" +
