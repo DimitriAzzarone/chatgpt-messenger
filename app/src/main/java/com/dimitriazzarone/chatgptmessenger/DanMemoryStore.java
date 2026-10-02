@@ -36,15 +36,15 @@ final class DanMemoryStore extends SQLiteOpenHelper {
         // Migrations will preserve existing turns when the schema changes.
     }
 
-    void record(String eventId, String conversationUrl, String role, String body) {
+    boolean record(String eventId, String conversationUrl, String role, String body) {
         ContentValues values = new ContentValues();
         values.put("event_id", eventId);
         values.put("conversation_url", conversationUrl);
         values.put("role", role);
         values.put("body", body);
         values.put("recorded_at", System.currentTimeMillis());
-        getWritableDatabase().insertWithOnConflict(
-                "turns", null, values, SQLiteDatabase.CONFLICT_IGNORE);
+        return getWritableDatabase().insertWithOnConflict(
+                "turns", null, values, SQLiteDatabase.CONFLICT_IGNORE) != -1;
     }
 
     int exportJsonl(OutputStream output) throws IOException {

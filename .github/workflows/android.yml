@@ -14,6 +14,7 @@ on:
       - dan-v1.49-pinned-order
       - dan-v1.57-local-memory
       - dan-v1.58-audio-mute
+      - dan-v1.59-auto-backup
 
 jobs:
   build:

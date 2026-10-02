@@ -83,8 +83,10 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends Activity {
 
@@ -97,6 +99,8 @@ public class MainActivity extends Activity {
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final int REQ_MEMORY_EXPORT = 4002;
+    private static final int REQ_MEMORY_BACKUP = 4003;
+    private static final String PREF_MEMORY_BACKUP_URI = "dan_memory_backup_uri";
     private static final String PREFS = "radio_prefs";
     private static final String PREF_TTS_VOICE = "tts_voice";
     private static final String PREF_TTS_MODE = "tts_mode";
@@ -110,7 +114,8 @@ public class MainActivity extends Activity {
     private WebView webView;
     private volatile String memoryPageUrl = "";
     private DanMemoryStore memoryStore;
-    private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService memoryExecutor = Executors.newSingleThreadScheduledExecutor();
+    private ScheduledFuture<?> pendingMemoryBackup;
     private String pendingMemoryId = "";
     private String pendingMemoryText = "";
     private long pendingMemoryAt = 0L;
@@ -289,11 +294,22 @@ public class MainActivity extends Activity {
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
         title.setOnLongClickListener(view -> {
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/x-ndjson");
-            intent.putExtra(Intent.EXTRA_TITLE, "Dan-memory-" + BuildConfig.VERSION_NAME + ".jsonl");
-            startActivityForResult(intent, REQ_MEMORY_EXPORT);
+            new AlertDialog.Builder(this)
+                    .setTitle("Memoria di Dan")
+                    .setItems(new String[]{"Esporta una copia", "Scegli backup automatico",
+                                    "Disattiva backup automatico"},
+                            (dialog, which) -> {
+                                if (which == 2) {
+                                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                            .remove(PREF_MEMORY_BACKUP_URI).apply();
+                                    Toast.makeText(this, "Backup automatico disattivato",
+                                            Toast.LENGTH_SHORT).show();
+                                } else {
+                                    chooseMemoryDestination(which == 0
+                                            ? REQ_MEMORY_EXPORT : REQ_MEMORY_BACKUP);
+                                }
+                            })
+                    .show();
             return true;
         });
 
@@ -4214,6 +4230,32 @@ public class MainActivity extends Activity {
         popupWebView = null;
     }
 
+    private void chooseMemoryDestination(int requestCode) {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/x-ndjson");
+        intent.putExtra(Intent.EXTRA_TITLE, "Dan-memory.jsonl");
+        startActivityForResult(intent, requestCode);
+    }
+
+    private void scheduleMemoryBackup() {
+        if (pendingMemoryBackup != null) pendingMemoryBackup.cancel(false);
+        pendingMemoryBackup = memoryExecutor.schedule(() -> {
+            String stored = getSharedPreferences(PREFS, MODE_PRIVATE)
+                    .getString(PREF_MEMORY_BACKUP_URI, null);
+            if (stored == null) return;
+            try (OutputStream output = getContentResolver().openOutputStream(Uri.parse(stored), "wt")) {
+                if (output == null) throw new java.io.IOException("Destinazione non scrivibile");
+                memoryStore.exportJsonl(output);
+            } catch (Exception e) {
+                android.util.Log.e("DanMemory", "Backup automatico fallito", e);
+                runOnUiThread(() -> Toast.makeText(this,
+                        "Backup automatico non riuscito; memoria locale conservata",
+                        Toast.LENGTH_LONG).show());
+            }
+        }, 5, TimeUnit.SECONDS);
+    }
+
     @Override
     protected void onActivityResult(
             int requestCode,
@@ -4222,19 +4264,38 @@ public class MainActivity extends Activity {
     ) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == REQ_MEMORY_EXPORT) {
+        if (requestCode == REQ_MEMORY_EXPORT || requestCode == REQ_MEMORY_BACKUP) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
                 Uri destination = data.getData();
+                if (requestCode == REQ_MEMORY_BACKUP) {
+                    try {
+                        int granted = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                                Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                        if ((granted & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) == 0) {
+                            throw new SecurityException("Permesso di scrittura non concesso");
+                        }
+                        getContentResolver().takePersistableUriPermission(destination, granted);
+                    } catch (SecurityException e) {
+                        Toast.makeText(this, "Impossibile mantenere l'accesso al backup",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                }
                 memoryExecutor.execute(() -> {
-                    try (OutputStream output = getContentResolver().openOutputStream(destination)) {
+                    try (OutputStream output = getContentResolver().openOutputStream(destination, "wt")) {
                         if (output == null) throw new java.io.IOException("Destinazione non scrivibile");
                         int count = memoryStore.exportJsonl(output);
+                        if (requestCode == REQ_MEMORY_BACKUP) {
+                            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                                    .putString(PREF_MEMORY_BACKUP_URI, destination.toString()).apply();
+                        }
                         runOnUiThread(() -> Toast.makeText(this,
-                                "Memoria esportata: " + count + " messaggi", Toast.LENGTH_LONG).show());
+                                (requestCode == REQ_MEMORY_BACKUP ? "Backup attivo: " : "Memoria esportata: ")
+                                        + count + " messaggi", Toast.LENGTH_LONG).show());
                     } catch (Exception e) {
                         android.util.Log.e("DanMemory", "Esportazione fallita", e);
                         runOnUiThread(() -> Toast.makeText(this,
-                                "Esportazione memoria non riuscita", Toast.LENGTH_LONG).show());
+                                "Salvataggio memoria non riuscito", Toast.LENGTH_LONG).show());
                     }
                 });
             }
@@ -4300,7 +4361,9 @@ public class MainActivity extends Activity {
                     parsed.getPath() == null ||
                     !parsed.getPath().matches("/(?:g/[^/]+/)?c/[^/]+")) return;
             if (!isDanChatGptPage()) return;
-            memoryExecutor.execute(() -> memoryStore.record(eventId, url, role, text));
+            memoryExecutor.execute(() -> {
+                if (memoryStore.record(eventId, url, role, text)) scheduleMemoryBackup();
+            });
         }
 
         @JavascriptInterface
