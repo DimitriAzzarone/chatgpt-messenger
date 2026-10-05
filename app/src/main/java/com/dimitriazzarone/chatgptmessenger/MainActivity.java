@@ -100,6 +100,9 @@ public class MainActivity extends Activity {
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final int REQ_MEMORY_EXPORT = 4002;
     private static final int REQ_MEMORY_BACKUP = 4003;
+    private static final int REQ_MEMORY_IMPORT = 4004;
+    private static final int REQ_HISTORY_IMPORT = 4005;
+    private static final int REQ_DRIVE_FOLDER = 4006;
     private static final String PREF_MEMORY_BACKUP_URI = "dan_memory_backup_uri";
     private static final String PREFS = "radio_prefs";
     private static final String PREF_TTS_VOICE = "tts_voice";
@@ -114,6 +117,8 @@ public class MainActivity extends Activity {
     private WebView webView;
     private volatile String memoryPageUrl = "";
     private DanMemoryStore memoryStore;
+    private DanHistoryStore historyStore;
+    private DanDriveSync driveSync;
     private final ScheduledExecutorService memoryExecutor = Executors.newSingleThreadScheduledExecutor();
     private ScheduledFuture<?> pendingMemoryBackup;
     private String pendingMemoryId = "";
@@ -242,8 +247,10 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         memoryStore = new DanMemoryStore(getApplicationContext());
+        historyStore = new DanHistoryStore(getApplicationContext());
 
         SharedPreferences startupPrefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        driveSync = new DanDriveSync(getApplicationContext(), startupPrefs, memoryStore, historyStore);
 
         // v1.23: conserva l'ultimo stato AUTO scelto dall'utente.
         // Al primo avvio resta OFF.
@@ -296,17 +303,31 @@ public class MainActivity extends Activity {
         title.setOnLongClickListener(view -> {
             new AlertDialog.Builder(this)
                     .setTitle("Memoria di Dan")
-                    .setItems(new String[]{"Esporta una copia", "Scegli backup automatico",
-                                    "Disattiva backup automatico"},
+                    .setItems(new String[]{"Collega Memoria Dan su Drive", "Sincronizza ora",
+                                    "Conta chat archiviate", "Esporta copia JSONL",
+                                    "Ripristina copia JSONL"},
                             (dialog, which) -> {
-                                if (which == 2) {
-                                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                                            .remove(PREF_MEMORY_BACKUP_URI).apply();
-                                    Toast.makeText(this, "Backup automatico disattivato",
-                                            Toast.LENGTH_SHORT).show();
+                                if (which == 0) {
+                                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                            | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                                    startActivityForResult(intent, REQ_DRIVE_FOLDER);
+                                } else if (which == 1) {
+                                    syncDrive(true, true);
+                                } else if (which == 2) {
+                                    memoryExecutor.execute(() -> {
+                                        int count = historyStore.count();
+                                        runOnUiThread(() -> Toast.makeText(this,
+                                                "Chat archiviate: " + count, Toast.LENGTH_LONG).show());
+                                    });
+                                } else if (which == 3) {
+                                    chooseMemoryDestination(REQ_MEMORY_EXPORT);
                                 } else {
-                                    chooseMemoryDestination(which == 0
-                                            ? REQ_MEMORY_EXPORT : REQ_MEMORY_BACKUP);
+                                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                                    intent.setType("*/*");
+                                    startActivityForResult(intent, REQ_MEMORY_IMPORT);
                                 }
                             })
                     .show();
@@ -4241,6 +4262,17 @@ public class MainActivity extends Activity {
     private void scheduleMemoryBackup() {
         if (pendingMemoryBackup != null) pendingMemoryBackup.cancel(false);
         pendingMemoryBackup = memoryExecutor.schedule(() -> {
+            if (driveSync.configured()) {
+                try {
+                    driveSync.sync(true);
+                } catch (Exception e) {
+                    android.util.Log.e("DanMemory", "Sincronizzazione Drive fallita", e);
+                    runOnUiThread(() -> Toast.makeText(this,
+                            "Drive non raggiungibile; nuovi messaggi conservati sul dispositivo",
+                            Toast.LENGTH_LONG).show());
+                }
+                return;
+            }
             String stored = getSharedPreferences(PREFS, MODE_PRIVATE)
                     .getString(PREF_MEMORY_BACKUP_URI, null);
             if (stored == null) return;
@@ -4256,6 +4288,33 @@ public class MainActivity extends Activity {
         }, 5, TimeUnit.SECONDS);
     }
 
+    private void syncDrive(boolean saveBackup, boolean showResult) {
+        if (!driveSync.configured()) {
+            Toast.makeText(this, "Collega prima la cartella Memoria Dan",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        memoryExecutor.execute(() -> {
+            try {
+                DanDriveSync.Result result = driveSync.sync(saveBackup);
+                if (showResult) runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Memoria Dan sincronizzata")
+                        .setMessage(result.historyCount + " chat nello storico; "
+                                + result.newTurns + " nuovi messaggi recuperati. "
+                                + (result.archiveFound ? "Archivio Drive presente."
+                                : "Archivio ZIP non trovato nella cartella."))
+                        .setPositiveButton("OK", null).show());
+            } catch (Exception e) {
+                android.util.Log.e("DanMemory", "Sincronizzazione Drive fallita", e);
+                if (showResult) runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Sincronizzazione non riuscita")
+                        .setMessage("Controlla la connessione e l'accesso alla cartella Memoria Dan. "
+                                + "I dati già presenti sul dispositivo restano disponibili.")
+                        .setPositiveButton("OK", null).show());
+            }
+        });
+    }
+
     @Override
     protected void onActivityResult(
             int requestCode,
@@ -4263,6 +4322,77 @@ public class MainActivity extends Activity {
             Intent data
     ) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_DRIVE_FOLDER) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                try {
+                    Uri folder = data.getData();
+                    int granted = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    if (granted != (Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+                        throw new java.io.IOException("Servono lettura e scrittura");
+                    getContentResolver().takePersistableUriPermission(folder, granted);
+                    driveSync.setFolder(folder);
+                    Toast.makeText(this, "Recupero e salvataggio da Memoria Dan in corso",
+                            Toast.LENGTH_LONG).show();
+                    syncDrive(true, true);
+                } catch (Exception e) {
+                    android.util.Log.e("DanMemory", "Cartella non collegata", e);
+                    Toast.makeText(this, "Seleziona Memoria Dan su Drive con accesso in scrittura",
+                            Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
+
+        if (requestCode == REQ_HISTORY_IMPORT) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri source = data.getData();
+                Toast.makeText(this, "Importazione dello storico in corso. Tieni Dan aperto.",
+                        Toast.LENGTH_LONG).show();
+                memoryExecutor.execute(() -> {
+                    try (InputStream input = getContentResolver().openInputStream(source)) {
+                        if (input == null) throw new java.io.IOException("Archivio non leggibile");
+                        int imported = historyStore.importArchive(input);
+                        runOnUiThread(() -> new AlertDialog.Builder(this)
+                                .setTitle("Storico importato")
+                                .setMessage(imported + " chat verificate e conservate sul dispositivo.")
+                                .setPositiveButton("OK", null).show());
+                    } catch (Exception e) {
+                        android.util.Log.e("DanHistory", "Importazione fallita", e);
+                        runOnUiThread(() -> new AlertDialog.Builder(this)
+                                .setTitle("Importazione non riuscita")
+                                .setMessage("Archivio non valido o importazione interrotta. "
+                                        + "Nessuna chat di questa importazione è stata aggiunta.")
+                                .setPositiveButton("OK", null).show());
+                    }
+                });
+            }
+            return;
+        }
+
+        if (requestCode == REQ_MEMORY_IMPORT) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri source = data.getData();
+                memoryExecutor.execute(() -> {
+                    try (InputStream input = getContentResolver().openInputStream(source)) {
+                        if (input == null) throw new java.io.IOException("Backup non leggibile");
+                        int added = memoryStore.importJsonl(input);
+                        if (added > 0) scheduleMemoryBackup();
+                        runOnUiThread(() -> Toast.makeText(this,
+                                "Ripristino completato: " + added + " messaggi aggiunti",
+                                Toast.LENGTH_LONG).show());
+                    } catch (Exception e) {
+                        android.util.Log.e("DanMemory", "Ripristino fallito", e);
+                        runOnUiThread(() -> Toast.makeText(this,
+                                "Backup non valido o non leggibile: nessun messaggio importato",
+                                Toast.LENGTH_LONG).show());
+                    }
+                });
+            }
+            return;
+        }
 
         if (requestCode == REQ_MEMORY_EXPORT || requestCode == REQ_MEMORY_BACKUP) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
@@ -5317,6 +5447,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (driveSync != null && driveSync.configured()) syncDrive(false, false);
         startLuminexPolling();
 
         // v1.21: keep-screen-on sulla view, meno invasivo per multi-window.

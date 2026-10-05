@@ -9,7 +9,10 @@ import android.database.sqlite.SQLiteOpenHelper;
 import org.json.JSONObject;
 
 import java.io.BufferedWriter;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
@@ -72,5 +75,47 @@ final class DanMemoryStore extends SQLiteOpenHelper {
             writer.flush();
         }
         return count;
+    }
+
+    int importJsonl(InputStream input) throws IOException {
+        SQLiteDatabase db = getWritableDatabase();
+        int added = 0;
+        int lineNumber = 0;
+        db.beginTransaction();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(input, StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+                if (line.trim().isEmpty()) continue;
+                JSONObject item;
+                try {
+                    item = new JSONObject(line);
+                    String id = item.getString("event_id");
+                    String url = item.getString("conversation_url");
+                    String role = item.getString("role");
+                    String body = item.getString("text");
+                    long timestamp = item.getLong("recorded_at_ms");
+                    if (id.isEmpty() || url.isEmpty() || body.isEmpty() ||
+                            !(role.equals("user") || role.equals("assistant")) || timestamp <= 0) {
+                        throw new IOException("Record non valido alla riga " + lineNumber);
+                    }
+                    ContentValues values = new ContentValues();
+                    values.put("event_id", id);
+                    values.put("conversation_url", url);
+                    values.put("role", role);
+                    values.put("body", body);
+                    values.put("recorded_at", timestamp);
+                    if (db.insertWithOnConflict("turns", null, values,
+                            SQLiteDatabase.CONFLICT_IGNORE) != -1) added++;
+                } catch (org.json.JSONException e) {
+                    throw new IOException("JSON non valido alla riga " + lineNumber, e);
+                }
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+        return added;
     }
 }

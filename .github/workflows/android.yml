@@ -15,6 +15,9 @@ on:
       - dan-v1.57-local-memory
       - dan-v1.58-audio-mute
       - dan-v1.59-auto-backup
+      - dan-v1.60-memory-restore
+      - dan-v1.61-history-archive
+      - dan-v1.62-drive-memory
 
 jobs:
   build:
