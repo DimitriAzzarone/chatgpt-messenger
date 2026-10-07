@@ -300,39 +300,6 @@ public class MainActivity extends Activity {
         title.setText("  Dan " + BuildConfig.VERSION_NAME);
         title.setTextColor(Color.WHITE);
         title.setTextSize(17);
-        title.setOnLongClickListener(view -> {
-            new AlertDialog.Builder(this)
-                    .setTitle("Memoria di Dan")
-                    .setItems(new String[]{"Collega Memoria Dan su Drive", "Sincronizza ora",
-                                    "Conta chat archiviate", "Esporta copia JSONL",
-                                    "Ripristina copia JSONL"},
-                            (dialog, which) -> {
-                                if (which == 0) {
-                                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-                                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                            | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                                            | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                                    startActivityForResult(intent, REQ_DRIVE_FOLDER);
-                                } else if (which == 1) {
-                                    syncDrive(true, true);
-                                } else if (which == 2) {
-                                    memoryExecutor.execute(() -> {
-                                        int count = historyStore.count();
-                                        runOnUiThread(() -> Toast.makeText(this,
-                                                "Chat archiviate: " + count, Toast.LENGTH_LONG).show());
-                                    });
-                                } else if (which == 3) {
-                                    chooseMemoryDestination(REQ_MEMORY_EXPORT);
-                                } else {
-                                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                                    intent.addCategory(Intent.CATEGORY_OPENABLE);
-                                    intent.setType("*/*");
-                                    startActivityForResult(intent, REQ_MEMORY_IMPORT);
-                                }
-                            })
-                    .show();
-            return true;
-        });
 
         voiceButton = makeButton("🔊");
         voiceButton.setTextSize(18);
@@ -440,7 +407,34 @@ public class MainActivity extends Activity {
         micParams.setMargins(dp(8), 0, 0, 0);
         bottomBar.addView(micButton, micParams);
 
+        LinearLayout controlsBar = new LinearLayout(this);
+        controlsBar.setOrientation(LinearLayout.HORIZONTAL);
+        controlsBar.setPadding(dp(8), dp(2), dp(8), dp(4));
+        controlsBar.setBackgroundColor(Color.rgb(32, 44, 51));
+
+        Button memoryButton = makeButton("Memoria");
+        memoryButton.setAllCaps(false);
+        memoryButton.setTextSize(12);
+        memoryButton.setContentDescription("Carica, ripristina o salva la memoria di Dan");
+        memoryButton.setOnClickListener(v -> showMemoryMenu());
+
+        Button engineButton = makeButton("Motore: ChatGPT");
+        engineButton.setAllCaps(false);
+        engineButton.setTextSize(12);
+        engineButton.setContentDescription("Mostra il motore attivo di Dan");
+        engineButton.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Motore di Dan")
+                .setMessage("Motore attivo: ChatGPT tramite la pagina Web. "
+                        + "La memoria locale di Dan è separata dal motore. "
+                        + "Altri motori non sono ancora collegati: selezionarli ora "
+                        + "non produrrebbe una risposta.")
+                .setPositiveButton("OK", null).show());
+
+        controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+
         root.addView(topBar);
+        root.addView(controlsBar);
         root.addView(progressBar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(3)));
         root.addView(webContainer, new LinearLayout.LayoutParams(
@@ -4257,6 +4251,47 @@ public class MainActivity extends Activity {
         intent.setType("application/x-ndjson");
         intent.putExtra(Intent.EXTRA_TITLE, "Dan-memory.jsonl");
         startActivityForResult(intent, requestCode);
+    }
+
+    private void showMemoryMenu() {
+        final String[] actions = {
+                "Importa storico Dan (ZIP preparato)",
+                "Ripristina messaggi (JSONL)",
+                "Esporta messaggi (JSONL)",
+                "Attiva backup automatico su un file",
+                "Collega cartella Memoria Dan",
+                "Sincronizza cartella collegata",
+                "Conta chat archiviate"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Memoria di Dan")
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0 || which == 1) {
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                        intent.addCategory(Intent.CATEGORY_OPENABLE);
+                        intent.setType(which == 0 ? "application/zip" : "*/*");
+                        startActivityForResult(intent,
+                                which == 0 ? REQ_HISTORY_IMPORT : REQ_MEMORY_IMPORT);
+                    } else if (which == 2) {
+                        chooseMemoryDestination(REQ_MEMORY_EXPORT);
+                    } else if (which == 3) {
+                        chooseMemoryDestination(REQ_MEMORY_BACKUP);
+                    } else if (which == 4) {
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                        startActivityForResult(intent, REQ_DRIVE_FOLDER);
+                    } else if (which == 5) {
+                        syncDrive(true, true);
+                    } else {
+                        memoryExecutor.execute(() -> {
+                            int count = historyStore.count();
+                            runOnUiThread(() -> Toast.makeText(this,
+                                    "Chat archiviate: " + count, Toast.LENGTH_LONG).show());
+                        });
+                    }
+                }).show();
     }
 
     private void scheduleMemoryBackup() {
