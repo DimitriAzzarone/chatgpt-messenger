@@ -18,6 +18,7 @@ on:
       - dan-v1.60-memory-restore
       - dan-v1.61-history-archive
       - dan-v1.62-drive-memory
+      - dan-v1.63-memory-engine-controls
 
 jobs:
   build:
