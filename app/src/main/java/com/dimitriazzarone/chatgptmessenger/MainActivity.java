@@ -418,17 +418,11 @@ public class MainActivity extends Activity {
         memoryButton.setContentDescription("Carica, ripristina o salva la memoria di Dan");
         memoryButton.setOnClickListener(v -> showMemoryMenu());
 
-        Button engineButton = makeButton("Motore: ChatGPT");
+        Button engineButton = makeButton("Motore");
         engineButton.setAllCaps(false);
         engineButton.setTextSize(12);
-        engineButton.setContentDescription("Mostra il motore attivo di Dan");
-        engineButton.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("Motore di Dan")
-                .setMessage("Motore attivo: ChatGPT tramite la pagina Web. "
-                        + "La memoria locale di Dan è separata dal motore. "
-                        + "Altri motori non sono ancora collegati: selezionarli ora "
-                        + "non produrrebbe una risposta.")
-                .setPositiveButton("OK", null).show());
+        engineButton.setContentDescription("Motore di Dan: ChatGPT attivo; mostra le alternative");
+        engineButton.setOnClickListener(v -> showEngineMenu());
 
         controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
@@ -4251,6 +4245,40 @@ public class MainActivity extends Activity {
         intent.setType("application/x-ndjson");
         intent.putExtra(Intent.EXTRA_TITLE, "Dan-memory.jsonl");
         startActivityForResult(intent, requestCode);
+    }
+
+    private void showEngineMenu() {
+        final String[] engines = {
+                "ChatGPT · attivo",
+                "Claude · da collegare",
+                "Grok · da collegare",
+                "Gemini · da collegare",
+                "Monica · da collegare",
+                "Qwen sul dispositivo · da preparare",
+                "Spark sul dispositivo · da verificare"
+        };
+        new AlertDialog.Builder(this)
+                .setTitle("Motore di Dan")
+                .setItems(engines, (dialog, selected) -> {
+                    if (selected == 0) {
+                        Toast.makeText(this, "ChatGPT è il motore attivo", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    String details = selected >= 5
+                            ? "Per usarlo senza rete bisogna verificare modello, licenza e "
+                                    + "prestazioni sul telefono e sul tablet. Dan continuerà a "
+                                    + "usare ChatGPT finché la prova locale non funzionerà."
+                            : "Questo motore richiede un collegamento API verificato. "
+                                    + "Dan continuerà a usare ChatGPT finché il collegamento "
+                                    + "non sarà pronto.";
+                    new AlertDialog.Builder(this)
+                            .setTitle(engines[selected].split(" · ")[0])
+                            .setMessage(details + " La memoria e la voce restano di Dan.")
+                            .setPositiveButton("OK", null)
+                            .show();
+                })
+                .setNegativeButton("Chiudi", null)
+                .show();
     }
 
     private void showMemoryMenu() {
