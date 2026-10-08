@@ -30,7 +30,6 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeLoad(JNIEnv *env, 
     if (!path) return JNI_FALSE;
     auto mp = llama_model_default_params();
     mp.n_gpu_layers = 0; // CPU-only on Android 12L; deterministic and portable.
-    mp.use_mmap = true;
     model = llama_model_load_from_file(path, mp);
     env->ReleaseStringUTFChars(file, path);
     if (!model) return JNI_FALSE;
