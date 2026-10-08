@@ -196,8 +196,8 @@ public final class DanLocalChatActivity extends Activity {
         card.addView(memoryToggle,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
-        Button importQwen = button("Importa Qwen (GGUF)");
-        importQwen.setContentDescription("Scegli il modello Qwen dalla cartella Download");
+        Button importQwen = button("Importa Qwen / SparkAI (GGUF)");
+        importQwen.setContentDescription("Scegli il modello Qwen o SparkAI dalla cartella Download");
         importQwen.setOnClickListener(v -> {
             Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             pick.setType("*/*");
@@ -319,7 +319,7 @@ public final class DanLocalChatActivity extends Activity {
 
     private void checkEngine() {
         if (DanNativeQwen.hasImportedModel(this)) {
-            setStatus("● Modello Qwen importato (avvio alla prima domanda)", true);
+            setStatus("● Modello AI importato (avvio alla prima domanda)", true);
             return;
         }
         setStatus("Controllo motore locale…", false);
@@ -600,7 +600,7 @@ public final class DanLocalChatActivity extends Activity {
         if (requestCode != REQUEST_IMPORT_QWEN || resultCode != RESULT_OK
                 || data == null || data.getData() == null) return;
         android.net.Uri uri = data.getData();
-        setStatus("Importazione Qwen in corso…", true);
+        setStatus("Importazione modello in corso…", true);
         executor.execute(() -> {
             String error = null;
             try { DanNativeQwen.importModel(getApplicationContext(), uri); }
@@ -608,9 +608,9 @@ public final class DanLocalChatActivity extends Activity {
             final String result = error;
             runOnUiThread(() -> {
                 if (isFinishing()) return;
-                if (result == null) setStatus("● Qwen importato: pronto per la prova locale", true);
+                if (result == null) setStatus("● Modello importato: pronto per la prova locale", true);
                 else new AlertDialog.Builder(this)
-                        .setTitle("Importazione Qwen non riuscita")
+                        .setTitle("Importazione modello non riuscita")
                         .setMessage(result).setPositiveButton("OK", null).show();
             });
         });
