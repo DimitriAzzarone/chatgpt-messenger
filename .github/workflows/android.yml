@@ -54,6 +54,11 @@ jobs:
           echo "DAN_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "DAN_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
 
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
       - name: Install native Android toolchain
         run: |
           yes | sdkmanager --licenses >/dev/null || true
