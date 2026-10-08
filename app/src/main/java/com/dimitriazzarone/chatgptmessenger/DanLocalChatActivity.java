@@ -55,6 +55,7 @@ public final class DanLocalChatActivity extends Activity {
     private static final int MAX_CONTEXT_MESSAGES = 30;
     private static final int MAX_USER_CHARS = 5000;
     private static final int MAX_REPLY_CHARS = 40000;
+    private static final int REQUEST_IMPORT_QWEN = 166;
     private static final String SYSTEM_PROMPT =
             "Sei Dan, un assistente personale in italiano. "
           + "Sei un'identita' separata dal motore AI utilizzato. "
@@ -195,6 +196,17 @@ public final class DanLocalChatActivity extends Activity {
         card.addView(memoryToggle,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button importQwen = button("Importa Qwen (GGUF)");
+        importQwen.setContentDescription("Scegli il modello Qwen dalla cartella Download");
+        importQwen.setOnClickListener(v -> {
+            Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            pick.setType("*/*");
+            pick.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(pick, REQUEST_IMPORT_QWEN);
+        });
+        card.addView(importQwen,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         card.setVisibility(View.GONE);
         settingsButton.setOnClickListener(v -> {
             card.setVisibility(
@@ -306,6 +318,10 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     private void checkEngine() {
+        if (DanNativeQwen.hasImportedModel(this)) {
+            setStatus("● Modello Qwen importato (avvio alla prima domanda)", true);
+            return;
+        }
         setStatus("Controllo motore locale…", false);
         executor.execute(() -> {
             String status;
@@ -486,6 +502,11 @@ public final class DanLocalChatActivity extends Activity {
         payload.put("stream", false);
         payload.put("temperature", 0.6);
         payload.put("max_tokens", 768);
+        // Prefer private JNI engine whenever the user has imported a model.
+        // No cloud API; the HTTP loopback mode is retained only for backward compatibility.
+        if (DanNativeQwen.hasImportedModel(this)) {
+            return DanNativeQwen.answer(this, messages);
+        }
         byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
 
         HttpURLConnection conn = null;
@@ -571,6 +592,28 @@ public final class DanLocalChatActivity extends Activity {
         } catch (Exception ignored) {
             setStatus("Salvataggio locale non riuscito", false);
         }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_IMPORT_QWEN || resultCode != RESULT_OK
+                || data == null || data.getData() == null) return;
+        android.net.Uri uri = data.getData();
+        setStatus("Importazione Qwen in corso…", true);
+        executor.execute(() -> {
+            String error = null;
+            try { DanNativeQwen.importModel(getApplicationContext(), uri); }
+            catch (Exception e) { error = e.getMessage(); }
+            final String result = error;
+            runOnUiThread(() -> {
+                if (isFinishing()) return;
+                if (result == null) setStatus("● Qwen importato: pronto per la prova locale", true);
+                else new AlertDialog.Builder(this)
+                        .setTitle("Importazione Qwen non riuscita")
+                        .setMessage(result).setPositiveButton("OK", null).show();
+            });
+        });
     }
 
     @Override protected void onDestroy() {

@@ -20,6 +20,7 @@ on:
       - dan-v1.62-drive-memory
       - dan-v1.64-engine-menu
       - dan-v1.65-local-chat
+      - dan-v1.66-unified
       - dan-v1.63-memory-engine-controls
 
 jobs:
@@ -52,6 +53,20 @@ jobs:
           source version.properties
           echo "DAN_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "DAN_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+
+      - name: Install native Android toolchain
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "ndk;29.0.13113456" "cmake;3.31.6"
+
+      - name: Fetch pinned llama.cpp native source
+        run: |
+          mkdir -p vendor/llama.cpp
+          git -C vendor/llama.cpp init
+          git -C vendor/llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C vendor/llama.cpp fetch --depth=1 origin de7fa0a3c6a2e1b4cd9f22eb8d6bf5b12dbdb63b
+          git -C vendor/llama.cpp checkout --detach FETCH_HEAD
+          test "$(git -C vendor/llama.cpp rev-parse HEAD)" = "de7fa0a3c6a2e1b4cd9f22eb8d6bf5b12dbdb63b"
 
       - name: Build Dan Luminex AI Integration
         env:
