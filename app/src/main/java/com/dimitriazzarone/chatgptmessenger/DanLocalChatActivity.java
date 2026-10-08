@@ -10,6 +10,8 @@ import android.content.Intent;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
+import android.view.KeyEvent;
+import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -77,8 +79,8 @@ public final class DanLocalChatActivity extends Activity {
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
-        getWindow().setStatusBarColor(Color.rgb(12, 14, 34));
-        getWindow().setNavigationBarColor(Color.rgb(12, 14, 34));
+        getWindow().setStatusBarColor(Color.rgb(7, 33, 49));
+        getWindow().setNavigationBarColor(Color.rgb(7, 33, 49));
         loadHistory();
         buildLayout();
         redrawMessages();
@@ -111,7 +113,7 @@ public final class DanLocalChatActivity extends Activity {
         b.setText(text);
         b.setTextColor(Color.WHITE);
         b.setTextSize(12);
-        b.setBackground(bg(Color.rgb(51, 49, 110), Color.rgb(96, 92, 170), 14));
+        b.setBackground(bg(Color.rgb(15, 90, 110), Color.rgb(58, 159, 171), 14));
         return b;
     }
 
@@ -120,7 +122,7 @@ public final class DanLocalChatActivity extends Activity {
         int faded = Color.rgb(186, 196, 220);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(12, 14, 34));
+        root.setBackgroundColor(Color.rgb(7, 33, 49));
         root.setPadding(dp(12), dp(12), dp(12), dp(8));
 
         LinearLayout header = new LinearLayout(this);
@@ -129,7 +131,7 @@ public final class DanLocalChatActivity extends Activity {
         TextView title = label("✦  DAN  ·  LOCALE", 19, white);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         header.addView(title, new LinearLayout.LayoutParams(0, dp(46), 1));
-        Button web = button("ChatGPT ↗");
+        Button web = button("↗");
         web.setContentDescription("Ritorna alla modalita ChatGPT");
         web.setOnClickListener(v -> {
             Intent openWeb = new Intent(this, MainActivity.class);
@@ -137,7 +139,7 @@ public final class DanLocalChatActivity extends Activity {
             startActivity(openWeb);
             finish();
         });
-        header.addView(web, new LinearLayout.LayoutParams(dp(116), dp(46)));
+        header.addView(web, new LinearLayout.LayoutParams(dp(50), dp(46)));
         root.addView(header);
 
         TextView intro = label("Conversazione nativa · memoria sul dispositivo", 12, faded);
@@ -147,7 +149,7 @@ public final class DanLocalChatActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(14), dp(12), dp(14), dp(12));
-        card.setBackground(bg(Color.rgb(28, 29, 65), Color.rgb(64, 75, 122), 17));
+        card.setBackground(bg(Color.rgb(15, 58, 75), Color.rgb(50, 126, 143), 17));
         connectionLabel = label("Verifica motore in corso…", 13, Color.rgb(126, 226, 222));
         card.addView(connectionLabel);
         TextView route = label("Qwen / llama.cpp · 127.0.0.1:8080 · nessun invio a ChatGPT", 11, faded);
@@ -188,7 +190,7 @@ public final class DanLocalChatActivity extends Activity {
         composer.setOrientation(LinearLayout.HORIZONTAL);
         composer.setGravity(Gravity.BOTTOM);
         composer.setPadding(dp(8), dp(6), dp(7), dp(6));
-        composer.setBackground(bg(Color.rgb(29, 31, 65), Color.rgb(73, 78, 133), 17));
+        composer.setBackground(bg(Color.rgb(15, 55, 73), Color.rgb(50, 129, 148), 17));
         input = new EditText(this);
         input.setHint("Scrivi direttamente a Dan…");
         input.setHintTextColor(Color.rgb(158, 167, 196));
@@ -199,9 +201,27 @@ public final class DanLocalChatActivity extends Activity {
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setBackgroundColor(Color.TRANSPARENT);
+        input.setImeOptions(EditorInfo.IME_ACTION_SEND);
+        input.setOnEditorActionListener((v, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_SEND) {
+                sendMessage();
+                return true;
+            }
+            return false;
+        });
+        input.setOnKeyListener((v, keyCode, event) -> {
+            if (keyCode == KeyEvent.KEYCODE_ENTER && !event.isShiftPressed()) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN
+                        && event.getRepeatCount() == 0) {
+                    sendMessage();
+                }
+                return true;
+            }
+            return false;
+        });
         composer.addView(input, new LinearLayout.LayoutParams(0, dp(54), 1));
         send = button("Invia ➤");
-        send.setBackground(bg(Color.rgb(93, 76, 191), 0, 14));
+        send.setBackground(bg(Color.rgb(21, 148, 176), 0, 14));
         send.setOnClickListener(v -> sendMessage());
         composer.addView(send, new LinearLayout.LayoutParams(dp(90), dp(52)));
         root.addView(composer);
@@ -222,7 +242,7 @@ public final class DanLocalChatActivity extends Activity {
                     + "Se non e' attivo, te lo diro' senza inventare una risposta.",
                     15, Color.rgb(217, 221, 246));
             welcome.setPadding(dp(16), dp(20), dp(16), dp(20));
-            welcome.setBackground(bg(Color.rgb(29, 31, 70), Color.rgb(65, 65, 119), 18));
+            welcome.setBackground(bg(Color.rgb(14, 63, 80), Color.rgb(48, 135, 152), 18));
             messagesArea.addView(welcome);
         }
         for (ChatMessage msg : history) {
@@ -230,8 +250,8 @@ public final class DanLocalChatActivity extends Activity {
             LinearLayout item = new LinearLayout(this);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setPadding(dp(14), dp(10), dp(14), dp(11));
-            item.setBackground(bg(user ? Color.rgb(58, 54, 124)
-                    : Color.rgb(24, 49, 68), user ? Color.rgb(106, 99, 187)
+            item.setBackground(bg(user ? Color.rgb(20, 95, 117)
+                    : Color.rgb(24, 49, 68), user ? Color.rgb(63, 164, 180)
                     : Color.rgb(50, 102, 120), 16));
             TextView who = label(user ? "TU" : "DAN · MOTORE LOCALE", 11,
                     Color.rgb(141, 221, 225));
