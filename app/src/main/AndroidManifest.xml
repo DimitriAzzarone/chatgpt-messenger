@@ -10,10 +10,14 @@
         android:icon="@drawable/ic_dan_launcher"
         android:roundIcon="@drawable/ic_dan_launcher"
         android:allowBackup="true"
-        android:label="Dan 1.64"
+        android:label="Dan 1.65"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
-        android:usesCleartextTraffic="false">
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/dan_network_security">
+
+        <activity android:name=".DanLocalChatActivity"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"

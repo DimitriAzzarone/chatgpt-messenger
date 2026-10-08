@@ -246,6 +246,14 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        // Dan 1.65: apre il motore locale per impostazione predefinita.
+        // ChatGPT viene caricato solo su richiesta esplicita.
+        if (!getIntent().getBooleanExtra("dan_open_web", false)) {
+            startActivity(new Intent(this, DanLocalChatActivity.class));
+            finish();
+            return;
+        }
+
         memoryStore = new DanMemoryStore(getApplicationContext());
         historyStore = new DanHistoryStore(getApplicationContext());
 
@@ -424,8 +432,18 @@ public class MainActivity extends Activity {
         engineButton.setContentDescription("Motore di Dan: ChatGPT attivo; mostra le alternative");
         engineButton.setOnClickListener(v -> showEngineMenu());
 
+        Button localDanButton = makeButton("Dan locale");
+        localDanButton.setAllCaps(false);
+        localDanButton.setTextSize(12);
+        localDanButton.setContentDescription("Apri la chat autonoma con motore locale");
+        localDanButton.setOnClickListener(v -> {
+            startActivity(new Intent(this, DanLocalChatActivity.class));
+            finish();
+        });
+
         controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        controlsBar.addView(localDanButton, new LinearLayout.LayoutParams(0, dp(42), 1));
 
         root.addView(topBar);
         root.addView(controlsBar);
