@@ -15,8 +15,13 @@ import java.util.Locale;
 
 /** Local llama.cpp runtime. The GGUF is imported with Android SAF; never shared with a server. */
 final class DanNativeQwen {
-    private static final String MODEL_NAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf";
-    private static final String SHA256 = "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db";
+    private static final String Q4_NAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf";
+    private static final String Q4_SHA256 = "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db";
+    private static final String Q3_NAME = "Qwen2.5-0.5B-Instruct-Q3_K_S.gguf";
+    private static final String Q3_SHA256 = "468787b643ef9081a75c6e7bd98da987f46583250248e0a0a7aca173308e8d34";
+    private static final String PREFS = "dan_native_qwen";
+    private static final String SELECTED = "selected_verified_model";
+    private static final long MIN_FILE_SIZE = 300L * 1024L * 1024L;
     private static final long MAX_FILE_SIZE = 800L * 1024L * 1024L;
     private static boolean libraryReady;
     private static boolean modelReady;
@@ -28,23 +33,37 @@ final class DanNativeQwen {
     private static native void nativeUnload();
 
     static File modelFile(Context context) {
-        return new File(new File(context.getFilesDir(), "models"), MODEL_NAME);
+        String selected = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(SELECTED, Q4_NAME);
+        if (!Q4_NAME.equals(selected) && !Q3_NAME.equals(selected)) selected = Q4_NAME;
+        return new File(new File(context.getFilesDir(), "models"), selected);
     }
 
     static boolean hasImportedModel(Context context) {
         File f = modelFile(context);
-        return f.isFile() && f.length() > 450L * 1024L * 1024L;
+        return f.isFile() && f.length() >= MIN_FILE_SIZE && f.length() <= MAX_FILE_SIZE;
     }
 
-    /** Call on a background worker, not UI thread. Only current officially downloaded GGUF accepted. */
+    private static String sha256Of(File f) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        try (FileInputStream in = new FileInputStream(f)) {
+            byte[] b = new byte[65536];
+            int n;
+            while ((n = in.read(b)) != -1) md.update(b, 0, n);
+        }
+        StringBuilder hash = new StringBuilder();
+        for (byte b : md.digest()) hash.append(String.format(Locale.ROOT, "%02x", b & 255));
+        return hash.toString();
+    }
+
+    /** Import only the two exact GGUF binaries whose publisher hashes are pinned above. */
     static synchronized void importModel(Context context, Uri uri) throws Exception {
-        File target = modelFile(context);
-        File parent = target.getParentFile();
+        File parent = new File(context.getFilesDir(), "models");
         if (!parent.isDirectory() && !parent.mkdirs())
             throw new IOException("Impossibile creare la cartella modelli");
-        File tmp = new File(parent, MODEL_NAME + ".partial");
+        File tmp = new File(parent, "qwen-import.partial");
         if (tmp.exists() && !tmp.delete())
-            throw new IOException("Importazione precedente incompleta: impossibile eliminare il temporaneo");
+            throw new IOException("Impossibile eliminare un'importazione incompleta");
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         long total = 0;
         try {
@@ -61,22 +80,36 @@ final class DanNativeQwen {
                 }
                 out.getFD().sync();
             }
+            if (total < MIN_FILE_SIZE)
+                throw new IOException("Modello troppo piccolo o download incompleto");
             StringBuilder hash = new StringBuilder();
             for (byte b : digest.digest())
                 hash.append(String.format(Locale.ROOT, "%02x", b & 255));
-            if (!SHA256.equals(hash.toString()))
-                throw new IOException("SHA-256 non corrisponde al modello Qwen verificato");
+            String verified = hash.toString();
+            final String name;
+            if (Q4_SHA256.equals(verified)) name = Q4_NAME;
+            else if (Q3_SHA256.equals(verified)) name = Q3_NAME;
+            else throw new IOException("SHA-256 non riconosciuto: scegliere Q3_K_S di bartowski o Q4_K_M originale");
             try (FileInputStream in = new FileInputStream(tmp)) {
                 byte[] head = new byte[4];
                 if (in.read(head) != 4 || !"GGUF".equals(new String(head, StandardCharsets.US_ASCII)))
                     throw new IOException("File GGUF non valido");
             }
-            // Existing model is never overwritten automatically.
+            File target = new File(parent, name);
             if (target.exists()) {
-                if (target.length() == tmp.length()) return;
-                throw new IOException("Modello gia' presente: nessuna sovrascrittura automatica");
+                // Never silently replace an installed model with different bytes.
+                if (!target.isFile() || target.length() != total || !verified.equals(sha256Of(target)))
+                    throw new IOException("File del modello gia' presente ma diverso: nessuna sovrascrittura");
+            } else if (!tmp.renameTo(target)) {
+                throw new IOException("Impossibile finalizzare il modello");
             }
-            if (!tmp.renameTo(target)) throw new IOException("Impossibile finalizzare il modello");
+            if (!context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(SELECTED, name).commit())
+                throw new IOException("Impossibile salvare il modello selezionato");
+            if (modelReady) {
+                nativeUnload();
+                modelReady = false;
+            }
         } finally {
             if (tmp.exists()) tmp.delete();
         }
