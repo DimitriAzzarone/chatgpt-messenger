@@ -29,6 +29,8 @@ on:
       - dan-v1.72-memory-voice
       - dan-v1.73-audio-controls
       - dan-v1.74-model-selector
+      - dan-v1.75-phone-layout
+      - dan-v1.76-identity
       - dan-v1.63-memory-engine-controls
 
 jobs:
