@@ -35,6 +35,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
@@ -53,6 +54,8 @@ public final class DanLocalChatActivity extends Activity {
     private static final String BASE_URL = "http://127.0.0.1:8080";
     private static final String PREFS = "dan_local_chat_165";
     private static final String KEY_HISTORY = "conversation";
+    private static final String KEY_CHAT_INDEX = "chat_index_v2";
+    private static final String KEY_ACTIVE_CHAT = "active_chat_v2";
     private static final String KEY_NATIVE_MODE = "use_native_engine";
     private static final int MAX_STORED_MESSAGES = 120;
     private static final int MAX_CONTEXT_MESSAGES = 30;
@@ -62,6 +65,8 @@ public final class DanLocalChatActivity extends Activity {
     private static final String SYSTEM_PROMPT =
             "Sei Dan, un assistente personale in italiano. "
           + "Sei un'identita' separata dal motore AI utilizzato. "
+          + "Ti chiami Dan. Il tuo interlocutore e' Dimitri Azzarone. "
+          + "Conserva questa identita' in ogni nuova conversazione. "
           + "Rispondi con chiarezza, gentilezza e precisione. "
           + "Non inventare fatti, risultati di azioni, file o verifiche. "
           + "Se non conosci un dato, dichiaralo. "
@@ -69,7 +74,11 @@ public final class DanLocalChatActivity extends Activity {
           + "Non dichiarare di poter comandare il dispositivo senza strumenti reali.";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
     private final ArrayList<ChatMessage> history = new ArrayList<>();
+    private final ArrayList<String> chatIds = new ArrayList<>();
+    private final ArrayList<String> chatTitles = new ArrayList<>();
+    private String activeChatId;
     private LinearLayout messagesArea;
     private ScrollView scroll;
     private EditText input;
@@ -101,6 +110,7 @@ public final class DanLocalChatActivity extends Activity {
         buildLayout();
         redrawMessages();
         checkEngine();
+        syncMemoryOnOpen();
     }
 
     private int dp(float d) {
@@ -184,17 +194,22 @@ public final class DanLocalChatActivity extends Activity {
         Button reset = button("Nuova chat");
         LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(0, dp(40), 1);
         resetParams.leftMargin = dp(8);
-        reset.setOnClickListener(v -> new AlertDialog.Builder(this)
-                .setTitle("Nuova chat locale")
-                .setMessage("Eliminare i messaggi della chat locale corrente? Questa azione non puo' essere annullata.")
-                .setNegativeButton("Annulla", null)
-                .setPositiveButton("Elimina", (dialog, which) -> {
-                    history.clear();
-                    saveHistory();
-                    redrawMessages();
-                }).show());
+        reset.setOnClickListener(v -> {
+            if (waiting) return;
+            if (!saveHistory()) return;
+            activeChatId = UUID.randomUUID().toString();
+            chatIds.add(activeChatId);
+            chatTitles.add("Nuova chat");
+            history.clear();
+            saveHistory();
+            redrawMessages();
+        });
         tools.addView(reset, resetParams);
         card.addView(tools);
+        Button conversations = button("Conversazioni salvate");
+        conversations.setOnClickListener(v -> showConversations());
+        card.addView(conversations, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button engineMode = button(isNativeEnabled()
                 ? "Modalità: nativa sperimentale"
                 : "Modalità: server locale");
@@ -396,6 +411,12 @@ public final class DanLocalChatActivity extends Activity {
         }
         input.setText("");
         history.add(new ChatMessage("user", question));
+        final String conversationId = activeChatId;
+        recordToMemory(conversationId, "user", question);
+        int titleIndex = chatIds.indexOf(activeChatId);
+        if (titleIndex >= 0 && "Nuova chat".equals(chatTitles.get(titleIndex)))
+            chatTitles.set(titleIndex, question.length() > 48
+                    ? question.substring(0, 48) + "…" : question);
         trimHistory();
         saveHistory();
         redrawMessages();
@@ -419,6 +440,7 @@ public final class DanLocalChatActivity extends Activity {
                 send.setEnabled(true);
                 if (answer != null && !answer.trim().isEmpty()) {
                     history.add(new ChatMessage("assistant", answer.trim()));
+                    recordToMemory(conversationId, "assistant", answer.trim());
                     trimHistory();
                     saveHistory();
                     redrawMessages();
@@ -433,6 +455,38 @@ public final class DanLocalChatActivity extends Activity {
                             .setPositiveButton("OK", null).show();
                 }
             });
+        });
+    }
+
+    private void recordToMemory(String id, String role, String content) {
+        String eventId = UUID.randomUUID().toString();
+        memoryExecutor.execute(() -> {
+            try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext())) {
+                if (!memory.record(eventId, "dan-local://" + id, role, content)) return;
+                SharedPreferences prefs = getSharedPreferences("radio_prefs", MODE_PRIVATE);
+                DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
+                try {
+                    DanDriveSync sync = new DanDriveSync(getApplicationContext(),
+                            prefs, memory, archive);
+                    if (sync.configured()) sync.sync(true);
+                } finally { archive.close(); }
+            } catch (Exception e) {
+                android.util.Log.e("DanLocalMemory", "Memoria Drive non sincronizzata", e);
+            }
+        });
+    }
+
+    private void syncMemoryOnOpen() {
+        memoryExecutor.execute(() -> {
+            SharedPreferences prefs = getSharedPreferences("radio_prefs", MODE_PRIVATE);
+            try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext());
+                 DanHistoryStore archive = new DanHistoryStore(getApplicationContext())) {
+                DanDriveSync sync = new DanDriveSync(getApplicationContext(),
+                        prefs, memory, archive);
+                if (sync.configured()) sync.sync(false);
+            } catch (Exception e) {
+                android.util.Log.e("DanLocalMemory", "Lettura memoria Drive non riuscita", e);
+            }
         });
     }
 
@@ -623,25 +677,67 @@ public final class DanLocalChatActivity extends Activity {
         while (history.size() > MAX_STORED_MESSAGES) history.remove(0);
     }
 
-    private void loadHistory() {
-        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+    private String chatKey(String id) { return "chat_v2_" + id; }
+
+    private void showConversations() {
+        if (waiting) return;
+        String[] titles = chatTitles.toArray(new String[0]);
+        new AlertDialog.Builder(this).setTitle("Conversazioni di Dan")
+                .setItems(titles, (dialog, index) -> {
+                    if (index < 0 || index >= chatIds.size()) return;
+                    if (!saveHistory()) return;
+                    activeChatId = chatIds.get(index);
+                    readChat(getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .getString(chatKey(activeChatId), "[]"));
+                    getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                            .putString(KEY_ACTIVE_CHAT, activeChatId).apply();
+                    redrawMessages();
+                }).setNegativeButton("Chiudi", null).show();
+    }
+
+    private void readChat(String json) {
+        history.clear();
         try {
-            JSONArray raw = new JSONArray(prefs.getString(KEY_HISTORY, "[]"));
+            JSONArray raw = new JSONArray(json);
             for (int i = 0; i < raw.length(); i++) {
                 JSONObject row = raw.getJSONObject(i);
                 String role = row.optString("role", "");
-                String text = row.optString("content", "");
-                if (("user".equals(role) || "assistant".equals(role)) && !text.isEmpty()) {
-                    history.add(new ChatMessage(role, text, row.optLong("timestamp", 0)));
-                }
+                String content = row.optString("content", "");
+                if (("user".equals(role) || "assistant".equals(role)) && !content.isEmpty())
+                    history.add(new ChatMessage(role, content, row.optLong("timestamp", 0)));
             }
             trimHistory();
-        } catch (Exception ignored) {
-            history.clear();
+        } catch (Exception ignored) { history.clear(); }
+    }
+
+    private void loadHistory() {
+        SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        try {
+            JSONArray index = new JSONArray(prefs.getString(KEY_CHAT_INDEX, "[]"));
+            for (int i = 0; i < index.length(); i++) {
+                JSONObject item = index.getJSONObject(i);
+                String id = item.getString("id");
+                if (!id.isEmpty() && prefs.contains(chatKey(id))) {
+                    chatIds.add(id);
+                    chatTitles.add(item.optString("title", "Conversazione"));
+                }
+            }
+        } catch (Exception ignored) { chatIds.clear(); chatTitles.clear(); }
+        if (chatIds.isEmpty()) {
+            // Keep the old key untouched so migration can be retried if saving fails.
+            activeChatId = UUID.randomUUID().toString();
+            chatIds.add(activeChatId);
+            chatTitles.add("Conversazione precedente");
+            readChat(prefs.getString(KEY_HISTORY, "[]"));
+            saveHistory();
+        } else {
+            activeChatId = prefs.getString(KEY_ACTIVE_CHAT, chatIds.get(0));
+            if (!chatIds.contains(activeChatId)) activeChatId = chatIds.get(0);
+            readChat(prefs.getString(chatKey(activeChatId), "[]"));
         }
     }
 
-    private void saveHistory() {
+    private boolean saveHistory() {
         JSONArray data = new JSONArray();
         try {
             for (ChatMessage m : history) {
@@ -651,10 +747,23 @@ public final class DanLocalChatActivity extends Activity {
                 if (m.timestamp > 0) row.put("timestamp", m.timestamp);
                 data.put(row);
             }
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putString(KEY_HISTORY, data.toString()).apply();
+            JSONArray index = new JSONArray();
+            for (int i = 0; i < chatIds.size(); i++) {
+                JSONObject item = new JSONObject();
+                item.put("id", chatIds.get(i));
+                item.put("title", chatTitles.get(i));
+                index.put(item);
+            }
+            boolean saved = getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString(chatKey(activeChatId), data.toString())
+                    .putString(KEY_CHAT_INDEX, index.toString())
+                    .putString(KEY_ACTIVE_CHAT, activeChatId).commit();
+            if (!saved)
+                setStatus("Salvataggio locale non riuscito", false);
+            return saved;
         } catch (Exception ignored) {
             setStatus("Salvataggio locale non riuscito", false);
+            return false;
         }
     }
 
