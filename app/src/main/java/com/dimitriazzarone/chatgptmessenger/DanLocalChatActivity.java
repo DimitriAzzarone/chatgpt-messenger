@@ -210,6 +210,10 @@ public final class DanLocalChatActivity extends Activity {
         conversations.setOnClickListener(v -> showConversations());
         card.addView(conversations, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button renameChat = button("Rinomina questa chat");
+        renameChat.setOnClickListener(v -> renameCurrentChat());
+        card.addView(renameChat, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button engineMode = button(isNativeEnabled()
                 ? "Modalità: nativa sperimentale"
                 : "Modalità: server locale");
@@ -678,6 +682,31 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     private String chatKey(String id) { return "chat_v2_" + id; }
+
+    private void renameCurrentChat() {
+        if (waiting) return;
+        int index = chatIds.indexOf(activeChatId);
+        if (index < 0) return;
+        EditText title = new EditText(this);
+        title.setSingleLine(true);
+        title.setText(chatTitles.get(index));
+        title.setSelectAllOnFocus(true);
+        title.setPadding(dp(16), dp(8), dp(16), dp(8));
+        new AlertDialog.Builder(this).setTitle("Nome della chat")
+                .setView(title)
+                .setNegativeButton("Annulla", null)
+                .setPositiveButton("Salva", (dialog, which) -> {
+                    String name = title.getText().toString().trim();
+                    if (name.isEmpty()) {
+                        new AlertDialog.Builder(this).setMessage("Scrivi un nome per la chat.")
+                                .setPositiveButton("OK", null).show();
+                        return;
+                    }
+                    if (name.length() > 60) name = name.substring(0, 60);
+                    String previous = chatTitles.set(index, name);
+                    if (!saveHistory()) chatTitles.set(index, previous);
+                }).show();
+    }
 
     private void showConversations() {
         if (waiting) return;
