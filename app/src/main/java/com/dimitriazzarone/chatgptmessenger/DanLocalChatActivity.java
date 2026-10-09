@@ -11,6 +11,9 @@ import android.content.Intent;
 import android.speech.RecognizerIntent;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.Voice;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
+import android.provider.Settings;
 import android.database.Cursor;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -41,6 +44,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
@@ -96,6 +101,9 @@ public final class DanLocalChatActivity extends Activity {
     private TextView memoryStatus;
     private TextToSpeech speech;
     private boolean speechReady;
+    private Button speedButton;
+    private Button soundsButton;
+    private MediaSession headsetSession;
     private boolean waiting = false;
 
     private static final class ChatMessage {
@@ -119,6 +127,7 @@ public final class DanLocalChatActivity extends Activity {
         loadHistory();
         buildLayout();
         initVoice();
+        initHeadsetControls();
         redrawMessages();
         checkEngine();
         syncMemoryOnOpen();
@@ -264,6 +273,66 @@ public final class DanLocalChatActivity extends Activity {
         memoryStatus = label("Memoria: controllo in corso…", 12, faded);
         memoryStatus.setPadding(dp(4), dp(5), dp(4), dp(10));
         card.addView(memoryStatus);
+        Button replay = button("Rileggi ultima risposta");
+        replay.setOnClickListener(v -> {
+            for (int i = history.size() - 1; i >= 0; i--) {
+                if ("assistant".equals(history.get(i).role)) {
+                    speakReply(history.get(i).content);
+                    return;
+                }
+            }
+            setStatus("Nessuna risposta da rileggere", false);
+        });
+        card.addView(replay, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button stopVoice = button("■ Stop lettura");
+        stopVoice.setOnClickListener(v -> {
+            if (speech != null) speech.stop();
+            setStatus("Lettura vocale fermata", true);
+        });
+        card.addView(stopVoice, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        speedButton = button("Velocità voce: 1×");
+        speedButton.setOnClickListener(v -> cycleVoiceSpeed());
+        card.addView(speedButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button voiceButton = button("Scegli voce di Dan");
+        voiceButton.setOnClickListener(v -> chooseVoice());
+        card.addView(voiceButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        soundsButton = button("Audio di Dan");
+        soundsButton.setOnClickListener(v -> toggleAudio());
+        card.addView(soundsButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button headphones = button("Cuffie: usa tasto di ascolto");
+        headphones.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Cuffie in Dan locale")
+                .setMessage("Il tasto delle cuffie avvia la dettatura quando Dan e' in primo piano. "
+                        + "Android sceglie il dispositivo audio attivo. Se le cuffie non sono collegate, "
+                        + "apri le impostazioni Bluetooth del tablet.")
+                .setPositiveButton("Detta ora", (d, w) -> startDictation())
+                .setNeutralButton("Bluetooth", (d, w) -> {
+                    try { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
+                    catch (Exception ignored) { setStatus("Impostazioni Bluetooth non disponibili", false); }
+                }).setNegativeButton("Chiudi", null).show());
+        card.addView(headphones, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button resetHeadphones = button("Riattiva tasti cuffie");
+        resetHeadphones.setOnClickListener(v -> {
+            if (headsetSession != null) {
+                headsetSession.setActive(false);
+                headsetSession.release();
+                headsetSession = null;
+            }
+            initHeadsetControls();
+            if (headsetSession != null) {
+                headsetSession.setActive(true);
+                setStatus("Tasti cuffie riattivati", true);
+            } else setStatus("Tasti cuffie non disponibili", false);
+        });
+        card.addView(resetHeadphones, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        updateAudioButtons();
         Button importQwen = button("Importa Qwen / SparkAI (GGUF)");
         importQwen.setContentDescription("Scegli il modello Qwen o SparkAI dalla cartella Download");
         importQwen.setOnClickListener(v -> {
@@ -338,14 +407,7 @@ public final class DanLocalChatActivity extends Activity {
         composer.addView(input, new LinearLayout.LayoutParams(0, dp(54), 1));
         Button microphone = button("🎙");
         microphone.setContentDescription("Detta il messaggio a Dan");
-        microphone.setOnClickListener(v -> {
-            Intent listen = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-            listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
-            try { startActivityForResult(listen, REQUEST_SPEECH); }
-            catch (Exception e) { setStatus("Riconoscimento vocale non disponibile", false); }
-        });
+        microphone.setOnClickListener(v -> startDictation());
         composer.addView(microphone, new LinearLayout.LayoutParams(dp(48), dp(52)));
         send = button("Invia ➤");
         send.setBackground(bg(Color.rgb(21, 148, 176), 0, 14));
@@ -557,21 +619,134 @@ public final class DanLocalChatActivity extends Activity {
             int language = speech.setLanguage(Locale.getDefault());
             speechReady = language != TextToSpeech.LANG_NOT_SUPPORTED
                     && language != TextToSpeech.LANG_MISSING_DATA;
-            SharedPreferences prefs = getSharedPreferences("radio_prefs", MODE_PRIVATE);
-            String mode = prefs.getString("tts_mode", "normal");
-            String voiceName = prefs.getString("sage".equals(mode)
-                    ? "sage_base_voice" : "tts_voice", "");
-            Collection<Voice> voices = speech.getVoices();
-            if (voices != null) for (Voice voice : voices) {
-                if (voice.getName().equals(voiceName)) {
-                    speech.setVoice(voice);
-                    break;
-                }
-            }
-            speech.setPitch("sage".equals(mode) ? 0.61f : 1.0f);
-            speech.setSpeechRate(prefs.getFloat("tts_speed", 1.0f)
-                    * ("sage".equals(mode) ? 0.76f : 1.0f));
+            applyVoiceSettings();
         });
+    }
+
+    private SharedPreferences audioPrefs() {
+        return getSharedPreferences("radio_prefs", MODE_PRIVATE);
+    }
+
+    private boolean audioEnabled() {
+        return audioPrefs().getBoolean("recording_sounds_enabled", true);
+    }
+
+    private void updateAudioButtons() {
+        if (soundsButton != null)
+            soundsButton.setText(audioEnabled() ? "Audio di Dan: ON" : "Audio di Dan: OFF");
+        if (speedButton != null)
+            speedButton.setText("Velocità voce: " + audioPrefs().getFloat("tts_speed", 1.0f) + "×");
+    }
+
+    private void toggleAudio() {
+        boolean enabled = !audioEnabled();
+        audioPrefs().edit().putBoolean("recording_sounds_enabled", enabled).apply();
+        if (!enabled && speech != null) speech.stop();
+        updateAudioButtons();
+    }
+
+    private void cycleVoiceSpeed() {
+        float old = audioPrefs().getFloat("tts_speed", 1.0f);
+        float next = old == 1.0f ? 1.5f : old == 1.5f ? 2.0f : 1.0f;
+        audioPrefs().edit().putFloat("tts_speed", next).apply();
+        applyVoiceSettings();
+        updateAudioButtons();
+    }
+
+    private void applyVoiceSettings() {
+        if (!speechReady || speech == null) return;
+        SharedPreferences prefs = audioPrefs();
+        String mode = prefs.getString("tts_mode", "normal");
+        String voiceName = prefs.getString("sage".equals(mode)
+                ? "sage_base_voice" : "tts_voice", "");
+        Collection<Voice> voices = speech.getVoices();
+        if (voices != null) for (Voice voice : voices) {
+            if (voice.getName().equals(voiceName)) {
+                speech.setVoice(voice);
+                break;
+            }
+        }
+        speech.setPitch("sage".equals(mode) ? 0.61f : 1.0f);
+        speech.setSpeechRate(prefs.getFloat("tts_speed", 1.0f)
+                * ("sage".equals(mode) ? 0.76f : 1.0f));
+    }
+
+    private void chooseVoice() {
+        if (!speechReady || speech == null || speech.getVoices() == null) {
+            setStatus("Voci Android non disponibili", false);
+            return;
+        }
+        ArrayList<Voice> voices = new ArrayList<>();
+        for (Voice voice : speech.getVoices())
+            if (voice.getLocale() != null && "it".equals(voice.getLocale().getLanguage()))
+                voices.add(voice);
+        Collections.sort(voices, Comparator.comparing(Voice::getName));
+        if (voices.isEmpty()) {
+            setStatus("Nessuna voce italiana installata su questo dispositivo", false);
+            return;
+        }
+        String[] names = new String[voices.size() + 1];
+        names[0] = "Voce Saggio di Dan";
+        for (int i = 0; i < voices.size(); i++)
+            names[i + 1] = voices.get(i).getName()
+                    + (voices.get(i).isNetworkConnectionRequired() ? " · online" : " · locale");
+        new AlertDialog.Builder(this).setTitle("Scegli la voce")
+                .setItems(names, (dialog, index) -> {
+                    SharedPreferences.Editor edit = audioPrefs().edit();
+                    if (index == 0) edit.putString("tts_mode", "sage");
+                    else edit.putString("tts_mode", "normal")
+                            .putString("tts_voice", voices.get(index - 1).getName());
+                    edit.apply();
+                    applyVoiceSettings();
+                    if (audioEnabled()) speech.speak("Ciao Dimitri, sono Dan.",
+                            TextToSpeech.QUEUE_FLUSH, null, "dan_voice_preview");
+                }).setNegativeButton("Chiudi", null).show();
+    }
+
+    private void startDictation() {
+        Intent listen = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
+        try { startActivityForResult(listen, REQUEST_SPEECH); }
+        catch (Exception e) { setStatus("Riconoscimento vocale non disponibile", false); }
+    }
+
+    private void initHeadsetControls() {
+        try {
+            headsetSession = new MediaSession(this, "DanLocalHeadset");
+            headsetSession.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS
+                    | MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+            headsetSession.setPlaybackState(new PlaybackState.Builder()
+                    .setActions(PlaybackState.ACTION_PLAY_PAUSE | PlaybackState.ACTION_PLAY)
+                    .setState(PlaybackState.STATE_PAUSED, 0, 1.0f).build());
+            headsetSession.setCallback(new MediaSession.Callback() {
+                @Override public boolean onMediaButtonEvent(Intent event) {
+                    KeyEvent key = event == null ? null
+                            : event.getParcelableExtra(Intent.EXTRA_KEY_EVENT);
+                    if (key != null && key.getAction() == KeyEvent.ACTION_DOWN
+                            && (key.getKeyCode() == KeyEvent.KEYCODE_HEADSETHOOK
+                            || key.getKeyCode() == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)) {
+                        runOnUiThread(() -> startDictation());
+                        return true;
+                    }
+                    return false;
+                }
+                @Override public void onPlay() { runOnUiThread(() -> startDictation()); }
+            });
+        } catch (Exception e) { headsetSession = null; }
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        applyVoiceSettings();
+        updateAudioButtons();
+        if (headsetSession != null) headsetSession.setActive(true);
+    }
+
+    @Override protected void onPause() {
+        if (headsetSession != null) headsetSession.setActive(false);
+        super.onPause();
     }
 
     private void speakReply(String answer) {
@@ -948,6 +1123,7 @@ public final class DanLocalChatActivity extends Activity {
     @Override protected void onDestroy() {
         executor.shutdownNow();
         if (speech != null) { speech.stop(); speech.shutdown(); }
+        if (headsetSession != null) headsetSession.release();
         super.onDestroy();
     }
 }
