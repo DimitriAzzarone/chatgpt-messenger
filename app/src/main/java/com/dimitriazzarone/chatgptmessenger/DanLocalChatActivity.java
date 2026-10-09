@@ -5,8 +5,12 @@ import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.content.SharedPreferences;
 import android.content.Intent;
+import android.speech.RecognizerIntent;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.Voice;
 import android.database.Cursor;
 import java.util.LinkedHashSet;
 import java.util.Locale;
@@ -36,6 +40,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Collection;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
@@ -62,6 +67,8 @@ public final class DanLocalChatActivity extends Activity {
     private static final int MAX_USER_CHARS = 5000;
     private static final int MAX_REPLY_CHARS = 40000;
     private static final int REQUEST_IMPORT_QWEN = 166;
+    private static final int REQUEST_SPEECH = 172;
+    private static final int REQUEST_TEXT_FILE = 173;
     private static final String SYSTEM_PROMPT =
             "Sei Dan, un assistente personale in italiano. "
           + "Sei un'identita' separata dal motore AI utilizzato. "
@@ -86,6 +93,9 @@ public final class DanLocalChatActivity extends Activity {
     private TextView connectionLabel;
     private TextView modelLabel;
     private TextView modeNote;
+    private TextView memoryStatus;
+    private TextToSpeech speech;
+    private boolean speechReady;
     private boolean waiting = false;
 
     private static final class ChatMessage {
@@ -108,6 +118,7 @@ public final class DanLocalChatActivity extends Activity {
         getWindow().setNavigationBarColor(Color.rgb(7, 33, 49));
         loadHistory();
         buildLayout();
+        initVoice();
         redrawMessages();
         checkEngine();
         syncMemoryOnOpen();
@@ -246,6 +257,13 @@ public final class DanLocalChatActivity extends Activity {
         card.addView(memoryToggle,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button syncButton = button("Sincronizza memoria ora");
+        syncButton.setOnClickListener(v -> syncMemoryOnOpen());
+        card.addView(syncButton, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        memoryStatus = label("Memoria: controllo in corso…", 12, faded);
+        memoryStatus.setPadding(dp(4), dp(5), dp(4), dp(10));
+        card.addView(memoryStatus);
         Button importQwen = button("Importa Qwen / SparkAI (GGUF)");
         importQwen.setContentDescription("Scegli il modello Qwen o SparkAI dalla cartella Download");
         importQwen.setOnClickListener(v -> {
@@ -280,6 +298,15 @@ public final class DanLocalChatActivity extends Activity {
         composer.setGravity(Gravity.BOTTOM);
         composer.setPadding(dp(8), dp(6), dp(7), dp(6));
         composer.setBackground(bg(Color.rgb(15, 55, 73), Color.rgb(50, 129, 148), 17));
+        Button attach = button("＋");
+        attach.setContentDescription("Allega un file di testo alla domanda");
+        attach.setOnClickListener(v -> {
+            Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            pick.addCategory(Intent.CATEGORY_OPENABLE);
+            pick.setType("text/*");
+            startActivityForResult(pick, REQUEST_TEXT_FILE);
+        });
+        composer.addView(attach, new LinearLayout.LayoutParams(dp(48), dp(52)));
         input = new EditText(this);
         input.setHint("Scrivi direttamente a Dan…");
         input.setHintTextColor(Color.rgb(158, 167, 196));
@@ -309,6 +336,17 @@ public final class DanLocalChatActivity extends Activity {
             return false;
         });
         composer.addView(input, new LinearLayout.LayoutParams(0, dp(54), 1));
+        Button microphone = button("🎙");
+        microphone.setContentDescription("Detta il messaggio a Dan");
+        microphone.setOnClickListener(v -> {
+            Intent listen = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
+            try { startActivityForResult(listen, REQUEST_SPEECH); }
+            catch (Exception e) { setStatus("Riconoscimento vocale non disponibile", false); }
+        });
+        composer.addView(microphone, new LinearLayout.LayoutParams(dp(48), dp(52)));
         send = button("Invia ➤");
         send.setBackground(bg(Color.rgb(21, 148, 176), 0, 14));
         send.setOnClickListener(v -> sendMessage());
@@ -428,6 +466,7 @@ public final class DanLocalChatActivity extends Activity {
         send.setEnabled(false);
         setStatus("Dan sta interrogando il motore locale…", true);
         List<ChatMessage> snapshot = new ArrayList<>(history);
+        long startedAt = SystemClock.elapsedRealtime();
         executor.execute(() -> {
             String reply = null;
             String error = null;
@@ -438,6 +477,7 @@ public final class DanLocalChatActivity extends Activity {
             }
             final String answer = reply;
             final String failure = error;
+            final long elapsedSeconds = (SystemClock.elapsedRealtime() - startedAt) / 1000;
             runOnUiThread(() -> {
                 if (isFinishing()) return;
                 waiting = false;
@@ -448,7 +488,8 @@ public final class DanLocalChatActivity extends Activity {
                     trimHistory();
                     saveHistory();
                     redrawMessages();
-                    setStatus("● Risposta ricevuta dal motore locale", true);
+                    setStatus("● Risposta locale in " + elapsedSeconds + " s", true);
+                    speakReply(answer.trim());
                 } else {
                     // La domanda rimane in memoria; l'errore NON e' una risposta AI.
                     setStatus("● Errore motore locale", false);
@@ -472,26 +513,73 @@ public final class DanLocalChatActivity extends Activity {
                 try {
                     DanDriveSync sync = new DanDriveSync(getApplicationContext(),
                             prefs, memory, archive);
-                    if (sync.configured()) sync.sync(true);
+                    if (sync.configured()) {
+                        showMemoryStatus("Memoria: sincronizzazione in corso…");
+                        sync.sync(true);
+                        showMemoryStatus("Memoria: backup aggiornato su Drive");
+                    }
                 } finally { archive.close(); }
             } catch (Exception e) {
                 android.util.Log.e("DanLocalMemory", "Memoria Drive non sincronizzata", e);
+                showMemoryStatus("Memoria: backup Drive non riuscito; copia locale conservata");
             }
         });
     }
 
+    private void showMemoryStatus(String status) {
+        runOnUiThread(() -> { if (!isFinishing() && memoryStatus != null)
+            memoryStatus.setText(status); });
+    }
+
     private void syncMemoryOnOpen() {
+        showMemoryStatus("Memoria: sincronizzazione in corso…");
         memoryExecutor.execute(() -> {
             SharedPreferences prefs = getSharedPreferences("radio_prefs", MODE_PRIVATE);
             try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext());
                  DanHistoryStore archive = new DanHistoryStore(getApplicationContext())) {
                 DanDriveSync sync = new DanDriveSync(getApplicationContext(),
                         prefs, memory, archive);
-                if (sync.configured()) sync.sync(false);
+                if (sync.configured()) {
+                    DanDriveSync.Result result = sync.sync(false);
+                    showMemoryStatus("Memoria Drive aggiornata · " + result.newTurns
+                            + " nuovi messaggi · " + result.historyCount + " chat archiviate");
+                } else showMemoryStatus("Memoria Drive: collega la cartella Memoria Dan");
             } catch (Exception e) {
                 android.util.Log.e("DanLocalMemory", "Lettura memoria Drive non riuscita", e);
+                showMemoryStatus("Memoria Drive non raggiungibile; dati locali conservati");
             }
         });
+    }
+
+    private void initVoice() {
+        speech = new TextToSpeech(this, status -> {
+            if (status != TextToSpeech.SUCCESS || speech == null) return;
+            int language = speech.setLanguage(Locale.getDefault());
+            speechReady = language != TextToSpeech.LANG_NOT_SUPPORTED
+                    && language != TextToSpeech.LANG_MISSING_DATA;
+            SharedPreferences prefs = getSharedPreferences("radio_prefs", MODE_PRIVATE);
+            String mode = prefs.getString("tts_mode", "normal");
+            String voiceName = prefs.getString("sage".equals(mode)
+                    ? "sage_base_voice" : "tts_voice", "");
+            Collection<Voice> voices = speech.getVoices();
+            if (voices != null) for (Voice voice : voices) {
+                if (voice.getName().equals(voiceName)) {
+                    speech.setVoice(voice);
+                    break;
+                }
+            }
+            speech.setPitch("sage".equals(mode) ? 0.61f : 1.0f);
+            speech.setSpeechRate(prefs.getFloat("tts_speed", 1.0f)
+                    * ("sage".equals(mode) ? 0.76f : 1.0f));
+        });
+    }
+
+    private void speakReply(String answer) {
+        if (!speechReady || speech == null ||
+                !getSharedPreferences("radio_prefs", MODE_PRIVATE)
+                        .getBoolean("recording_sounds_enabled", true)) return;
+        if (answer.length() > 3200) answer = answer.substring(0, 3200);
+        speech.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "dan_local_reply");
     }
 
     private boolean isMemoryEnabled() {
@@ -799,6 +887,20 @@ public final class DanLocalChatActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_SPEECH) {
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> words = data.getStringArrayListExtra(
+                        RecognizerIntent.EXTRA_RESULTS);
+                if (words != null && !words.isEmpty())
+                    input.setText(input.getText().toString() + words.get(0));
+            }
+            return;
+        }
+        if (requestCode == REQUEST_TEXT_FILE) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null)
+                importTextAttachment(data.getData());
+            return;
+        }
         if (requestCode != REQUEST_IMPORT_QWEN || resultCode != RESULT_OK
                 || data == null || data.getData() == null) return;
         android.net.Uri uri = data.getData();
@@ -821,8 +923,31 @@ public final class DanLocalChatActivity extends Activity {
         });
     }
 
+    private void importTextAttachment(android.net.Uri uri) {
+        executor.execute(() -> {
+            try (InputStream stream = getContentResolver().openInputStream(uri)) {
+                if (stream == null) throw new Exception("File non leggibile");
+                byte[] buffer = new byte[3900];
+                int count = stream.read(buffer);
+                if (count < 0) throw new Exception("File vuoto");
+                String contents = new String(buffer, 0, count, StandardCharsets.UTF_8);
+                runOnUiThread(() -> {
+                    String text = input.getText().toString();
+                    if (text.length() + contents.length() + 25 > MAX_USER_CHARS) {
+                        setStatus("Allegato troppo lungo per questa domanda", false);
+                        return;
+                    }
+                    input.setText(text + "\n[Allegato testuale]\n" + contents);
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> setStatus("Allegato non leggibile", false));
+            }
+        });
+    }
+
     @Override protected void onDestroy() {
         executor.shutdownNow();
+        if (speech != null) { speech.stop(); speech.shutdown(); }
         super.onDestroy();
     }
 }
