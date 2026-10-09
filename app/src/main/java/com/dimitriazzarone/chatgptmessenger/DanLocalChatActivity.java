@@ -35,7 +35,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.text.DateFormat;
+import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -76,6 +76,7 @@ public final class DanLocalChatActivity extends Activity {
     private Button send;
     private TextView connectionLabel;
     private TextView modelLabel;
+    private TextView modeNote;
     private boolean waiting = false;
 
     private static final class ChatMessage {
@@ -205,6 +206,7 @@ public final class DanLocalChatActivity extends Activity {
                     ? "Modalità: nativa sperimentale"
                     : "Modalità: server locale");
             updateModelLabel();
+            updateModeNote();
             checkEngine();
         });
         card.addView(engineMode, new LinearLayout.LayoutParams(
@@ -293,10 +295,10 @@ public final class DanLocalChatActivity extends Activity {
         send.setOnClickListener(v -> sendMessage());
         composer.addView(send, new LinearLayout.LayoutParams(dp(90), dp(52)));
         root.addView(composer);
-        TextView note = label("Dan locale funziona solo se un server AI e' attivo su QUESTO dispositivo.\n"
-                + "Nessun fallback a Internet o ChatGPT.", 11, faded);
-        note.setPadding(dp(4), dp(10), dp(4), dp(3));
-        card.addView(note);
+        modeNote = label("", 11, faded);
+        modeNote.setPadding(dp(4), dp(10), dp(4), dp(3));
+        card.addView(modeNote);
+        updateModeNote();
         setContentView(root);
     }
 
@@ -320,7 +322,7 @@ public final class DanLocalChatActivity extends Activity {
                     : Color.rgb(24, 49, 68), user ? Color.rgb(63, 164, 180)
                     : Color.rgb(50, 102, 120), 16));
             String clock = msg.timestamp > 0
-                    ? "  ·  " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(msg.timestamp))
+                    ? "  ·  " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date(msg.timestamp))
                     : "";
             TextView who = label((user ? "TU" : "DAN") + clock, 11,
                     Color.rgb(141, 221, 225));
@@ -453,6 +455,13 @@ public final class DanLocalChatActivity extends Activity {
         } else {
             modelLabel.setText("Modello: nessun GGUF importato");
         }
+    }
+
+    private void updateModeNote() {
+        if (modeNote == null) return;
+        modeNote.setText(isNativeEnabled()
+                ? "Il GGUF importato gira in Dan su questo dispositivo. Nessun fallback a ChatGPT."
+                : "Serve llama-server attivo in Termux su questo dispositivo. Nessun fallback a ChatGPT.");
     }
 
     private String findRelevantMemory(String question) throws Exception {
