@@ -79,7 +79,8 @@ public final class DanLocalChatActivity extends Activity {
     private static final String SYSTEM_PROMPT =
             "Sei Dan, un assistente personale in italiano. "
           + "Sei un'identita' separata dal motore AI utilizzato. "
-          + "Ti chiami Dan. Il tuo interlocutore e' Dimitri Azzarone. "
+          + "Il TUO nome e' Dan. Il nome dell'UTENTE e' Dimitri Azzarone. "
+          + "Se parli di te stesso usa Dan; non dire mai 'Mi chiamo Dimitri'. "
           + "Conserva questa identita' in ogni nuova conversazione. "
           + "Rispondi con chiarezza, gentilezza e precisione. "
           + "Non inventare fatti, risultati di azioni, file o verifiche. "
@@ -276,6 +277,10 @@ public final class DanLocalChatActivity extends Activity {
         card.addView(memoryToggle,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button inspectMemory = button("Verifica dati della memoria");
+        inspectMemory.setOnClickListener(v -> inspectMemory());
+        card.addView(inspectMemory, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button syncButton = button("Sincronizza memoria ora");
         syncButton.setOnClickListener(v -> syncMemoryOnOpen());
         card.addView(syncButton, new LinearLayout.LayoutParams(
@@ -661,6 +666,38 @@ public final class DanLocalChatActivity extends Activity {
             memoryStatus.setText("Memoria: copia locale al sicuro · Drive: " + reason
                     + " · nuovo tentativo tra " + (delay / 1000) + " s");
             syncHandler.postDelayed(retrySync, delay);
+        });
+    }
+
+    private void inspectMemory() {
+        showMemoryStatus("Memoria: conteggio in corso…");
+        memoryExecutor.execute(() -> {
+            try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext());
+                 DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
+                 Cursor cursor = memory.getReadableDatabase().rawQuery(
+                         "SELECT COUNT(*), COUNT(DISTINCT conversation_url) FROM turns", null)) {
+                if (!cursor.moveToFirst()) throw new Exception("Conteggio non disponibile");
+                int turns = cursor.getInt(0);
+                int sources = cursor.getInt(1);
+                int archived = archive.count();
+                boolean drive = new DanDriveSync(getApplicationContext(),
+                        getSharedPreferences("radio_prefs", MODE_PRIVATE), memory, archive)
+                        .configured();
+                String report = "Messaggi registrati: " + turns + "\n"
+                        + "Conversazioni sorgente: " + sources + "\n"
+                        + "Chat nell'archivio ChatGPT: " + archived + "\n"
+                        + "Cartella Drive: " + (drive ? "collegata" : "non collegata") + "\n\n"
+                        + "Le chat dell'archivio sono conservate, ma Dan non le consulta "
+                        + "ancora quando risponde. I conteggi non provano che Drive "
+                        + "sia allineato con l'altro dispositivo.";
+                runOnUiThread(() -> {
+                    if (!isFinishing()) new AlertDialog.Builder(this)
+                            .setTitle("Stato reale della memoria")
+                            .setMessage(report).setPositiveButton("Chiudi", null).show();
+                });
+            } catch (Exception error) {
+                showMemoryStatus("Verifica memoria non riuscita: " + error.getMessage());
+            }
         });
     }
 
