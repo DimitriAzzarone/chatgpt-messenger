@@ -35,6 +35,8 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.text.DateFormat;
+import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -73,14 +75,20 @@ public final class DanLocalChatActivity extends Activity {
     private EditText input;
     private Button send;
     private TextView connectionLabel;
+    private TextView modelLabel;
     private boolean waiting = false;
 
     private static final class ChatMessage {
         final String role;
         final String content;
+        final long timestamp;
         ChatMessage(String role, String content) {
+            this(role, content, System.currentTimeMillis());
+        }
+        ChatMessage(String role, String content, long timestamp) {
             this.role = role;
             this.content = content;
+            this.timestamp = timestamp;
         }
     }
 
@@ -196,10 +204,15 @@ public final class DanLocalChatActivity extends Activity {
             engineMode.setText(nativeMode
                     ? "Modalità: nativa sperimentale"
                     : "Modalità: server locale");
+            updateModelLabel();
             checkEngine();
         });
         card.addView(engineMode, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        modelLabel = label("", 12, faded);
+        modelLabel.setPadding(dp(4), dp(5), dp(4), dp(10));
+        card.addView(modelLabel);
+        updateModelLabel();
         Button memoryToggle = button(
                 isMemoryEnabled() ? "Memoria Dan: ON" : "Memoria Dan: OFF");
         memoryToggle.setOnClickListener(v -> {
@@ -306,7 +319,10 @@ public final class DanLocalChatActivity extends Activity {
             item.setBackground(bg(user ? Color.rgb(20, 95, 117)
                     : Color.rgb(24, 49, 68), user ? Color.rgb(63, 164, 180)
                     : Color.rgb(50, 102, 120), 16));
-            TextView who = label(user ? "TU" : "DAN", 11,
+            String clock = msg.timestamp > 0
+                    ? "  ·  " + DateFormat.getTimeInstance(DateFormat.SHORT).format(new Date(msg.timestamp))
+                    : "";
+            TextView who = label((user ? "TU" : "DAN") + clock, 11,
                     Color.rgb(141, 221, 225));
             who.setTypeface(null, android.graphics.Typeface.BOLD);
             item.addView(who);
@@ -426,6 +442,17 @@ public final class DanLocalChatActivity extends Activity {
     private boolean isNativeEnabled() {
         return getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_NATIVE_MODE, false);
+    }
+
+    private void updateModelLabel() {
+        if (modelLabel == null) return;
+        if (!isNativeEnabled()) {
+            modelLabel.setText("Motore: server locale in Termux (modello non rilevato da Dan)");
+        } else if (DanNativeQwen.hasImportedModel(this)) {
+            modelLabel.setText("Modello importato: " + DanNativeQwen.modelFile(this).getName());
+        } else {
+            modelLabel.setText("Modello: nessun GGUF importato");
+        }
     }
 
     private String findRelevantMemory(String question) throws Exception {
@@ -596,7 +623,7 @@ public final class DanLocalChatActivity extends Activity {
                 String role = row.optString("role", "");
                 String text = row.optString("content", "");
                 if (("user".equals(role) || "assistant".equals(role)) && !text.isEmpty()) {
-                    history.add(new ChatMessage(role, text));
+                    history.add(new ChatMessage(role, text, row.optLong("timestamp", 0)));
                 }
             }
             trimHistory();
@@ -612,6 +639,7 @@ public final class DanLocalChatActivity extends Activity {
                 JSONObject row = new JSONObject();
                 row.put("role", m.role);
                 row.put("content", m.content);
+                if (m.timestamp > 0) row.put("timestamp", m.timestamp);
                 data.put(row);
             }
             getSharedPreferences(PREFS, MODE_PRIVATE).edit()
@@ -635,7 +663,10 @@ public final class DanLocalChatActivity extends Activity {
             final String result = error;
             runOnUiThread(() -> {
                 if (isFinishing()) return;
-                if (result == null) setStatus("● Modello importato: pronto per la prova locale", true);
+                if (result == null) {
+                    updateModelLabel();
+                    setStatus("● Modello importato: pronto per la prova locale", true);
+                }
                 else new AlertDialog.Builder(this)
                         .setTitle("Importazione modello non riuscita")
                         .setMessage(result).setPositiveButton("OK", null).show();

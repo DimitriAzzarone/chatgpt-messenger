@@ -22,6 +22,7 @@ on:
       - dan-v1.65-local-chat
       - dan-v1.66-unified
       - dan-v1.67-local-server
+      - dan-v1.68-chat-times
       - dan-v1.63-memory-engine-controls
 
 jobs:
