@@ -177,6 +177,10 @@ public final class DanLocalChatActivity extends Activity {
         TextView title = label("✦  DAN", 19, white);
         title.setTypeface(null, android.graphics.Typeface.BOLD);
         header.addView(title, new LinearLayout.LayoutParams(0, dp(46), 1));
+        Button modelsButton = button("Modelli");
+        modelsButton.setContentDescription("Scegli o importa un modello GGUF su questo dispositivo");
+        modelsButton.setOnClickListener(v -> showModelMenu());
+        header.addView(modelsButton, new LinearLayout.LayoutParams(dp(96), dp(46)));
         Button settingsButton = button("⚙");
         settingsButton.setContentDescription("Impostazioni chat e motore");
         header.addView(settingsButton,
@@ -333,14 +337,13 @@ public final class DanLocalChatActivity extends Activity {
         card.addView(resetHeadphones, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         updateAudioButtons();
+        Button selectQwen = button("Scegli modello gia importato");
+        selectQwen.setOnClickListener(v -> showInstalledModels());
+        card.addView(selectQwen, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button importQwen = button("Importa Qwen / SparkAI (GGUF)");
         importQwen.setContentDescription("Scegli il modello Qwen o SparkAI dalla cartella Download");
-        importQwen.setOnClickListener(v -> {
-            Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            pick.setType("*/*");
-            pick.addCategory(Intent.CATEGORY_OPENABLE);
-            startActivityForResult(pick, REQUEST_IMPORT_QWEN);
-        });
+        importQwen.setOnClickListener(v -> openModelImporter());
         card.addView(importQwen,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
@@ -765,6 +768,59 @@ public final class DanLocalChatActivity extends Activity {
     private boolean isNativeEnabled() {
         return getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getBoolean(KEY_NATIVE_MODE, false);
+    }
+
+    private void showModelMenu() {
+        new AlertDialog.Builder(this).setTitle("Modello di Dan su questo dispositivo")
+                .setItems(new String[]{"Scegli modello gia importato", "Importa modello GGUF"},
+                        (dialog, which) -> {
+                            if (which == 0) showInstalledModels();
+                            else openModelImporter();
+                        }).show();
+    }
+
+    private void openModelImporter() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.setType("*/*");
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(pick, REQUEST_IMPORT_QWEN);
+    }
+
+    private void showInstalledModels() {
+        String[] names = DanNativeQwen.availableModels(this);
+        if (names.length == 0) {
+            new AlertDialog.Builder(this).setTitle("Nessun modello importato")
+                    .setMessage("Importa il GGUF sul telefono o tablet. I modelli non si trasferiscono automaticamente con la memoria Drive.")
+                    .setPositiveButton("Importa GGUF", (d, w) -> openModelImporter())
+                    .setNegativeButton("Chiudi", null).show();
+            return;
+        }
+        String[] choices = new String[names.length];
+        String selected = DanNativeQwen.modelFile(this).getName();
+        for (int i = 0; i < names.length; i++)
+            choices[i] = (names[i].equals(selected) ? "✓  " : "    ") + names[i];
+        new AlertDialog.Builder(this).setTitle("Scegli il modello locale")
+                .setItems(choices, (dialog, which) -> {
+                    String name = names[which];
+                    setStatus("Verifica del modello in corso…", true);
+                    executor.execute(() -> {
+                        String error = null;
+                        try { DanNativeQwen.selectModel(getApplicationContext(), name); }
+                        catch (Exception e) { error = e.getMessage(); }
+                        String result = error;
+                        runOnUiThread(() -> {
+                            if (isFinishing()) return;
+                            updateModelLabel();
+                            if (result == null) {
+                                setStatus("Modello selezionato: " + name, true);
+                                checkEngine();
+                            } else new AlertDialog.Builder(this)
+                                    .setTitle("Selezione non riuscita").setMessage(result)
+                                    .setPositiveButton("OK", null).show();
+                        });
+                    });
+                }).setNeutralButton("Importa GGUF", (dialog, which) -> openModelImporter())
+                .setNegativeButton("Chiudi", null).show();
     }
 
     private void updateModelLabel() {

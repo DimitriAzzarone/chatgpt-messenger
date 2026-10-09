@@ -42,6 +42,37 @@ final class DanNativeQwen {
         return new File(new File(context.getFilesDir(), "models"), selected);
     }
 
+    static String[] availableModels(Context context) {
+        File dir = new File(context.getFilesDir(), "models");
+        String[] names = {Q4_NAME, Q3_NAME, SPARK_NAME};
+        java.util.ArrayList<String> found = new java.util.ArrayList<>();
+        for (String name : names) {
+            File file = new File(dir, name);
+            if (file.isFile() && file.length() >= MIN_FILE_SIZE && file.length() <= MAX_FILE_SIZE)
+                found.add(name);
+        }
+        return found.toArray(new String[0]);
+    }
+
+    static synchronized void selectModel(Context context, String name) throws Exception {
+        String expected;
+        if (Q4_NAME.equals(name)) expected = Q4_SHA256;
+        else if (Q3_NAME.equals(name)) expected = Q3_SHA256;
+        else if (SPARK_NAME.equals(name)) expected = SPARK_SHA256;
+        else throw new IOException("Modello non supportato");
+        File file = new File(new File(context.getFilesDir(), "models"), name);
+        if (!file.isFile() || file.length() < MIN_FILE_SIZE || file.length() > MAX_FILE_SIZE
+                || !expected.equals(sha256Of(file)))
+            throw new IOException("File mancante o non verificato: importa di nuovo il GGUF");
+        if (!context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putString(SELECTED, name).commit())
+            throw new IOException("Impossibile salvare il modello selezionato");
+        if (modelReady) {
+            nativeUnload();
+            modelReady = false;
+        }
+    }
+
     static boolean hasImportedModel(Context context) {
         File f = modelFile(context);
         return f.isFile() && f.length() >= MIN_FILE_SIZE && f.length() <= MAX_FILE_SIZE;

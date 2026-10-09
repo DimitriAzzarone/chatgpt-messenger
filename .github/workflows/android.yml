@@ -28,6 +28,7 @@ on:
       - dan-v1.71-rename-chat
       - dan-v1.72-memory-voice
       - dan-v1.73-audio-controls
+      - dan-v1.74-model-selector
       - dan-v1.63-memory-engine-controls
 
 jobs:
