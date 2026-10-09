@@ -51,6 +51,7 @@ public final class DanLocalChatActivity extends Activity {
     private static final String BASE_URL = "http://127.0.0.1:8080";
     private static final String PREFS = "dan_local_chat_165";
     private static final String KEY_HISTORY = "conversation";
+    private static final String KEY_NATIVE_MODE = "use_native_engine";
     private static final int MAX_STORED_MESSAGES = 120;
     private static final int MAX_CONTEXT_MESSAGES = 30;
     private static final int MAX_USER_CHARS = 5000;
@@ -161,8 +162,9 @@ public final class DanLocalChatActivity extends Activity {
         card.setPadding(dp(14), dp(12), dp(14), dp(12));
         card.setBackground(bg(Color.rgb(15, 58, 75), Color.rgb(50, 126, 143), 17));
         connectionLabel = label("Verifica motore in corso…", 13, Color.rgb(126, 226, 222));
-        card.addView(connectionLabel);
-        TextView route = label("Qwen / llama.cpp · 127.0.0.1:8080 · nessun invio a ChatGPT", 11, faded);
+        connectionLabel.setPadding(dp(4), dp(5), dp(4), dp(5));
+        root.addView(connectionLabel);
+        TextView route = label("Server sul tablet · 127.0.0.1:8080", 11, faded);
         route.setPadding(0, dp(7), 0, dp(9));
         card.addView(route);
         LinearLayout tools = new LinearLayout(this);
@@ -184,6 +186,20 @@ public final class DanLocalChatActivity extends Activity {
                 }).show());
         tools.addView(reset, resetParams);
         card.addView(tools);
+        Button engineMode = button(isNativeEnabled()
+                ? "Modalità: nativa sperimentale"
+                : "Modalità: server locale");
+        engineMode.setOnClickListener(v -> {
+            boolean nativeMode = !isNativeEnabled();
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(KEY_NATIVE_MODE, nativeMode).apply();
+            engineMode.setText(nativeMode
+                    ? "Modalità: nativa sperimentale"
+                    : "Modalità: server locale");
+            checkEngine();
+        });
+        card.addView(engineMode, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button memoryToggle = button(
                 isMemoryEnabled() ? "Memoria Dan: ON" : "Memoria Dan: OFF");
         memoryToggle.setOnClickListener(v -> {
@@ -318,8 +334,11 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     private void checkEngine() {
-        if (DanNativeQwen.hasImportedModel(this)) {
-            setStatus("● Modello AI importato (avvio alla prima domanda)", true);
+        if (isNativeEnabled()) {
+            setStatus(DanNativeQwen.hasImportedModel(this)
+                    ? "● Modello importato · caricamento nativo da verificare"
+                    : "● Importa un modello GGUF per la modalità nativa",
+                    DanNativeQwen.hasImportedModel(this));
             return;
         }
         setStatus("Controllo motore locale…", false);
@@ -402,6 +421,11 @@ public final class DanLocalChatActivity extends Activity {
     private boolean isMemoryEnabled() {
         return getSharedPreferences(PREFS, MODE_PRIVATE)
                 .getBoolean("use_dan_memory", false);
+    }
+
+    private boolean isNativeEnabled() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_NATIVE_MODE, false);
     }
 
     private String findRelevantMemory(String question) throws Exception {
@@ -502,11 +526,14 @@ public final class DanLocalChatActivity extends Activity {
         payload.put("stream", false);
         payload.put("temperature", 0.6);
         payload.put("max_tokens", 768);
-        // Prefer private JNI engine whenever the user has imported a model.
-        // No cloud API; the HTTP loopback mode is retained only for backward compatibility.
-        if (DanNativeQwen.hasImportedModel(this)) {
+        // An imported GGUF must not silently override the working local server.
+        if (isNativeEnabled()) {
+            if (!DanNativeQwen.hasImportedModel(this))
+                throw new Exception("Importa un modello GGUF o scegli il server locale.");
+            runOnUiThread(() -> setStatus("● Caricamento nativo del modello…", true));
             return DanNativeQwen.answer(this, messages);
         }
+        runOnUiThread(() -> setStatus("● Invio al server locale sul tablet…", true));
         byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);
 
         HttpURLConnection conn = null;
