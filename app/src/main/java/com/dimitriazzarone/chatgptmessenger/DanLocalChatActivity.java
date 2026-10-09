@@ -76,16 +76,24 @@ public final class DanLocalChatActivity extends Activity {
     private static final int REQUEST_IMPORT_QWEN = 166;
     private static final int REQUEST_SPEECH = 172;
     private static final int REQUEST_TEXT_FILE = 173;
+    /** Profilo stabile ricavato dalle istruzioni DAN e dal documento di continuita'. */
     private static final String SYSTEM_PROMPT =
-            "Sei Dan, un assistente personale in italiano. "
-          + "Sei un'identita' separata dal motore AI utilizzato. "
-          + "Ti chiami Dan. Il tuo interlocutore e' Dimitri Azzarone. "
-          + "Conserva questa identita' in ogni nuova conversazione. "
-          + "Rispondi con chiarezza, gentilezza e precisione. "
-          + "Non inventare fatti, risultati di azioni, file o verifiche. "
-          + "Se non conosci un dato, dichiaralo. "
-          + "Non affermare di ricordare informazioni che non sono disponibili. "
-          + "Non dichiarare di poter comandare il dispositivo senza strumenti reali.";
+            "Tu sei DAN; parli con Dimitri Azzarone. Tu sei Dan, l'utente e' Dimitri: "
+          + "non scambiare mai le vostre identita'. Sei il suo assistente personale, "
+          + "un confidente saggio, un biografo attento e un analista. "
+          + "Usa un tono complice, empatico, intimo e riflessivo, mai giudicante; "
+          + "rispondi in italiano con chiarezza e concisione. "
+          + "Fa' una o due domande mirate quando servono. "
+          + "Dimitri e' interessato alla Legge degli assunti; non imporla se non pertinente. "
+          + "Cerca nella memoria disponibile fatti, nomi e progetti pertinenti, "
+          + "ma non ripetere domande passate come risposta e non inventare ricordi. "
+          + "Se il dato manca, dillo e chiedi; se la trascrizione e' ambigua, chiarisci. "
+          + "Per problemi tecnici verifica i fatti passo per passo. In programmazione "
+          + "fai una modifica alla volta, controlla il risultato, non dichiarare build "
+          + "o pubblicazioni non verificate. Il motore AI puo' cambiare, ma la tua "
+          + "identita' e le regole restano stabili. Non affermare di avere letto "
+          + "l'archivio completo se non e' stato realmente consultato. "
+          + "Non affermare di comandare il dispositivo senza strumenti reali.";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
@@ -276,6 +284,10 @@ public final class DanLocalChatActivity extends Activity {
         card.addView(memoryToggle,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button inspectMemory = button("Verifica dati della memoria");
+        inspectMemory.setOnClickListener(v -> inspectMemory());
+        card.addView(inspectMemory, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button syncButton = button("Sincronizza memoria ora");
         syncButton.setOnClickListener(v -> syncMemoryOnOpen());
         card.addView(syncButton, new LinearLayout.LayoutParams(
@@ -661,6 +673,38 @@ public final class DanLocalChatActivity extends Activity {
             memoryStatus.setText("Memoria: copia locale al sicuro · Drive: " + reason
                     + " · nuovo tentativo tra " + (delay / 1000) + " s");
             syncHandler.postDelayed(retrySync, delay);
+        });
+    }
+
+    private void inspectMemory() {
+        showMemoryStatus("Memoria: conteggio in corso…");
+        memoryExecutor.execute(() -> {
+            try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext());
+                 DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
+                 Cursor cursor = memory.getReadableDatabase().rawQuery(
+                         "SELECT COUNT(*), COUNT(DISTINCT conversation_url) FROM turns", null)) {
+                if (!cursor.moveToFirst()) throw new Exception("Conteggio non disponibile");
+                int turns = cursor.getInt(0);
+                int sources = cursor.getInt(1);
+                int archived = archive.count();
+                boolean drive = new DanDriveSync(getApplicationContext(),
+                        getSharedPreferences("radio_prefs", MODE_PRIVATE), memory, archive)
+                        .configured();
+                String report = "Messaggi registrati: " + turns + "\n"
+                        + "Conversazioni sorgente: " + sources + "\n"
+                        + "Chat nell'archivio ChatGPT: " + archived + "\n"
+                        + "Cartella Drive: " + (drive ? "collegata" : "non collegata") + "\n\n"
+                        + "Le chat dell'archivio sono conservate, ma Dan non le consulta "
+                        + "ancora quando risponde. I conteggi non provano che Drive "
+                        + "sia allineato con l'altro dispositivo.";
+                runOnUiThread(() -> {
+                    if (!isFinishing()) new AlertDialog.Builder(this)
+                            .setTitle("Stato reale della memoria")
+                            .setMessage(report).setPositiveButton("Chiudi", null).show();
+                });
+            } catch (Exception error) {
+                showMemoryStatus("Verifica memoria non riuscita: " + error.getMessage());
+            }
         });
     }
 

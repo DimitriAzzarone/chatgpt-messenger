@@ -31,6 +31,8 @@ on:
       - dan-v1.74-model-selector
       - dan-v1.75-phone-layout
       - dan-v1.76-identity
+      - dan-v1.77-memory-audit
+      - dan-v1.78-personality
       - dan-v1.63-memory-engine-controls
 
 jobs:
