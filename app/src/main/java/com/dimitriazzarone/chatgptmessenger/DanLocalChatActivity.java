@@ -617,6 +617,8 @@ public final class DanLocalChatActivity extends Activity {
         memoryExecutor.execute(() -> {
             try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext())) {
                 if (!memory.record(eventId, "dan-local://" + id, role, content)) return;
+                // Recover legacy UI-only messages before the next Drive export.
+                memory.importSavedLocalChats(getApplicationContext());
                 SharedPreferences prefs = getSharedPreferences("radio_prefs", MODE_PRIVATE);
                 DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
                 try {
@@ -650,6 +652,7 @@ public final class DanLocalChatActivity extends Activity {
             SharedPreferences prefs = getSharedPreferences("radio_prefs", MODE_PRIVATE);
             try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext());
                  DanHistoryStore archive = new DanHistoryStore(getApplicationContext())) {
+                int recovered = memory.importSavedLocalChats(getApplicationContext());
                 DanDriveSync sync = new DanDriveSync(getApplicationContext(),
                         prefs, memory, archive);
                 if (sync.configured()) {
@@ -661,8 +664,10 @@ public final class DanLocalChatActivity extends Activity {
                         syncHandler.removeCallbacks(retrySync);
                     });
                     showMemoryStatus("Memoria Drive aggiornata · " + result.newTurns
-                            + " nuovi messaggi · " + result.historyCount + " chat archiviate");
-                } else showMemoryStatus("Memoria Drive: collega la cartella Memoria Dan");
+                            + " nuovi messaggi · " + recovered + " messaggi locali recuperati"
+                            + " · " + result.historyCount + " chat archiviate");
+                } else showMemoryStatus("Memoria locale aggiornata (" + recovered
+                        + " messaggi recuperati); collega la cartella Memoria Dan");
             } catch (Exception e) {
                 android.util.Log.e("DanLocalMemory", "Lettura memoria Drive non riuscita", e);
                 scheduleMemoryRetry(e);
@@ -692,19 +697,22 @@ public final class DanLocalChatActivity extends Activity {
                 turns.put(turn);
             }
         }
+        java.util.HashMap<String, String> incomingTitles = new java.util.HashMap<>();
+        for (String id : imported.keySet())
+            incomingTitles.put(id, memory.getChatTitle("dan-local://" + id));
         runOnUiThread(() -> {
             if (isFinishing() || isDestroyed() || imported.isEmpty()) return;
             SharedPreferences local = getSharedPreferences(PREFS, MODE_PRIVATE);
             SharedPreferences.Editor edit = local.edit();
             int added = 0;
+            int titlesUpdated = 0;
             for (java.util.Map.Entry<String, JSONArray> entry : imported.entrySet()) {
                 String id = entry.getKey();
                 JSONArray turns = entry.getValue();
                 if (turns.length() == 0) continue;
                 boolean exists = chatIds.contains(id);
-                boolean shared = local.getBoolean("shared_chat_" + id, false);
-                // An existing local chat may include old turns absent from the event log.
-                if (exists && !shared) continue;
+                // NEVER skip an existing local chat: it may have replies written
+                // on another device. Never replace it with a remote snapshot.
                 if (!exists) {
                     chatIds.add(id);
                     String title = "Chat condivisa";
@@ -717,16 +725,34 @@ public final class DanLocalChatActivity extends Activity {
                             break;
                         }
                     }
-                    chatTitles.add(title);
+                    String sharedTitle = incomingTitles.get(id);
+                    chatTitles.add(sharedTitle == null || sharedTitle.isEmpty() ? title : sharedTitle);
                     edit.putBoolean("shared_chat_" + id, true);
                     added++;
                 }
-                if (!exists || turns.length() > storedChatLength(local.getString(
-                        chatKey(id), "[]"))) {
+                if (!exists) {
                     edit.putString(chatKey(id), turns.toString());
+                } else {
+                    JSONArray saved;
+                    try {
+                        saved = new JSONArray(local.getString(chatKey(id), "[]"));
+                    } catch (Exception invalid) {
+                        android.util.Log.w("DanLocalMemory", "Chat da proteggere: " + id, invalid);
+                        continue; // Preserve unreadable local contents for recovery.
+                    }
+                    JSONArray merged = mergeWithoutRemovingTurns(saved, turns);
+                    if (merged.length() > saved.length())
+                        edit.putString(chatKey(id), merged.toString());
+                    String updatedTitle = incomingTitles.get(id);
+                    int current = chatIds.indexOf(id);
+                    if (current >= 0 && updatedTitle != null && !updatedTitle.trim().isEmpty()
+                            && !updatedTitle.equals(chatTitles.get(current))) {
+                        chatTitles.set(current, updatedTitle);
+                        titlesUpdated++;
+                    }
                 }
             }
-            if (added > 0) {
+            if (added > 0 || titlesUpdated > 0) {
                 JSONArray index = new JSONArray();
                 try {
                     for (int i = 0; i < chatIds.size(); i++) {
@@ -741,6 +767,40 @@ public final class DanLocalChatActivity extends Activity {
             if (!edit.commit()) showMemoryStatus("Chat condivise: salvataggio non riuscito");
             else if (added > 0) showMemoryStatus("Chat condivise aggiunte: " + added);
         });
+    }
+
+    /** Append remote occurrences absent from the saved UI chat, never deleting or
+     * replacing an existing local turn. Identical repeated messages are counted
+     * per conversation and role so repeated syncs remain idempotent.
+     */
+    private static JSONArray mergeWithoutRemovingTurns(JSONArray saved, JSONArray incoming) {
+        java.util.HashMap<String, Integer> kept = new java.util.HashMap<>();
+        for (int i = 0; i < saved.length(); i++) {
+            JSONObject message = saved.optJSONObject(i);
+            if (message == null) continue;
+            String role = message.optString("role", "");
+            String body = message.optString("content", "");
+            String key = role.length() + ":" + role + body.length() + ":" + body;
+            Integer count = kept.get(key);
+            kept.put(key, count == null ? 1 : count + 1);
+        }
+        java.util.HashMap<String, Integer> seen = new java.util.HashMap<>();
+        JSONArray result = new JSONArray();
+        for (int i = 0; i < saved.length(); i++) result.put(saved.opt(i));
+        for (int i = 0; i < incoming.length(); i++) {
+            JSONObject message = incoming.optJSONObject(i);
+            if (message == null) continue;
+            String role = message.optString("role", "");
+            String body = message.optString("content", "");
+            if (!("user".equals(role) || "assistant".equals(role)) || body.isEmpty()) continue;
+            String key = role.length() + ":" + role + body.length() + ":" + body;
+            Integer count = seen.get(key);
+            int number = (count == null ? 0 : count) + 1;
+            seen.put(key, number);
+            Integer already = kept.get(key);
+            if (number > (already == null ? 0 : already)) result.put(message);
+        }
+        return result;
     }
 
     private static int storedChatLength(String json) {
@@ -1284,7 +1344,24 @@ public final class DanLocalChatActivity extends Activity {
                     if (name.length() > 60) name = name.substring(0, 60);
                     String previous = chatTitles.set(index, name);
                     if (!saveHistory()) chatTitles.set(index, previous);
+                    else syncRenamedTitle(activeChatId, name);
                 }).show();
+    }
+
+    /** Changing a chat label is metadata only; all message bodies remain intact. */
+    private void syncRenamedTitle(String id, String title) {
+        memoryExecutor.execute(() -> {
+            try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext());
+                 DanHistoryStore archive = new DanHistoryStore(getApplicationContext())) {
+                memory.updateChatTitle("dan-local://" + id, title);
+                DanDriveSync sync = new DanDriveSync(getApplicationContext(),
+                        getSharedPreferences("radio_prefs", MODE_PRIVATE), memory, archive);
+                if (sync.configured()) sync.sync(true);
+            } catch (Exception e) {
+                android.util.Log.e("DanLocalMemory", "Titolo non sincronizzato", e);
+                scheduleMemoryRetry(e);
+            }
+        });
     }
 
     private void showConversations() {
