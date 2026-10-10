@@ -11,6 +11,10 @@ import android.os.Looper;
 import android.content.SharedPreferences;
 import android.content.Intent;
 import android.speech.RecognizerIntent;
+import android.speech.RecognitionListener;
+import android.speech.SpeechRecognizer;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.Voice;
 import android.media.session.MediaSession;
@@ -75,17 +79,26 @@ public final class DanLocalChatActivity extends Activity {
     private static final int MAX_REPLY_CHARS = 40000;
     private static final int REQUEST_IMPORT_QWEN = 166;
     private static final int REQUEST_SPEECH = 172;
+    private static final int REQUEST_AUDIO_PERMISSION = 180;
     private static final int REQUEST_TEXT_FILE = 173;
+    /** Profilo stabile ricavato dalle istruzioni DAN e dal documento di continuita'. */
     private static final String SYSTEM_PROMPT =
-            "Sei Dan, un assistente personale in italiano. "
-          + "Sei un'identita' separata dal motore AI utilizzato. "
-          + "Ti chiami Dan. Il tuo interlocutore e' Dimitri Azzarone. "
-          + "Conserva questa identita' in ogni nuova conversazione. "
-          + "Rispondi con chiarezza, gentilezza e precisione. "
-          + "Non inventare fatti, risultati di azioni, file o verifiche. "
-          + "Se non conosci un dato, dichiaralo. "
-          + "Non affermare di ricordare informazioni che non sono disponibili. "
-          + "Non dichiarare di poter comandare il dispositivo senza strumenti reali.";
+            "Tu sei DAN; parli con Dimitri Azzarone. Tu sei Dan, l'utente e' Dimitri: "
+          + "non scambiare mai le vostre identita'. Sei il suo assistente personale, "
+          + "un confidente saggio, un biografo attento e un analista. "
+          + "Usa un tono complice, empatico, intimo e riflessivo, mai giudicante; "
+          + "rispondi in italiano con chiarezza e concisione. "
+          + "Fa' una o due domande mirate quando servono. "
+          + "Dimitri e' interessato alla Legge degli assunti; non imporla se non pertinente. "
+          + "Cerca nella memoria disponibile fatti, nomi e progetti pertinenti, "
+          + "ma non ripetere domande passate come risposta e non inventare ricordi. "
+          + "Se il dato manca, dillo e chiedi; se la trascrizione e' ambigua, chiarisci. "
+          + "Per problemi tecnici verifica i fatti passo per passo. In programmazione "
+          + "fai una modifica alla volta, controlla il risultato, non dichiarare build "
+          + "o pubblicazioni non verificate. Il motore AI puo' cambiare, ma la tua "
+          + "identita' e le regole restano stabili. Non affermare di avere letto "
+          + "l'archivio completo se non e' stato realmente consultato. "
+          + "Non affermare di comandare il dispositivo senza strumenti reali.";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
@@ -109,6 +122,10 @@ public final class DanLocalChatActivity extends Activity {
     private Button speedButton;
     private Button soundsButton;
     private MediaSession headsetSession;
+    private SpeechRecognizer recognizer;
+    private boolean listening;
+    private boolean headsetDictation;
+    private boolean pendingHeadsetDictation;
     private boolean waiting = false;
 
     private static final class ChatMessage {
@@ -276,6 +293,10 @@ public final class DanLocalChatActivity extends Activity {
         card.addView(memoryToggle,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button inspectMemory = button("Verifica dati della memoria");
+        inspectMemory.setOnClickListener(v -> inspectMemory());
+        card.addView(inspectMemory, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button syncButton = button("Sincronizza memoria ora");
         syncButton.setOnClickListener(v -> syncMemoryOnOpen());
         card.addView(syncButton, new LinearLayout.LayoutParams(
@@ -320,7 +341,7 @@ public final class DanLocalChatActivity extends Activity {
                 .setMessage("Il tasto delle cuffie avvia la dettatura quando Dan e' in primo piano. "
                         + "Android sceglie il dispositivo audio attivo. Se le cuffie non sono collegate, "
                         + "apri le impostazioni Bluetooth del tablet.")
-                .setPositiveButton("Detta ora", (d, w) -> startDictation())
+                .setPositiveButton("Detta ora", (d, w) -> startDictation(true))
                 .setNeutralButton("Bluetooth", (d, w) -> {
                     try { startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS)); }
                     catch (Exception ignored) { setStatus("Impostazioni Bluetooth non disponibili", false); }
@@ -634,6 +655,7 @@ public final class DanLocalChatActivity extends Activity {
                 if (sync.configured()) {
                     // Import remote turns, then publish local messages left queued offline.
                     DanDriveSync.Result result = sync.sync(true);
+                    importSharedChats(memory);
                     runOnUiThread(() -> {
                         syncFailures = 0;
                         syncHandler.removeCallbacks(retrySync);
@@ -646,6 +668,84 @@ public final class DanLocalChatActivity extends Activity {
                 scheduleMemoryRetry(e);
             }
         });
+    }
+
+    /** Build UI chats from the already synchronized event log, without overwriting local chats. */
+    private void importSharedChats(DanMemoryStore memory) throws Exception {
+        java.util.LinkedHashMap<String, JSONArray> imported = new java.util.LinkedHashMap<>();
+        try (Cursor cursor = memory.getReadableDatabase().rawQuery(
+                "SELECT conversation_url, role, body, recorded_at FROM turns "
+                + "WHERE conversation_url LIKE 'dan-local://%' "
+                + "ORDER BY recorded_at, rowid", null)) {
+            while (cursor.moveToNext()) {
+                String url = cursor.getString(0);
+                String id = url.substring("dan-local://".length());
+                if (!id.matches("[0-9a-fA-F-]{36}")) continue;
+                String role = cursor.getString(1);
+                if (!"user".equals(role) && !"assistant".equals(role)) continue;
+                JSONArray turns = imported.get(id);
+                if (turns == null) { turns = new JSONArray(); imported.put(id, turns); }
+                JSONObject turn = new JSONObject();
+                turn.put("role", role);
+                turn.put("content", cursor.getString(2));
+                turn.put("timestamp", cursor.getLong(3));
+                turns.put(turn);
+            }
+        }
+        runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed() || imported.isEmpty()) return;
+            SharedPreferences local = getSharedPreferences(PREFS, MODE_PRIVATE);
+            SharedPreferences.Editor edit = local.edit();
+            int added = 0;
+            for (java.util.Map.Entry<String, JSONArray> entry : imported.entrySet()) {
+                String id = entry.getKey();
+                JSONArray turns = entry.getValue();
+                if (turns.length() == 0) continue;
+                boolean exists = chatIds.contains(id);
+                boolean shared = local.getBoolean("shared_chat_" + id, false);
+                // An existing local chat may include old turns absent from the event log.
+                if (exists && !shared) continue;
+                if (!exists) {
+                    chatIds.add(id);
+                    String title = "Chat condivisa";
+                    for (int j = 0; j < turns.length(); j++) {
+                        JSONObject turn = turns.optJSONObject(j);
+                        if (turn != null && "user".equals(turn.optString("role"))) {
+                            String first = turn.optString("content").replace('\n', ' ').trim();
+                            if (!first.isEmpty()) title = first.length() > 48
+                                    ? first.substring(0, 48) + "…" : first;
+                            break;
+                        }
+                    }
+                    chatTitles.add(title);
+                    edit.putBoolean("shared_chat_" + id, true);
+                    added++;
+                }
+                if (!exists || turns.length() > storedChatLength(local.getString(
+                        chatKey(id), "[]"))) {
+                    edit.putString(chatKey(id), turns.toString());
+                }
+            }
+            if (added > 0) {
+                JSONArray index = new JSONArray();
+                try {
+                    for (int i = 0; i < chatIds.size(); i++) {
+                        JSONObject item = new JSONObject();
+                        item.put("id", chatIds.get(i));
+                        item.put("title", chatTitles.get(i));
+                        index.put(item);
+                    }
+                    edit.putString(KEY_CHAT_INDEX, index.toString());
+                } catch (Exception ignored) { return; }
+            }
+            if (!edit.commit()) showMemoryStatus("Chat condivise: salvataggio non riuscito");
+            else if (added > 0) showMemoryStatus("Chat condivise aggiunte: " + added);
+        });
+    }
+
+    private static int storedChatLength(String json) {
+        try { return new JSONArray(json).length(); }
+        catch (Exception ignored) { return 0; }
     }
 
     private void scheduleMemoryRetry(Exception error) {
@@ -661,6 +761,38 @@ public final class DanLocalChatActivity extends Activity {
             memoryStatus.setText("Memoria: copia locale al sicuro · Drive: " + reason
                     + " · nuovo tentativo tra " + (delay / 1000) + " s");
             syncHandler.postDelayed(retrySync, delay);
+        });
+    }
+
+    private void inspectMemory() {
+        showMemoryStatus("Memoria: conteggio in corso…");
+        memoryExecutor.execute(() -> {
+            try (DanMemoryStore memory = new DanMemoryStore(getApplicationContext());
+                 DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
+                 Cursor cursor = memory.getReadableDatabase().rawQuery(
+                         "SELECT COUNT(*), COUNT(DISTINCT conversation_url) FROM turns", null)) {
+                if (!cursor.moveToFirst()) throw new Exception("Conteggio non disponibile");
+                int turns = cursor.getInt(0);
+                int sources = cursor.getInt(1);
+                int archived = archive.count();
+                boolean drive = new DanDriveSync(getApplicationContext(),
+                        getSharedPreferences("radio_prefs", MODE_PRIVATE), memory, archive)
+                        .configured();
+                String report = "Messaggi registrati: " + turns + "\n"
+                        + "Conversazioni sorgente: " + sources + "\n"
+                        + "Chat nell'archivio ChatGPT: " + archived + "\n"
+                        + "Cartella Drive: " + (drive ? "collegata" : "non collegata") + "\n\n"
+                        + "Le chat dell'archivio sono conservate, ma Dan non le consulta "
+                        + "ancora quando risponde. I conteggi non provano che Drive "
+                        + "sia allineato con l'altro dispositivo.";
+                runOnUiThread(() -> {
+                    if (!isFinishing()) new AlertDialog.Builder(this)
+                            .setTitle("Stato reale della memoria")
+                            .setMessage(report).setPositiveButton("Chiudi", null).show();
+                });
+            } catch (Exception error) {
+                showMemoryStatus("Verifica memoria non riuscita: " + error.getMessage());
+            }
         });
     }
 
@@ -754,13 +886,91 @@ public final class DanLocalChatActivity extends Activity {
                 }).setNegativeButton("Chiudi", null).show();
     }
 
-    private void startDictation() {
-        Intent listen = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault());
-        try { startActivityForResult(listen, REQUEST_SPEECH); }
-        catch (Exception e) { setStatus("Riconoscimento vocale non disponibile", false); }
+    private void startDictation() { startDictation(false); }
+
+    private void startDictation(boolean fromHeadset) {
+        if (listening) {
+            if (recognizer != null) recognizer.stopListening();
+            setStatus("Elaboro la voce…", true);
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            pendingHeadsetDictation = fromHeadset;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},
+                    REQUEST_AUDIO_PERMISSION);
+            return;
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            setStatus("Riconoscimento vocale Android non disponibile", false);
+            return;
+        }
+        try {
+            if (speech != null) speech.stop();
+            if (recognizer == null) {
+                recognizer = SpeechRecognizer.createSpeechRecognizer(this);
+                recognizer.setRecognitionListener(new RecognitionListener() {
+                    @Override public void onReadyForSpeech(Bundle params) {
+                        setStatus("● Dan ascolta…", true);
+                    }
+                    @Override public void onBeginningOfSpeech() { }
+                    @Override public void onRmsChanged(float rmsdB) { }
+                    @Override public void onBufferReceived(byte[] buffer) { }
+                    @Override public void onEndOfSpeech() {
+                        setStatus("● Trascrizione in corso…", true);
+                    }
+                    @Override public void onError(int error) {
+                        listening = false;
+                        headsetDictation = false;
+                        setStatus(error == SpeechRecognizer.ERROR_NO_MATCH
+                                || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
+                                ? "Nessuna frase rilevata; premi di nuovo le cuffie"
+                                : "Ascolto non riuscito (codice " + error + ")", false);
+                    }
+                    @Override public void onResults(Bundle results) {
+                        listening = false;
+                        boolean sendFromHeadset = headsetDictation;
+                        headsetDictation = false;
+                        ArrayList<String> words = results.getStringArrayList(
+                                SpeechRecognizer.RESULTS_RECOGNITION);
+                        if (words == null || words.isEmpty() || words.get(0).trim().isEmpty()) {
+                            setStatus("Nessuna frase rilevata", false);
+                            return;
+                        }
+                        String existing = input.getText().toString().trim();
+                        input.setText(existing.isEmpty() ? words.get(0)
+                                : existing + " " + words.get(0));
+                        if (sendFromHeadset && existing.isEmpty() && !waiting) sendMessage();
+                        else setStatus("Testo dettato: controlla e premi Invia", true);
+                    }
+                    @Override public void onPartialResults(Bundle partialResults) { }
+                    @Override public void onEvent(int eventType, Bundle params) { }
+                });
+            }
+            Intent listen = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            listen.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.ITALIAN.toLanguageTag());
+            headsetDictation = fromHeadset;
+            listening = true;
+            setStatus("● Dan ascolta…", true);
+            recognizer.startListening(listen);
+        } catch (Exception e) {
+            listening = false;
+            headsetDictation = false;
+            setStatus("Riconoscimento vocale non disponibile", false);
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode,
+            String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != REQUEST_AUDIO_PERMISSION) return;
+        boolean headset = pendingHeadsetDictation;
+        pendingHeadsetDictation = false;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+            startDictation(headset);
+        else setStatus("Permesso microfono negato", false);
     }
 
     private void initHeadsetControls() {
@@ -778,12 +988,12 @@ public final class DanLocalChatActivity extends Activity {
                     if (key != null && key.getAction() == KeyEvent.ACTION_DOWN
                             && (key.getKeyCode() == KeyEvent.KEYCODE_HEADSETHOOK
                             || key.getKeyCode() == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)) {
-                        runOnUiThread(() -> startDictation());
+                        runOnUiThread(() -> startDictation(true));
                         return true;
                     }
                     return false;
                 }
-                @Override public void onPlay() { runOnUiThread(() -> startDictation()); }
+                @Override public void onPlay() { runOnUiThread(() -> startDictation(true)); }
             });
         } catch (Exception e) { headsetSession = null; }
     }
@@ -800,6 +1010,9 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     @Override protected void onPause() {
+        if (recognizer != null) recognizer.cancel();
+        listening = false;
+        headsetDictation = false;
         if (headsetSession != null) headsetSession.setActive(false);
         super.onPause();
     }
@@ -1226,6 +1439,7 @@ public final class DanLocalChatActivity extends Activity {
     @Override protected void onDestroy() {
         syncHandler.removeCallbacks(retrySync);
         executor.shutdownNow();
+        if (recognizer != null) { recognizer.destroy(); recognizer = null; }
         if (speech != null) { speech.stop(); speech.shutdown(); }
         if (headsetSession != null) headsetSession.release();
         super.onDestroy();
