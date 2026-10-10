@@ -2,6 +2,11 @@ package com.dimitriazzarone.chatgptmessenger;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.os.Build;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -127,6 +132,7 @@ public final class DanLocalChatActivity extends Activity {
     private boolean headsetDictation;
     private boolean pendingHeadsetDictation;
     private boolean waiting = false;
+    private boolean chatVisible;
 
     private static final class ChatMessage {
         final String role;
@@ -550,6 +556,14 @@ public final class DanLocalChatActivity extends Activity {
 
     private void sendMessage() {
         if (waiting) return;
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
+                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                && !getSharedPreferences(PREFS, MODE_PRIVATE)
+                        .getBoolean("notification_permission_asked", false)) {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putBoolean("notification_permission_asked", true).apply();
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 181);
+        }
         String question = input.getText().toString().trim();
         if (question.isEmpty()) return;
         if (question.length() > MAX_USER_CHARS) {
@@ -599,6 +613,7 @@ public final class DanLocalChatActivity extends Activity {
                     setStatus(knownAnswer != null ? "● Dato d'identita' locale" :
                             "● Risposta locale in " + elapsedSeconds + " s", true);
                     speakReply(answer.trim());
+                    notifyBackgroundReply(answer.trim());
                 } else {
                     // La domanda rimane in memoria; l'errore NON e' una risposta AI.
                     setStatus("● Errore motore locale", false);
@@ -1000,6 +1015,7 @@ public final class DanLocalChatActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
+        chatVisible = true;
         applyVoiceSettings();
         updateAudioButtons();
         if (headsetSession != null) headsetSession.setActive(true);
@@ -1015,6 +1031,33 @@ public final class DanLocalChatActivity extends Activity {
         headsetDictation = false;
         if (headsetSession != null) headsetSession.setActive(false);
         super.onPause();
+    }
+
+    @Override protected void onStop() {
+        chatVisible = false;
+        super.onStop();
+    }
+
+    private void notifyBackgroundReply(String answer) {
+        if (chatVisible || Build.VERSION.SDK_INT < 26) return;
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
+                Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return;
+        NotificationManager manager = getSystemService(NotificationManager.class);
+        if (manager == null) return;
+        String channel = "dan_local_replies";
+        NotificationChannel replies = new NotificationChannel(channel, "Risposte di Dan",
+                NotificationManager.IMPORTANCE_DEFAULT);
+        replies.setDescription("Avviso sonoro quando Dan risponde in secondo piano");
+        manager.createNotificationChannel(replies);
+        PendingIntent open = PendingIntent.getActivity(this, 0,
+                new Intent(this, DanLocalChatActivity.class),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        Notification notification = new Notification.Builder(this, channel)
+                .setSmallIcon(R.drawable.ic_dan_launcher)
+                .setContentTitle("Dan ha risposto")
+                .setContentText(answer.length() > 100 ? answer.substring(0, 100) + "…" : answer)
+                .setContentIntent(open).setAutoCancel(true).build();
+        manager.notify(181, notification);
     }
 
     private void speakReply(String answer) {
@@ -1171,8 +1214,12 @@ public final class DanLocalChatActivity extends Activity {
         sys.put("content", SYSTEM_PROMPT);
         messages.put(sys);
         if (isMemoryEnabled()) {
-            String memory = findRelevantMemory(
-                    snapshot.get(snapshot.size() - 1).content);
+            String question = snapshot.get(snapshot.size() - 1).content;
+            String memory = findRelevantMemory(question);
+            try (DanHistoryStore archive = new DanHistoryStore(getApplicationContext())) {
+                String historical = archive.relevantExcerpts(question);
+                if (!historical.isEmpty()) memory += "\n" + historical;
+            }
             if (!memory.isEmpty()) {
                 JSONObject context = new JSONObject();
                 context.put("role", "system");
@@ -1184,6 +1231,13 @@ public final class DanLocalChatActivity extends Activity {
                         + "Non inserire indirizzi o etichette tecniche nella risposta:\n"
                         + memory);
                 messages.put(context);
+            } else {
+                JSONObject absent = new JSONObject();
+                absent.put("role", "system");
+                absent.put("content", "Per questa domanda non sono stati trovati estratti "
+                        + "nella memoria consultabile. Se chiede un fatto personale non "
+                        + "presente nella conversazione, di' chiaramente che non lo sai.");
+                messages.put(absent);
             }
         }
         int start = Math.max(0, snapshot.size() - MAX_CONTEXT_MESSAGES);

@@ -18,6 +18,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -42,6 +45,69 @@ final class DanHistoryStore extends SQLiteOpenHelper {
             c.moveToFirst();
             return c.getInt(0);
         }
+    }
+
+    /** Search imported conversations on demand; historical text is never copied to Git. */
+    String relevantExcerpts(String question) throws Exception {
+        Set<String> words = new LinkedHashSet<>();
+        String stop = "|come|cosa|quale|quali|sono|sai|dirmi|dimmi|mio|mia|"
+                + "tuo|tua|della|delle|questo|questa|vorrei|ricordi|";
+        for (String part : question.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
+            if (part.length() >= 4 && !stop.contains("|" + part + "|")) words.add(part);
+            if (words.size() >= 5) break;
+        }
+        if (question.toLowerCase(Locale.ROOT).matches(".*(lavor|profess|occupaz).*")) {
+            words.add("docente"); words.add("insegn"); words.add("matematica");
+        }
+        if (words.isEmpty()) return "";
+        StringBuilder sql = new StringBuilder("SELECT title, raw_json FROM conversations WHERE ");
+        ArrayList<String> args = new ArrayList<>();
+        for (String word : words) {
+            if (!args.isEmpty()) sql.append(" OR ");
+            sql.append("instr(lower(raw_json), ?) > 0");
+            args.add(word);
+        }
+        sql.append(" ORDER BY updated_at DESC LIMIT 24");
+        StringBuilder excerpts = new StringBuilder();
+        int found = 0;
+        try (Cursor rows = getReadableDatabase().rawQuery(sql.toString(),
+                args.toArray(new String[0]))) {
+            while (rows.moveToNext() && found < 5) {
+                JSONObject chat = new JSONObject(rows.getString(1));
+                JSONObject mapping = chat.optJSONObject("mapping");
+                if (mapping == null) continue;
+                String title = rows.getString(0);
+                java.util.Iterator<String> nodes = mapping.keys();
+                while (nodes.hasNext() && found < 5) {
+                    JSONObject node = mapping.optJSONObject(nodes.next());
+                    JSONObject message = node == null ? null : node.optJSONObject("message");
+                    JSONObject author = message == null ? null : message.optJSONObject("author");
+                    JSONObject content = message == null ? null : message.optJSONObject("content");
+                    if (author == null || !"user".equals(author.optString("role"))
+                            || content == null) continue;
+                    JSONArray parts = content.optJSONArray("parts");
+                    if (parts == null) continue;
+                    for (int i = 0; i < parts.length() && found < 5; i++) {
+                        Object part = parts.opt(i);
+                        if (!(part instanceof String)) continue;
+                        String body = ((String) part).replace('\n', ' ').trim();
+                        if (body.length() < 25) continue;
+                        String lower = body.toLowerCase(Locale.ROOT);
+                        boolean relevant = false;
+                        for (String word : words) if (lower.contains(word)) {
+                            relevant = true; break;
+                        }
+                        if (!relevant) continue;
+                        if (body.length() > 420) body = body.substring(0, 420) + "…";
+                        String line = "- [Chat storica: " + title + "] " + body + "\n";
+                        if (excerpts.length() + line.length() > 2300) return excerpts.toString();
+                        excerpts.append(line);
+                        found++;
+                    }
+                }
+            }
+        }
+        return excerpts.toString();
     }
 
     int importArchive(InputStream source) throws Exception {
