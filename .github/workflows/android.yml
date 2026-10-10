@@ -35,6 +35,7 @@ on:
       - dan-v1.78-personality
       - dan-v1.79-shared-chats
       - dan-v1.80-headset-voice
+      - dan-v1.82-restore-180
       - dan-v1.63-memory-engine-controls
 
 jobs:
