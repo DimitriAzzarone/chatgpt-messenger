@@ -1224,6 +1224,83 @@ public final class DanLocalChatActivity extends Activity {
         return found.toString();
     }
 
+    /** Recupera brevi citazioni dallo storico senza alterare il database importato.
+     * Prima versione prudente: ricerca lessicale, risultati limitati. */
+    private String findHistoricalMemory(String question) {
+        LinkedHashSet<String> words = new LinkedHashSet<>();
+        String excluded = "|questo|questa|quello|quella|come|quando|quali|"
+                + "ricordi|ricordo|raccontami|parlami|parlato|storia|"
+                + "vorrei|potrei|sapere|delle|degli|anche|sono|"
+                + "avevo|volevo|perche|perché|nostra|tuoi|";
+        for (String word : question.toLowerCase(Locale.ROOT)
+                .split("[^\\p{L}\\p{N}]+")) {
+            if (word.length() >= 5 && !excluded.contains("|" + word + "|"))
+                words.add(word);
+            if (words.size() == 3) break;
+        }
+        if (words.isEmpty()) return "";
+
+        StringBuilder sql = new StringBuilder(
+                "SELECT title, raw_json FROM conversations WHERE ");
+        ArrayList<String> args = new ArrayList<>();
+        for (String word : words) {
+            if (!args.isEmpty()) sql.append(" OR ");
+            sql.append("lower(raw_json) LIKE ?");
+            args.add("%" + word + "%");
+        }
+        sql.append(" ORDER BY updated_at DESC LIMIT 24");
+        StringBuilder result = new StringBuilder();
+        try (DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
+             Cursor cursor = archive.getReadableDatabase().rawQuery(
+                     sql.toString(), args.toArray(new String[0]))) {
+            int matches = 0;
+            while (cursor.moveToNext() && matches < 2) {
+                JSONObject chat = new JSONObject(cursor.getString(1));
+                if (chat.optBoolean("is_do_not_remember", false)) continue;
+                JSONObject mapping = chat.optJSONObject("mapping");
+                if (mapping == null) continue;
+                String best = "";
+                int bestScore = 0;
+                java.util.Iterator<String> ids = mapping.keys();
+                while (ids.hasNext()) {
+                    JSONObject node = mapping.optJSONObject(ids.next());
+                    JSONObject msg = node == null ? null : node.optJSONObject("message");
+                    if (msg == null || !"user".equals(
+                            msg.optJSONObject("author") == null ? "" :
+                            msg.optJSONObject("author").optString("role"))) continue;
+                    JSONObject content = msg.optJSONObject("content");
+                    JSONArray parts = content == null ? null : content.optJSONArray("parts");
+                    if (parts == null) continue;
+                    for (int i = 0; i < parts.length(); i++) {
+                        Object part = parts.opt(i);
+                        if (!(part instanceof String)) continue;
+                        String body = ((String) part).replace('\n', ' ').trim();
+                        if (body.isEmpty()) continue;
+                        String lower = body.toLowerCase(Locale.ROOT);
+                        int score = 0;
+                        for (String word : words) if (lower.contains(word)) score++;
+                        if (score > bestScore) {
+                            bestScore = score;
+                            best = body.length() > 350 ? body.substring(0, 350) + "..." : body;
+                        }
+                    }
+                }
+                if (bestScore == 0) continue;
+                String title = cursor.getString(0);
+                if (title == null) title = "Senza titolo";
+                title = title.replace('\n', ' ').trim();
+                if (title.length() > 70) title = title.substring(0, 70);
+                String entry = "- [" + title + "] " + best + "\n";
+                if (result.length() + entry.length() > 950) break;
+                result.append(entry);
+                matches++;
+            }
+        } catch (Exception e) {
+            android.util.Log.w("DanLocalMemory", "Ricerca storico non riuscita", e);
+        }
+        return result.toString();
+    }
+
     private String requestLocalReply(List<ChatMessage> snapshot) throws Exception {
         JSONArray messages = new JSONArray();
         JSONObject sys = new JSONObject();
@@ -1231,8 +1308,11 @@ public final class DanLocalChatActivity extends Activity {
         sys.put("content", SYSTEM_PROMPT);
         messages.put(sys);
         if (isMemoryEnabled()) {
-            String memory = findRelevantMemory(
-                    snapshot.get(snapshot.size() - 1).content);
+            String question = snapshot.get(snapshot.size() - 1).content;
+            String memory = findRelevantMemory(question);
+            String historical = findHistoricalMemory(question);
+            if (!historical.isEmpty())
+                memory += "\nEstratti dallo storico di conversazioni (non sempre attuali):\n" + historical;
             if (!memory.isEmpty()) {
                 JSONObject context = new JSONObject();
                 context.put("role", "system");
