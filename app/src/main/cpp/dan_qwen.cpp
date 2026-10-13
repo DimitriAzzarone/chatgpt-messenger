@@ -81,7 +81,13 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *e
         if (llama_decode(context, batch) != 0) { ok = false; break; }
     }
     if (!ok) { llama_batch_free(batch); throw_java(env,"Errore decodifica prompt"); return nullptr; }
-    llama_sampler * sampler = llama_sampler_init_greedy();
+    // Campionamento con temperatura moderata; evita la rigidità greedy.
+    llama_sampler_chain_params params = llama_sampler_chain_default_params();
+    llama_sampler * sampler = llama_sampler_chain_init(params);
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.90f, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.65f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     std::string output;
     for (int i = 0; i < max_tokens; i++) {
         llama_token token = llama_sampler_sample(sampler, context, -1);

@@ -100,6 +100,14 @@ public final class DanLocalChatActivity extends Activity {
           + "l'archivio completo se non e' stato realmente consultato. "
           + "Non affermare di comandare il dispositivo senza strumenti reali.";
 
+    /** Istruzioni brevi per modelli locali da 0,5B. */
+    private static final String NATIVE_PROMPT =
+            "Sei DAN, assistente conversazionale. Rispondi in italiano alla "
+          + "domanda in modo diretto, naturale e utile. "
+          + "Per domande di cultura generale non servono dati personali o ricordi. "
+          + "Non inventare fatti o ricordi. Se un dato personale non è disponibile, "
+          + "dillo brevemente e rispondi comunque alla parte generale.";
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
     private final Handler syncHandler = new Handler(Looper.getMainLooper());
@@ -1305,7 +1313,7 @@ public final class DanLocalChatActivity extends Activity {
         JSONArray messages = new JSONArray();
         JSONObject sys = new JSONObject();
         sys.put("role", "system");
-        sys.put("content", SYSTEM_PROMPT);
+        sys.put("content", isNativeEnabled() ? NATIVE_PROMPT : SYSTEM_PROMPT);
         messages.put(sys);
         if (isMemoryEnabled()) {
             String question = snapshot.get(snapshot.size() - 1).content;
@@ -1326,7 +1334,7 @@ public final class DanLocalChatActivity extends Activity {
                 messages.put(context);
             }
         }
-        int start = Math.max(0, snapshot.size() - MAX_CONTEXT_MESSAGES);
+        int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 6 : MAX_CONTEXT_MESSAGES));
         for (int i = start; i < snapshot.size(); i++) {
             ChatMessage m = snapshot.get(i);
             JSONObject j = new JSONObject();
