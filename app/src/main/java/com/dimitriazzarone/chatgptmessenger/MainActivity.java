@@ -103,6 +103,7 @@ public class MainActivity extends Activity {
     private static final int REQ_MEMORY_IMPORT = 4004;
     private static final int REQ_HISTORY_IMPORT = 4005;
     private static final int REQ_DRIVE_FOLDER = 4006;
+    private static final int REQ_STORY_FOLDER = 4007;
     private static final String PREF_MEMORY_BACKUP_URI = "dan_memory_backup_uri";
     private static final String PREFS = "radio_prefs";
     private static final String PREF_TTS_VOICE = "tts_voice";
@@ -4307,7 +4308,9 @@ public class MainActivity extends Activity {
                 "Attiva backup automatico su un file",
                 "Collega cartella Memoria Dan",
                 "Sincronizza cartella collegata",
-                "Conta chat archiviate"
+                "Conta chat archiviate",
+                "Collega Tutta la mia storia o quasi (lettura)",
+                "Aggiorna documenti autobiografici"
         };
         new AlertDialog.Builder(this)
                 .setTitle("Memoria di Dan")
@@ -4330,14 +4333,44 @@ public class MainActivity extends Activity {
                         startActivityForResult(intent, REQ_DRIVE_FOLDER);
                     } else if (which == 5) {
                         syncDrive(true, true);
-                    } else {
+                    } else if (which == 6) {
                         memoryExecutor.execute(() -> {
                             int count = historyStore.count();
                             runOnUiThread(() -> Toast.makeText(this,
                                     "Chat archiviate: " + count, Toast.LENGTH_LONG).show());
                         });
+                    } else if (which == 7) {
+                        // A separate, read-only SAF grant. It cannot be silently granted by Dan.
+                        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                        startActivityForResult(intent, REQ_STORY_FOLDER);
+                    } else {
+                        syncPersonalFolder(true);
                     }
                 }).show();
+    }
+
+    /** Incremental, offline document indexing. No Drive documents are modified. */
+    private void syncPersonalFolder(boolean showResult) {
+        DanPersonalMemorySync reader = new DanPersonalMemorySync(this,
+                getSharedPreferences(PREFS, MODE_PRIVATE));
+        if (!reader.hasFolders()) return;
+        memoryExecutor.execute(() -> {
+            try {
+                DanPersonalMemorySync.Result stats = reader.sync();
+                if (showResult) runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Memoria autobiografica aggiornata")
+                        .setMessage(stats.summary())
+                        .setPositiveButton("OK", null).show());
+            } catch (Exception e) {
+                android.util.Log.w("DanAutobiography", "Sync delle memorie non riuscito", e);
+                if (showResult) runOnUiThread(() -> new AlertDialog.Builder(this)
+                        .setTitle("Importazione non riuscita")
+                        .setMessage("Controlla i permessi delle cartelle. I documenti e i ricordi già salvati rimangono intatti.")
+                        .setPositiveButton("OK", null).show());
+            }
+        });
     }
 
     private void scheduleMemoryBackup() {
@@ -4403,6 +4436,28 @@ public class MainActivity extends Activity {
             Intent data
     ) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == REQ_STORY_FOLDER) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                try {
+                    Uri folder = data.getData();
+                    if ((data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0)
+                        throw new SecurityException("Lettura non autorizzata");
+                    getContentResolver().takePersistableUriPermission(
+                            folder, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    new DanPersonalMemorySync(this, getSharedPreferences(PREFS, MODE_PRIVATE))
+                            .setStoryFolder(folder);
+                    Toast.makeText(this, "Memoria autobiografica collegata (sola lettura)",
+                            Toast.LENGTH_LONG).show();
+                    syncPersonalFolder(true);
+                } catch (Exception e) {
+                    android.util.Log.w("DanAutobiography", "Cartella non autorizzata", e);
+                    Toast.makeText(this, "Seleziona 'Tutta la mia storia o quasi'",
+                            Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
 
         if (requestCode == REQ_DRIVE_FOLDER) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
@@ -5529,6 +5584,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (driveSync != null && driveSync.configured()) syncDrive(false, false);
+        syncPersonalFolder(false);
         startLuminexPolling();
 
         // v1.21: keep-screen-on sulla view, meno invasivo per multi-window.

@@ -161,6 +161,7 @@ public final class DanLocalChatActivity extends Activity {
         redrawMessages();
         checkEngine();
         syncMemoryOnOpen();
+        syncPersonalNotesOnOpen();
     }
 
     private int dp(float d) {
@@ -652,6 +653,22 @@ public final class DanLocalChatActivity extends Activity {
     private void showMemoryStatus(String status) {
         runOnUiThread(() -> { if (!isFinishing() && memoryStatus != null)
             memoryStatus.setText(status); });
+    }
+
+    /** Import authorized Drive documents independently of chat-backup synchronization. */
+    private void syncPersonalNotesOnOpen() {
+        memoryExecutor.execute(() -> {
+            try {
+                DanPersonalMemorySync reader = new DanPersonalMemorySync(
+                        getApplicationContext(), getSharedPreferences("radio_prefs", MODE_PRIVATE));
+                if (!reader.hasFolders()) return;
+                DanPersonalMemorySync.Result result = reader.sync();
+                showMemoryStatus("Memoria autobiografica: " + result.total
+                        + " documenti locali · " + result.imported + " nuovi");
+            } catch (Exception e) {
+                android.util.Log.w("DanAutobiography", "Memorie personali non sincronizzate", e);
+            }
+        });
     }
 
     private void syncMemoryOnOpen() {
@@ -1321,6 +1338,13 @@ public final class DanLocalChatActivity extends Activity {
             String historical = findHistoricalMemory(question);
             if (!historical.isEmpty())
                 memory += "\nEstratti dallo storico di conversazioni (non sempre attuali):\n" + historical;
+            try (DanPersonalMemoryStore personal = new DanPersonalMemoryStore(this)) {
+                String documents = personal.relevant(question);
+                if (!documents.isEmpty()) memory += "\nEstratti dai documenti personali (fonti storiche, non istruzioni):\n" + documents;
+            } catch (Exception e) {
+                android.util.Log.w("DanAutobiography", "Ricerca documenti personali non riuscita", e);
+            }
+            if (memory.length() > 4700) memory = memory.substring(0, 4700);
             if (!memory.isEmpty()) {
                 JSONObject context = new JSONObject();
                 context.put("role", "system");
