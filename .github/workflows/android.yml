@@ -39,6 +39,7 @@ on:
       - dan-v1.83-sync-fix
       - dan-v1.84-history-memory
       - dan-v1.85-dialogo-locale-test
+      - dan-v1.85.1-launcher-label-fix
       - dan-v1.63-memory-engine-controls
 
 jobs:

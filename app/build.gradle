@@ -23,6 +23,8 @@ android {
         }
         versionCode Integer.parseInt(project.findProperty("DAN_VERSION_CODE") ?: "44")
         versionName project.findProperty("DAN_VERSION_NAME") ?: "1.41"
+        // Il nome mostrato da Android segue la versione usata dalla build.
+        resValue "string", "dan_launcher_label", "Dan ${project.findProperty('DAN_VERSION_NAME') ?: '1.41'}"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
