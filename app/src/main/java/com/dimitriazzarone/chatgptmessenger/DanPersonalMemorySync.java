@@ -32,8 +32,6 @@ import java.util.zip.ZipInputStream;
 final class DanPersonalMemorySync {
     static final String PREF_STORY_FOLDER = "dan_story_folder";
     private static final String PREF_MEMORY_FOLDER = DanDriveSync.PREF_FOLDER;
-    private static final int MAX_FILES_PER_SYNC = 8;
-    private static final int MAX_SCAN_FILES = 250;
     private static final int MAX_DOCUMENT_BYTES = 24 * 1024 * 1024;
     private static final int MAX_TEXT_CHARS = 850_000;
     private static final int MAX_PDF_PAGES = 280;
@@ -77,7 +75,7 @@ final class DanPersonalMemorySync {
 
     private void walk(Uri tree, String prefix, int depth, DanPersonalMemoryStore store,
                       Result stats) throws Exception {
-        if (depth > 3 || stats.scanned >= MAX_SCAN_FILES || stats.imported >= MAX_FILES_PER_SYNC) return;
+        if (Thread.currentThread().isInterrupted()) throw new InterruptedException("Importazione interrotta");
         ContentResolver resolver = context.getContentResolver();
         String parentId = depth == 0 ? DocumentsContract.getTreeDocumentId(tree)
                 : DocumentsContract.getDocumentId(tree);
@@ -89,7 +87,8 @@ final class DanPersonalMemorySync {
                 DocumentsContract.Document.COLUMN_SIZE,
                 DocumentsContract.Document.COLUMN_LAST_MODIFIED},null,null,null)) {
             if (c == null) throw new IllegalArgumentException("Cartella non accessibile: "+prefix);
-            while (c.moveToNext() && stats.scanned < MAX_SCAN_FILES && stats.imported < MAX_FILES_PER_SYNC) {
+            while (c.moveToNext()) {
+                if (Thread.currentThread().isInterrupted()) throw new InterruptedException("Importazione interrotta");
                 String id=c.getString(0), name=c.getString(1), mime=c.getString(2);
                 if (name == null) continue;
                 long bytes=c.isNull(3)?-1:c.getLong(3), modified=c.isNull(4)?0:c.getLong(4);

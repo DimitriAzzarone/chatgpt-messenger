@@ -134,6 +134,8 @@ public final class DanLocalChatActivity extends Activity {
     private boolean headsetDictation;
     private boolean pendingHeadsetDictation;
     private boolean waiting = false;
+    private long lastMemoryMillis;
+    private long lastEngineMillis;
 
     private static final class ChatMessage {
         final String role;
@@ -599,7 +601,9 @@ public final class DanLocalChatActivity extends Activity {
                     saveHistory();
                     redrawMessages();
                     setStatus(knownAnswer != null ? "● Dato d'identita' locale" :
-                            "● Risposta locale in " + elapsedSeconds + " s", true);
+                            "● Risposta locale in " + elapsedSeconds + " s"
+                                    + (isNativeEnabled() ? " · Memoria " + lastMemoryMillis
+                                    + " ms · Motore " + (lastEngineMillis / 1000) + " s" : ""), true);
                     speakReply(answer.trim());
                 } else {
                     // La domanda rimane in memoria; l'errore NON e' una risposta AI.
@@ -856,13 +860,19 @@ public final class DanLocalChatActivity extends Activity {
                 boolean drive = new DanDriveSync(getApplicationContext(),
                         getSharedPreferences("radio_prefs", MODE_PRIVATE), memory, archive)
                         .configured();
-                String report = "Messaggi registrati: " + turns + "\n"
+                int documents;
+                try (DanPersonalMemoryStore personal = new DanPersonalMemoryStore(getApplicationContext())) {
+                    documents = personal.documentCount();
+                }
+                String report = "Documenti autobiografici indicizzati: " + documents + "\n"
+                        + "Messaggi registrati: " + turns + "\n"
                         + "Conversazioni sorgente: " + sources + "\n"
                         + "Chat nell'archivio ChatGPT: " + archived + "\n"
                         + "Cartella Drive: " + (drive ? "collegata" : "non collegata") + "\n\n"
-                        + "Le chat dell'archivio sono conservate, ma Dan non le consulta "
-                        + "ancora quando risponde. I conteggi non provano che Drive "
-                        + "sia allineato con l'altro dispositivo.";
+                        + "Con Memoria Dan ON vengono cercati estratti pertinenti nei messaggi, "
+                        + "nello storico e nei documenti indicizzati. I conteggi non provano "
+                        + "che tutti i documenti siano importati o che Drive sia allineato "
+                        + "con l'altro dispositivo.";
                 runOnUiThread(() -> {
                     if (!isFinishing()) new AlertDialog.Builder(this)
                             .setTitle("Stato reale della memoria")
@@ -1320,6 +1330,9 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     private String requestLocalReply(List<ChatMessage> snapshot) throws Exception {
+        long memoryStarted = SystemClock.elapsedRealtime();
+        lastMemoryMillis = 0;
+        lastEngineMillis = 0;
         JSONArray messages = new JSONArray();
         JSONObject sys = new JSONObject();
         sys.put("role", "system");
@@ -1351,6 +1364,7 @@ public final class DanLocalChatActivity extends Activity {
                 messages.put(context);
             }
         }
+        lastMemoryMillis = SystemClock.elapsedRealtime() - memoryStarted;
         int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 6 : MAX_CONTEXT_MESSAGES));
         for (int i = start; i < snapshot.size(); i++) {
             ChatMessage m = snapshot.get(i);
@@ -1369,7 +1383,9 @@ public final class DanLocalChatActivity extends Activity {
             if (!DanNativeQwen.hasImportedModel(this))
                 throw new Exception("Importa un modello GGUF o scegli il server locale.");
             runOnUiThread(() -> setStatus("● Caricamento nativo del modello…", true));
-            return DanNativeQwen.answer(this, messages);
+            long engineStarted = SystemClock.elapsedRealtime();
+            try { return DanNativeQwen.answer(this, messages); }
+            finally { lastEngineMillis = SystemClock.elapsedRealtime() - engineStarted; }
         }
         runOnUiThread(() -> setStatus("● Invio al server locale sul tablet…", true));
         byte[] bytes = payload.toString().getBytes(StandardCharsets.UTF_8);

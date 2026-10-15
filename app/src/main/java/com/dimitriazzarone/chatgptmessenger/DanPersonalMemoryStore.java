@@ -18,7 +18,7 @@ final class DanPersonalMemoryStore extends SQLiteOpenHelper {
     private static final int CHUNK_CHARS = 1250;
     private static final int MAX_CONTEXT_CHARS = 2350;
 
-    DanPersonalMemoryStore(Context context) { super(context, "dan_personal_documents.db", null, 1); }
+    DanPersonalMemoryStore(Context context) { super(context, "dan_personal_documents.db", null, 2); }
 
     @Override public void onCreate(SQLiteDatabase db) {
         db.execSQL("CREATE TABLE documents (source TEXT PRIMARY KEY, name TEXT NOT NULL, "
@@ -26,13 +26,42 @@ final class DanPersonalMemoryStore extends SQLiteOpenHelper {
         db.execSQL("CREATE TABLE chunks (source TEXT NOT NULL, part INTEGER NOT NULL, "
                 + "name TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (source,part))");
         db.execSQL("CREATE INDEX chunks_source ON chunks(source)");
+        createSearchIndex(db);
     }
     @Override public void onUpgrade(SQLiteDatabase db, int before, int after) {
-        // Do not destroy memories during schema changes. Migrations will be additive.
+        if (before < 2) createSearchIndex(db);
+    }
+
+
+    private void createSearchIndex(SQLiteDatabase db) {
+        db.execSQL("CREATE VIRTUAL TABLE IF NOT EXISTS chunks_search USING fts4(name, body)");
+        db.execSQL("INSERT INTO chunks_search(rowid,name,body) SELECT rowid,name,body FROM chunks");
+        db.execSQL("CREATE TRIGGER chunks_search_insert AFTER INSERT ON chunks BEGIN "
+                + "INSERT INTO chunks_search(rowid,name,body) VALUES(new.rowid,new.name,new.body); END");
+        db.execSQL("CREATE TRIGGER chunks_search_delete AFTER DELETE ON chunks BEGIN "
+                + "DELETE FROM chunks_search WHERE rowid=old.rowid; END");
+        db.execSQL("CREATE TRIGGER chunks_search_update AFTER UPDATE ON chunks BEGIN "
+                + "DELETE FROM chunks_search WHERE rowid=old.rowid; "
+                + "INSERT INTO chunks_search(rowid,name,body) VALUES(new.rowid,new.name,new.body); END");
+    }
+
+    private Cursor searchCandidates(Set<String> terms) {
+        if (terms.isEmpty())
+            return getReadableDatabase().rawQuery(
+                    "SELECT name,body FROM chunks_search WHERE name LIKE ?",
+                    new String[]{"%profilo-dan%"});
+        StringBuilder query = new StringBuilder();
+        for (String term : terms) {
+            if (query.length() > 0) query.append(" OR ");
+            query.append(term).append("*");
+        }
+        return getReadableDatabase().rawQuery(
+                "SELECT name,body FROM chunks_search WHERE chunks_search MATCH ?",
+                new String[]{query.toString()});
     }
 
     boolean unchanged(String source, long modified, long size) {
-        if (size <= 0) return false; // Providers may not expose modification timestamps.
+        if (size <= 0 || modified <= 0) return false; // Providers may not expose modification timestamps.
         try (Cursor c = getReadableDatabase().rawQuery(
                 "SELECT modified,size FROM documents WHERE source=?", new String[]{source})) {
             return c.moveToFirst() && c.getLong(0) == modified && c.getLong(1) == size;
@@ -87,7 +116,7 @@ final class DanPersonalMemoryStore extends SQLiteOpenHelper {
             if (terms.size() >= 6) break;
         }
         List<Match> found = new ArrayList<>();
-        try (Cursor c = getReadableDatabase().rawQuery("SELECT name,body FROM chunks", null)) {
+        try (Cursor c = searchCandidates(terms)) {
             while (c.moveToNext()) {
                 String name = c.getString(0), body = c.getString(1);
                 String low = body.toLowerCase(Locale.ROOT);
