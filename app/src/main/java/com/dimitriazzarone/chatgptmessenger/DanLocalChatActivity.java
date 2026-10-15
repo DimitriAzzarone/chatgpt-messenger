@@ -480,7 +480,7 @@ public final class DanLocalChatActivity extends Activity {
                     : Color.rgb(24, 49, 68), user ? Color.rgb(63, 164, 180)
                     : Color.rgb(50, 102, 120), 16));
             String clock = msg.timestamp > 0
-                    ? "  ·  " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(new Date(msg.timestamp))
+                    ? "  ·  " + new SimpleDateFormat("dd/MM/yyyy · HH:mm:ss", Locale.getDefault()).format(new Date(msg.timestamp))
                     : "";
             TextView who = label((user ? "TU" : "DAN") + clock, 11,
                     Color.rgb(141, 221, 225));
