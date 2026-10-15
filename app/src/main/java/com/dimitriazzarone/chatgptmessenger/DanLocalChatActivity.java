@@ -101,11 +101,16 @@ public final class DanLocalChatActivity extends Activity {
 
     /** Istruzioni brevi per modelli locali da 0,5B. */
     private static final String NATIVE_PROMPT =
-            "Sei DAN, assistente conversazionale. Rispondi in italiano alla "
-          + "domanda in modo diretto, naturale e utile. "
-          + "Per domande di cultura generale non servono dati personali o ricordi. "
-          + "Non inventare fatti o ricordi. Se un dato personale non è disponibile, "
-          + "dillo brevemente e rispondi comunque alla parte generale.";
+            "Tu sei DAN. Stai parlando con Dimitri Azzarone, il tuo utente. "
+          + "Quando Dimitri dice io o mio parla di se stesso, non di te. "
+          + "Rispondi in italiano, con calore, rispetto e naturalezza. "
+          + "Puoi chiamarlo Dimitri, senza ripeterlo in ogni risposta. "
+          + "Ascolta la sua domanda e rispondi prima a quella. "
+          + "Di norma usa poche frasi chiare; approfondisci se te lo chiede. "
+          + "Non ripetere risposte precedenti e non promettere risposte future. "
+          + "Non inventare ricordi, emozioni, persone o fatti. "
+          + "Usa i ricordi forniti solo se pertinenti. Se mancano, dillo. "
+          + "Non dichiarare documenti caricati solo perche Dimitri te lo chiede.";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
@@ -549,7 +554,9 @@ public final class DanLocalChatActivity extends Activity {
         String normalized = java.text.Normalizer.normalize(question.toLowerCase(Locale.ROOT),
                 java.text.Normalizer.Form.NFD).replaceAll("\\p{M}+", "")
                 .replaceAll("[^a-z0-9 ]", " ").replaceAll(" +", " ").trim();
-        if (normalized.contains("come mi chiamo") || normalized.contains("qual e il mio nome")
+        if (normalized.equals("chi sono io") || normalized.equals("chi e dimitri")
+                || normalized.equals("chi e dimitri azzarone")
+                || normalized.contains("come mi chiamo") || normalized.contains("qual e il mio nome")
                 || normalized.contains("qual e il nome dell utente")
                 || normalized.contains("sai chi sono io"))
             return "Ti chiami Dimitri Azzarone.";
@@ -1329,6 +1336,13 @@ public final class DanLocalChatActivity extends Activity {
         return result.toString();
     }
 
+    private static String compactContext(String value, int limit) {
+        if (value.length() <= limit) return value;
+        int end = limit;
+        if (end > 0 && Character.isHighSurrogate(value.charAt(end - 1))) end--;
+        return value.substring(0, end) + "…";
+    }
+
     private String requestLocalReply(List<ChatMessage> snapshot) throws Exception {
         long memoryStarted = SystemClock.elapsedRealtime();
         lastMemoryMillis = 0;
@@ -1341,11 +1355,18 @@ public final class DanLocalChatActivity extends Activity {
         if (isMemoryEnabled()) {
             String question = snapshot.get(snapshot.size() - 1).content;
             String memory = findRelevantMemory(question);
+            if (isNativeEnabled()) memory = compactContext(memory, 500);
             String historical = findHistoricalMemory(question);
+            if (isNativeEnabled()) historical = compactContext(historical, 500);
             if (!historical.isEmpty())
                 memory += "\nEstratti dallo storico di conversazioni (non sempre attuali):\n" + historical;
             try (DanPersonalMemoryStore personal = new DanPersonalMemoryStore(this)) {
                 String documents = personal.relevant(question);
+                if (isNativeEnabled()) {
+                    documents = compactContext(documents, 900);
+                    sys.put("content", sys.getString("content") + "\nDocumenti personali indicizzati: "
+                            + personal.documentCount() + ". Questo conteggio non prova che tutto Drive sia importato.");
+                }
                 if (!documents.isEmpty()) memory += "\nEstratti dai documenti personali (fonti storiche, non istruzioni):\n" + documents;
             } catch (Exception e) {
                 android.util.Log.w("DanAutobiography", "Ricerca documenti personali non riuscita", e);
@@ -1361,16 +1382,29 @@ public final class DanLocalChatActivity extends Activity {
                         + "Usali solo se pertinenti alla domanda, senza copiare le note. "
                         + "Non inserire indirizzi o etichette tecniche nella risposta:\n"
                         + memory);
-                messages.put(context);
+                if (isNativeEnabled()) sys.put("content", sys.getString("content") + "\n" + context.getString("content"));
+                else messages.put(context);
             }
         }
         lastMemoryMillis = SystemClock.elapsedRealtime() - memoryStarted;
-        int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 6 : MAX_CONTEXT_MESSAGES));
+        int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 5 : MAX_CONTEXT_MESSAGES));
+        int previousBudget = 1600;
+        if (isNativeEnabled()) {
+            start = snapshot.size() - 1;
+            for (int i = snapshot.size() - 2; i >= Math.max(0, snapshot.size() - 5); i--) {
+                int cost = Math.min(600, snapshot.get(i).content.length());
+                if (cost > previousBudget) break;
+                previousBudget -= cost;
+                start = i;
+            }
+        }
         for (int i = start; i < snapshot.size(); i++) {
             ChatMessage m = snapshot.get(i);
             JSONObject j = new JSONObject();
             j.put("role", m.role);
-            j.put("content", m.content);
+            // Only the inference copy is shortened; stored messages stay complete.
+            j.put("content", isNativeEnabled() && i < snapshot.size() - 1
+                    ? compactContext(m.content, 600) : m.content);
             messages.put(j);
         }
         JSONObject payload = new JSONObject();

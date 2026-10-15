@@ -427,11 +427,15 @@ public class MainActivity extends Activity {
         memoryButton.setContentDescription("Carica, ripristina o salva la memoria di Dan");
         memoryButton.setOnClickListener(v -> showMemoryMenu());
 
-        Button engineButton = makeButton("Motore");
+        Button engineButton = makeButton("Utilizzo Work");
         engineButton.setAllCaps(false);
         engineButton.setTextSize(12);
-        engineButton.setContentDescription("Motore di Dan: ChatGPT attivo; mostra le alternative");
-        engineButton.setOnClickListener(v -> showEngineMenu());
+        engineButton.setContentDescription("Apri i limiti e l'utilizzo ufficiale di Work e Codex");
+        engineButton.setOnClickListener(v -> {
+            setLuminexVisible(false);
+            webView.loadUrl("https://chatgpt.com/codex/settings/usage");
+        });
+        engineButton.setOnLongClickListener(v -> { showEngineMenu(); return true; });
 
         Button localDanButton = makeButton("Dan locale");
         localDanButton.setAllCaps(false);

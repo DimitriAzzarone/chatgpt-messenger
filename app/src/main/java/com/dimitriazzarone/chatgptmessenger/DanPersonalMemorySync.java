@@ -66,8 +66,24 @@ final class DanPersonalMemorySync {
         try (DanPersonalMemoryStore store = new DanPersonalMemoryStore(context)) {
             String notes = prefs.getString(PREF_MEMORY_FOLDER, "");
             String story = prefs.getString(PREF_STORY_FOLDER, "");
-            if (!notes.isEmpty()) walk(Uri.parse(notes), "Memoria Dan/", 0, store, stats);
-            if (!story.isEmpty()) walk(Uri.parse(story), STORIES + "/", 0, store, stats);
+            stats.notesLinked = !notes.isEmpty();
+            stats.storyLinked = !story.isEmpty();
+            if (stats.notesLinked) {
+                try { walk(Uri.parse(notes), "Memoria Dan/", 0, store, stats); }
+                catch (Exception error) {
+                    if (error instanceof InterruptedException) throw error;
+                    stats.folderErrors++;
+                    android.util.Log.w("DanAutobiography", "Memoria Dan non accessibile", error);
+                }
+            }
+            if (stats.storyLinked) {
+                try { walk(Uri.parse(story), STORIES + "/", 0, store, stats); }
+                catch (Exception error) {
+                    if (error instanceof InterruptedException) throw error;
+                    stats.folderErrors++;
+                    android.util.Log.w("DanAutobiography", "Cartella autobiografica non accessibile", error);
+                }
+            }
             stats.total = store.documentCount();
         }
         return stats;
@@ -97,7 +113,12 @@ final class DanPersonalMemorySync {
                     walk(file,prefix+name+"/",depth+1,store,stats);
                     continue;
                 }
-                if (!supported(name,mime)) continue;
+                if (!supported(name,mime)) {
+                    stats.unsupported++;
+                    if ("application/vnd.google-apps.document".equals(mime)
+                            || name.toLowerCase(Locale.ROOT).endsWith(".gdoc")) stats.googleDocs++;
+                    continue;
+                }
                 stats.scanned++;
                 if (bytes > MAX_DOCUMENT_BYTES) { stats.skipped++;continue; }
                 String source=file.toString();
@@ -195,9 +216,18 @@ final class DanPersonalMemorySync {
     }
 
     static final class Result {
-        int scanned,imported,unchanged,skipped,chunks,total;
-        String summary() {return "Documenti indicizzati: "+total+" · Nuovi/aggiornati: "+imported
-                +" · Già aggiornati: "+unchanged+" · Da verificare: "+skipped;
+        int scanned,imported,unchanged,skipped,chunks,total,unsupported,googleDocs,folderErrors;
+        boolean notesLinked, storyLinked;
+        String summary() {
+            return "Memoria Dan: " + (notesLinked ? "collegata" : "non collegata")
+                    + "\nTutta la mia storia o quasi: " + (storyLinked ? "collegata" : "non collegata")
+                    + "\nDocumenti indicizzati: " + total
+                    + "\nNuovi/aggiornati: " + imported + " · Già aggiornati: " + unchanged
+                    + "\nFile da verificare: " + skipped + " · Formati esclusi: " + unsupported
+                    + "\nCartelle con errori di accesso: " + folderErrors
+                    + (googleDocs > 0 ? "\nGoogle Docs nativi: " + googleDocs
+                    + ". Esportali in DOCX, PDF o TXT per importarli sul dispositivo." : "")
+                    + "\nFormati supportati: TXT, Markdown, DOCX e PDF con testo.";
         }
     }
 }

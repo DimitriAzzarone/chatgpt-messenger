@@ -182,7 +182,17 @@ final class DanNativeQwen {
         // small model gives the user a direct answer. Qwen2.5 unchanged.
         if (SPARK_NAME.equals(model.getName()))
             prompt.append("<think>\n\n</think>\n\n");
-        String reply = nativeGenerate(prompt.toString(), 220);
+        String lastQuestion = "";
+        for (int i = messages.length() - 1; i >= 0; i--) {
+            JSONObject message = messages.getJSONObject(i);
+            if ("user".equals(message.optString("role"))) {
+                lastQuestion = message.optString("content", "").toLowerCase(Locale.ROOT);
+                break;
+            }
+        }
+        boolean detailed = lastQuestion.contains("dettagli") || lastQuestion.contains("spiega")
+                || lastQuestion.contains("approfond") || lastQuestion.contains("raccont");
+        String reply = nativeGenerate(prompt.toString(), detailed ? 220 : 128);
         if (reply == null || reply.trim().isEmpty())
             throw new IOException("Qwen non ha generato una risposta");
         return reply.trim();
