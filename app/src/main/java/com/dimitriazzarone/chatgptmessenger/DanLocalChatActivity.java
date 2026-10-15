@@ -75,7 +75,6 @@ public final class DanLocalChatActivity extends Activity {
     private static final String KEY_NATIVE_MODE = "use_native_engine";
     private static final int MAX_STORED_MESSAGES = 120;
     private static final int MAX_CONTEXT_MESSAGES = 30;
-    private static final int MAX_USER_CHARS = 5000;
     private static final int MAX_REPLY_CHARS = 40000;
     private static final int REQUEST_IMPORT_QWEN = 166;
     private static final int REQUEST_SPEECH = 172;
@@ -561,12 +560,6 @@ public final class DanLocalChatActivity extends Activity {
         if (waiting) return;
         String question = input.getText().toString().trim();
         if (question.isEmpty()) return;
-        if (question.length() > MAX_USER_CHARS) {
-            new AlertDialog.Builder(this).setTitle("Messaggio troppo lungo")
-                    .setMessage("Limite: " + MAX_USER_CHARS + " caratteri per messaggio.")
-                    .setPositiveButton("OK", null).show();
-            return;
-        }
         input.setText("");
         history.add(new ChatMessage("user", question));
         final String conversationId = activeChatId;
@@ -1613,10 +1606,6 @@ public final class DanLocalChatActivity extends Activity {
                 String contents = new String(buffer, 0, count, StandardCharsets.UTF_8);
                 runOnUiThread(() -> {
                     String text = input.getText().toString();
-                    if (text.length() + contents.length() + 25 > MAX_USER_CHARS) {
-                        setStatus("Allegato troppo lungo per questa domanda", false);
-                        return;
-                    }
                     input.setText(text + "\n[Allegato testuale]\n" + contents);
                 });
             } catch (Exception e) {

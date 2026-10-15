@@ -41,6 +41,7 @@ on:
       - dan-v1.85-dialogo-locale-test
       - dan-v1.85.1-launcher-label-fix
       - dan-v1.86-memoria-autobiografica
+      - dan-v1.87-messaggi-senza-limite
       - dan-v1.63-memory-engine-controls
 
 jobs:
