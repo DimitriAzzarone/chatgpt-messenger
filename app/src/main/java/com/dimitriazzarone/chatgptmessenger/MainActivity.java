@@ -3721,78 +3721,29 @@ public class MainActivity extends Activity {
     private void clickLuminexText(String text) {
         WebView activeLuminex = getActiveLuminexWebView();
         if (activeLuminex == null || TextUtils.isEmpty(text)) return;
-
-        String escaped = text
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\n", "\\n")
-                .replace("\r", "");
-
-        String script =
-                "(function(){" +
-                " const wanted='" + escaped + "'.trim().toLowerCase();" +
-                " if(!wanted)return 'EMPTY';" +
-                " const nodes=Array.from(document.querySelectorAll(" +
-                " 'button,a,[role=button],[role=link],div,span'+" +
-                " ));" +
-                " const el=nodes.find(n=>{" +
-                "  const t=((n.innerText||n.textContent||n.getAttribute('aria-label')||'')+'').trim().toLowerCase();" +
-                "  return t===wanted || t.includes(wanted);" +
-                " });" +
-                " if(!el)return 'NOT_FOUND';" +
-                " el.scrollIntoView({block:'center',inline:'center'});" +
-                " el.click();" +
-                " return 'CLICKED';" +
-                "})()";
-
+        String script = "(function(){\n const wanted=" + org.json.JSONObject.quote(text) + ".trim().replace(/\\s+/g,' ').toLocaleLowerCase();\n if(!wanted)return 'EMPTY';\n const roots=[], seen=new Set();\n function visit(root){\n  if(!root||seen.has(root))return; seen.add(root);roots.push(root);\n  for(const e of root.querySelectorAll('*')){\n   if(e.shadowRoot)visit(e.shadowRoot);\n   if(e.tagName==='IFRAME'){try{visit(e.contentDocument);}catch(ignore){}}\n  }\n }\n visit(document);\n const norm=s=>(s||'').trim().replace(/\\s+/g,' ').toLocaleLowerCase();\n const matches=[];\n for(const root of roots)for(const e of root.querySelectorAll('button,a[href],input[type=submit],input[type=button],[role=button],[role=link],[role=menuitem],[role=tab],[onclick],[tabindex]')){\n  const win=e.ownerDocument.defaultView, style=win.getComputedStyle(e), rect=e.getBoundingClientRect();\n  if(!rect.width||!rect.height||style.visibility==='hidden'||style.display==='none'||e.closest('[hidden],[inert]'))continue;\n  const ids=(e.getAttribute('aria-labelledby')||'').split(/\\s+/);\n  const labelled=ids.map(id=>root.getElementById?root.getElementById(id):null).filter(Boolean).map(n=>n.textContent).join(' ');\n  const labels=[e.getAttribute('aria-label'),labelled,e.title,e.innerText,e.value].map(norm).filter(Boolean);\n  let score=labels.some(t=>t===wanted)?2:labels.some(t=>t.includes(wanted))?1:0;\n  if(score)matches.push({e,score});\n }\n if(!matches.length)return 'NOT_FOUND';\n const best=Math.max(...matches.map(m=>m.score));\n let chosen=matches.filter(m=>m.score===best);\n chosen=chosen.filter(m=>!chosen.some(n=>n!==m&&m.e.contains(n.e)));\n if(chosen.length!==1)return 'AMBIGUOUS';\n const el=chosen[0].e;\n if(el.disabled||el.getAttribute('aria-disabled')==='true'||el.matches(':disabled'))return 'DISABLED';\n el.scrollIntoView({block:'center',inline:'center'});\n el.focus();el.click();return 'CLICKED';\n})()\n";
         activeLuminex.evaluateJavascript(script, result -> {
-            runOnUiThread(() -> {
-                if (result != null && result.contains("CLICKED")) {
-                    statusText.setText("Luminex: clic eseguito su " + text);
-                } else {
-                    statusText.setText("Luminex: elemento non trovato");
-                }
-            });
+            if (isFinishing() || isDestroyed()) return;
+            String message;
+            if ("\"CLICKED\"".equals(result)) message = "Luminex: clic eseguito su " + text;
+            else if ("\"AMBIGUOUS\"".equals(result)) message = "Luminex: più pulsanti corrispondono; usa un'etichetta più precisa";
+            else if ("\"DISABLED\"".equals(result)) message = "Luminex: pulsante disabilitato";
+            else message = "Luminex: pulsante non trovato nella pagina accessibile";
+            statusText.setText(message);
+            activeLuminex.postDelayed(() -> sendLuminexPageState(activeLuminex), 1500L);
         });
     }
 
     private void typeLuminexText(String text) {
         WebView activeLuminex = getActiveLuminexWebView();
-        if (activeLuminex == null || TextUtils.isEmpty(text)) return;
-
-        String escaped = text
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\n", "\\n")
-                .replace("\r", "");
-
-        String script =
-                "(function(){" +
-                " const text='" + escaped + "';" +
-                " const el=" +
-                " document.querySelector('[contenteditable=\"true\"][data-tab]') ||" +
-                " document.querySelector('footer [contenteditable=\"true\"]') ||" +
-                " document.querySelector('[contenteditable=\"true\"]');" +
-                " if(!el)return 'NOT_FOUND';" +
-
-                " el.focus();" +
-                " el.textContent=text;" +
-                " el.dispatchEvent(new InputEvent('input',{" +
-                "  bubbles:true," +
-                "  inputType:'insertText'," +
-                "  data:text" +
-                " }));" +
-                " return 'TYPED';" +
-                "})()";
-
+        if (activeLuminex == null || text == null) return;
+        String script = "(function(){\n const text=" + org.json.JSONObject.quote(text) + ",roots=[],seen=new Set();\n function visit(root){if(!root||seen.has(root))return;seen.add(root);roots.push(root);for(const e of root.querySelectorAll('*')){if(e.shadowRoot)visit(e.shadowRoot);if(e.tagName==='IFRAME'){try{visit(e.contentDocument);}catch(ignore){}}}}\n visit(document);\n const editable=e=>e&&(e.isContentEditable||e.tagName==='TEXTAREA'||(e.tagName==='INPUT'&&/^(text|search|url|email|tel|number|password)$/.test(e.type)))&&!e.disabled&&!e.readOnly;\n const visible=e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&!e.closest('[hidden],[inert]')&&e.ownerDocument.defaultView.getComputedStyle(e).visibility!=='hidden';};\n let el=null;\n for(const root of roots){let a=root.activeElement;if(editable(a)&&visible(a))el=a;}\n if(!el){const fields=[];for(const root of roots)for(const e of root.querySelectorAll('textarea,input,[contenteditable=true]'))if(editable(e)&&visible(e)&&!fields.includes(e))fields.push(e);if(fields.length!==1)return fields.length?'AMBIGUOUS':'NOT_FOUND';el=fields[0];}\n const win=el.ownerDocument.defaultView;el.focus();\n if(el.isContentEditable){el.textContent=text;}else{\n  const proto=el.tagName==='TEXTAREA'?win.HTMLTextAreaElement.prototype:win.HTMLInputElement.prototype;\n  Object.getOwnPropertyDescriptor(proto,'value').set.call(el,text);\n }\n el.dispatchEvent(new win.InputEvent('input',{bubbles:true,composed:true,inputType:'insertText',data:text}));\n el.dispatchEvent(new win.Event('change',{bubbles:true}));return 'TYPED';\n})()\n";
         activeLuminex.evaluateJavascript(script, result -> {
-            runOnUiThread(() -> {
-                if (result != null && result.contains("TYPED")) {
-                    statusText.setText("Luminex: messaggio preparato — conferma prima di inviare");
-                } else {
-                    statusText.setText("Luminex: campo messaggio non trovato");
-                }
-            });
+            if (isFinishing() || isDestroyed()) return;
+            if ("\"TYPED\"".equals(result)) statusText.setText("Luminex: testo inserito nel campo");
+            else if ("\"AMBIGUOUS\"".equals(result)) statusText.setText("Luminex: seleziona prima il campo da compilare");
+            else statusText.setText("Luminex: campo modificabile non trovato");
+            activeLuminex.postDelayed(() -> sendLuminexPageState(activeLuminex), 800L);
         });
     }
 

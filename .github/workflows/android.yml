@@ -45,6 +45,7 @@ on:
       - dan-v1.88-data-messaggi
       - dan-v1.89-memoria-indicizzata
       - dan-v1.90-identita-contesto-work
+      - dan-v1.91-luminex-pulsanti
       - dan-v1.63-memory-engine-controls
 
 jobs:
