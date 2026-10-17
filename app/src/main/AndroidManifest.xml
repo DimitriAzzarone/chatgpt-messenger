@@ -17,7 +17,7 @@
         android:label="@string/dan_launcher_label"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/dan_network_security">
 
         <activity android:name=".DanLocalChatActivity"
