@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode Integer.parseInt(project.findProperty("DAN_VERSION_CODE") ?: "44")
-        versionName project.findProperty("DAN_VERSION_NAME") ?: "1.41"
-        // Il nome mostrato da Android segue la versione usata dalla build.
-        resValue "string", "dan_launcher_label", "Dan ${project.findProperty('DAN_VERSION_NAME') ?: '1.41'}"
+        versionCode 93
+        versionName "1.93"
+        // DAN 1.93: versione fissata direttamente per questa build.
+        resValue "string", "dan_launcher_label", "Dan 1.93"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
