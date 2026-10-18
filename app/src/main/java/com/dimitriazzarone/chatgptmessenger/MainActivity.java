@@ -94,7 +94,7 @@ public class MainActivity extends Activity {
     private static final String LUMINEX_HOME = "https://www.google.com/";
     private static final String LUMINEX_CONTROL_URL =
             "https://luminex-ai-control.dimitri-azzarone.workers.dev/device/next";
-    private static final long LUMINEX_POLL_MS = 2500L;
+    private static final long LUMINEX_POLL_MS = 1000L;
     private static final long LUMINEX_SNAPSHOT_MS = 4000L;
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_FILE_CHOOSER = 4001;
@@ -2834,6 +2834,14 @@ public class MainActivity extends Activity {
                     return;
                 }
 
+                String luminexDeviceId = Settings.Secure.getString(
+                        getContentResolver(),
+                        Settings.Secure.ANDROID_ID
+                );
+                if (!TextUtils.isEmpty(luminexDeviceId)) {
+                    state.put("luminexDevice", luminexDeviceId);
+                }
+
                 if (source == getActiveLuminexWebView()) {
                     state.put(
                             "luminexSession",
@@ -3048,6 +3056,17 @@ public class MainActivity extends Activity {
                     "Accept",
                     "application/json"
             );
+
+            String luminexDeviceId = Settings.Secure.getString(
+                    getContentResolver(),
+                    Settings.Secure.ANDROID_ID
+            );
+            if (!TextUtils.isEmpty(luminexDeviceId)) {
+                connection.setRequestProperty(
+                        "X-Luminex-Device",
+                        luminexDeviceId
+                );
+            }
 
             int status = connection.getResponseCode();
 
@@ -5578,7 +5597,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
-        stopLuminexPolling();
+        // DAN 1.94: Luminex deve continuare a ricevere comandi anche quando
+        // DAN passa in background, per esempio mentre Termux/Bridge è visibile.
 
         // Fuori da Dan Android torna a gestire normalmente lo spegnimento schermo.
         if (webContainer != null) {

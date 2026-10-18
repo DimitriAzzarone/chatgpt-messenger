@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 93
-        versionName "1.93"
-        // DAN 1.93: versione fissata direttamente per questa build.
-        resValue "string", "dan_launcher_label", "Dan 1.93"
+        versionCode 94
+        versionName "1.94"
+        // DAN 1.94: collegamento Luminex tablet -> telefono.
+        resValue "string", "dan_launcher_label", "Dan 1.94"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
