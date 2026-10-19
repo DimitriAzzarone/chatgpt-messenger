@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.96-luminex-stable
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
