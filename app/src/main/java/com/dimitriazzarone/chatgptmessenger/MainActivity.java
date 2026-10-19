@@ -5629,7 +5629,7 @@ public class MainActivity extends Activity {
         if (driveSync != null && driveSync.configured()) syncDrive(false, false);
         syncPersonalFolder(false);
         startLuminexPolling();
-        startChatLiveRefresh();
+        // DAN 1.98: refresh automatico chat disattivato.
 
         // v1.21: keep-screen-on sulla view, meno invasivo per multi-window.
         if (webContainer != null) {

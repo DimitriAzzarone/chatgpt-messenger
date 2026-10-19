@@ -6,6 +6,7 @@ on:
   push:
     branches:
       - dan-v1.97-chat-live-refresh
+      - dan-v1.98-disable-live-refresh
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
