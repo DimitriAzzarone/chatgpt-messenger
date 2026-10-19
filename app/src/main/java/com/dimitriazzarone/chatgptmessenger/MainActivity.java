@@ -233,6 +233,60 @@ public class MainActivity extends Activity {
     private String lastUrl = HOME;
     private String activeDanChatKey = "";
 
+    // DAN 1.97: il telefono mantiene aggiornata automaticamente la chat
+    // aperta anche quando i messaggi vengono inviati dal tablet.
+    private static final long CHAT_LIVE_REFRESH_MS = 8000L;
+    private final Handler chatLiveRefreshHandler = new Handler(Looper.getMainLooper());
+    private boolean chatLiveRefreshRunning = false;
+
+    private final Runnable chatLiveRefreshRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (!chatLiveRefreshRunning) return;
+
+            WebView current = webView;
+            if (current == null || luminexVisible || popupWebView != null || fullChatLoading) {
+                chatLiveRefreshHandler.postDelayed(this, CHAT_LIVE_REFRESH_MS);
+                return;
+            }
+
+            String url = current.getUrl();
+            if (TextUtils.isEmpty(url)
+                    || !url.startsWith("https://chatgpt.com/")
+                    || !url.contains("/c/")) {
+                chatLiveRefreshHandler.postDelayed(this, CHAT_LIVE_REFRESH_MS);
+                return;
+            }
+
+            String script =
+                    "(function(){try{"
+                    + "var a=document.activeElement;"
+                    + "var editing=!!(a&&(a.tagName==='TEXTAREA'||a.tagName==='INPUT'||a.isContentEditable));"
+                    + "var txt=editing?String(a.value||a.innerText||a.textContent||'').trim():'';"
+                    + "if(editing&&txt.length>0)return 'busy';"
+                    + "var stop=document.querySelector('button[data-testid=\\\"stop-button\\\"],button[aria-label*=\\\"Stop\\\"],button[aria-label*=\\\"Interrompi\\\"]');"
+                    + "if(stop)return 'busy';"
+                    + "return 'ok';"
+                    + "}catch(e){return 'busy';}})();";
+
+            current.evaluateJavascript(script, result -> {
+                if (chatLiveRefreshRunning
+                        && current == webView
+                        && result != null
+                        && result.contains("ok")) {
+                    current.reload();
+                }
+
+                if (chatLiveRefreshRunning) {
+                    chatLiveRefreshHandler.postDelayed(
+                            chatLiveRefreshRunnable,
+                            CHAT_LIVE_REFRESH_MS
+                    );
+                }
+            });
+        }
+    };
+
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private String lastSpokenText = "";
@@ -5554,12 +5608,28 @@ public class MainActivity extends Activity {
                 .trim();
     }
 
+    private void startChatLiveRefresh() {
+        // Il tablet resta il dispositivo di lavoro. Solo gli schermi da telefono
+        // fanno il refresh automatico della conversazione condivisa.
+        if (getResources().getConfiguration().smallestScreenWidthDp >= 600) return;
+
+        chatLiveRefreshRunning = true;
+        chatLiveRefreshHandler.removeCallbacks(chatLiveRefreshRunnable);
+        chatLiveRefreshHandler.postDelayed(chatLiveRefreshRunnable, 4000L);
+    }
+
+    private void stopChatLiveRefresh() {
+        chatLiveRefreshRunning = false;
+        chatLiveRefreshHandler.removeCallbacks(chatLiveRefreshRunnable);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
         if (driveSync != null && driveSync.configured()) syncDrive(false, false);
         syncPersonalFolder(false);
         startLuminexPolling();
+        startChatLiveRefresh();
 
         // v1.21: keep-screen-on sulla view, meno invasivo per multi-window.
         if (webContainer != null) {
@@ -5597,6 +5667,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        stopChatLiveRefresh();
+
         // DAN 1.94: Luminex deve continuare a ricevere comandi anche quando
         // DAN passa in background, per esempio mentre Termux/Bridge è visibile.
 
@@ -5658,6 +5730,7 @@ public class MainActivity extends Activity {
         }
 
         stopLuminexPolling();
+        stopChatLiveRefresh();
         closePopupWebView();
         handsFreeEnabled = false;
         headsetRecording = false;

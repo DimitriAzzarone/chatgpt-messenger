@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 96
-        versionName "1.96"
-        // DAN 1.96: collegamento Luminex stabile.
-        resValue "string", "dan_launcher_label", "Dan 1.96"
+        versionCode 97
+        versionName "1.97"
+        // DAN 1.97: aggiornamento automatico chat tablet -> telefono.
+        resValue "string", "dan_launcher_label", "Dan 1.97"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
