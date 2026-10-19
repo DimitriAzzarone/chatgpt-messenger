@@ -94,8 +94,8 @@ public class MainActivity extends Activity {
     private static final String LUMINEX_HOME = "https://www.google.com/";
     private static final String LUMINEX_CONTROL_URL =
             "https://luminex-ai-control.dimitri-azzarone.workers.dev/device/next";
-    private static final long LUMINEX_POLL_MS = 1000L;
-    private static final long LUMINEX_SNAPSHOT_MS = 4000L;
+    private static final long LUMINEX_POLL_MS = 750L;
+    private static final long LUMINEX_SNAPSHOT_MS = 1500L;
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final int REQ_MEMORY_EXPORT = 4002;
@@ -2738,7 +2738,7 @@ public class MainActivity extends Activity {
             ) {
                 view.postDelayed(
                         () -> sendLuminexPageState(view),
-                        1200L
+                        250L
                 );
 
                 if (!luminexVisible || statusText == null) return;
@@ -3749,7 +3749,7 @@ public class MainActivity extends Activity {
             else if ("\"DISABLED\"".equals(result)) message = "Luminex: pulsante disabilitato";
             else message = "Luminex: pulsante non trovato nella pagina accessibile";
             statusText.setText(message);
-            activeLuminex.postDelayed(() -> sendLuminexPageState(activeLuminex), 1500L);
+            activeLuminex.postDelayed(() -> sendLuminexPageState(activeLuminex), 500L);
         });
     }
 
@@ -3762,7 +3762,7 @@ public class MainActivity extends Activity {
             if ("\"TYPED\"".equals(result)) statusText.setText("Luminex: testo inserito nel campo");
             else if ("\"AMBIGUOUS\"".equals(result)) statusText.setText("Luminex: seleziona prima il campo da compilare");
             else statusText.setText("Luminex: campo modificabile non trovato");
-            activeLuminex.postDelayed(() -> sendLuminexPageState(activeLuminex), 800L);
+            activeLuminex.postDelayed(() -> sendLuminexPageState(activeLuminex), 300L);
         });
     }
 
