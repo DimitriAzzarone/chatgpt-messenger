@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 99
-        versionName "1.99"
-        // DAN 1.99: memoria classificata per pertinenza e contesto bilanciato.
-        resValue "string", "dan_launcher_label", "Dan 1.99"
+        versionCode 100
+        versionName "1.100"
+        // DAN 1.100: diagnostica visibile della memoria realmente usata.
+        resValue "string", "dan_launcher_label", "Dan 1.100"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }

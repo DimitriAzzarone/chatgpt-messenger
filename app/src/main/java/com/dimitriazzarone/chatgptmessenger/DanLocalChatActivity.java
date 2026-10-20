@@ -141,6 +141,8 @@ public final class DanLocalChatActivity extends Activity {
     private boolean waiting = false;
     private long lastMemoryMillis;
     private long lastEngineMillis;
+    // DAN 1.100: conserva esattamente la memoria selezionata per l'ultima domanda.
+    private String lastMemoryDebug = "Nessuna memoria ancora analizzata.";
 
     private static final class ChatMessage {
         final String role;
@@ -311,6 +313,10 @@ public final class DanLocalChatActivity extends Activity {
         Button inspectMemory = button("Verifica dati della memoria");
         inspectMemory.setOnClickListener(v -> inspectMemory());
         card.addView(inspectMemory, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+        Button showUsedMemory = button("Mostra memoria usata");
+        showUsedMemory.setOnClickListener(v -> showLastMemoryDebug());
+        card.addView(showUsedMemory, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
         Button syncButton = button("Sincronizza memoria ora");
         syncButton.setOnClickListener(v -> syncMemoryOnOpen());
@@ -851,6 +857,17 @@ public final class DanLocalChatActivity extends Activity {
                     + " · nuovo tentativo tra " + (delay / 1000) + " s");
             syncHandler.postDelayed(retrySync, delay);
         });
+    }
+
+    private void showLastMemoryDebug() {
+        String report = lastMemoryDebug == null || lastMemoryDebug.trim().isEmpty()
+                ? "Nessuna memoria selezionata per l'ultima domanda."
+                : lastMemoryDebug;
+        new AlertDialog.Builder(this)
+                .setTitle("Memoria usata nell'ultima risposta")
+                .setMessage(report)
+                .setPositiveButton("Chiudi", null)
+                .show();
     }
 
     private void inspectMemory() {
@@ -1559,6 +1576,19 @@ public final class DanLocalChatActivity extends Activity {
                         + documentCount + ". Il conteggio non prova che tutto Drive sia importato.");
 
             String memoryText = compactContext(memory.toString(), isNativeEnabled() ? 1900 : 4500);
+
+            StringBuilder debug = new StringBuilder();
+            debug.append("DOMANDA:\n").append(question).append("\n\n");
+            debug.append("RICORDI DIRETTI:\n")
+                    .append(direct.isEmpty() ? "(nessuno)\n" : direct);
+            debug.append("\nSTORICO:\n")
+                    .append(historical.isEmpty() ? "(nessuno)\n" : historical);
+            debug.append("\nDOCUMENTI:\n")
+                    .append(documents.isEmpty() ? "(nessuno)\n" : documents);
+            debug.append("\nCONTESTO EFFETTIVAMENTE INVIATO:\n")
+                    .append(memoryText.isEmpty() ? "(nessuno)" : memoryText);
+            lastMemoryDebug = debug.toString();
+
             if (!memoryText.isEmpty()) {
                 JSONObject context = new JSONObject();
                 context.put("role", "system");
@@ -1574,6 +1604,8 @@ public final class DanLocalChatActivity extends Activity {
                     sys.put("content", sys.getString("content") + "\n" + context.getString("content"));
                 else messages.put(context);
             }
+        } else {
+            lastMemoryDebug = "Memoria Dan disattivata: nessun ricordo inviato al modello.";
         }
         lastMemoryMillis = SystemClock.elapsedRealtime() - memoryStarted;
         int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 5 : MAX_CONTEXT_MESSAGES));
