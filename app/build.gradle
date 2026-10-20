@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 98
-        versionName "1.98"
-        // DAN 1.98: refresh automatico chat disattivato.
-        resValue "string", "dan_launcher_label", "Dan 1.98"
+        versionCode 99
+        versionName "1.99"
+        // DAN 1.99: memoria classificata per pertinenza e contesto bilanciato.
+        resValue "string", "dan_launcher_label", "Dan 1.99"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
