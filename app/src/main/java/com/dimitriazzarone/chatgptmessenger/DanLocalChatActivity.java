@@ -101,7 +101,8 @@ public final class DanLocalChatActivity extends Activity {
 
     /** Istruzioni brevi per modelli locali da 0,5B. */
     private static final String NATIVE_PROMPT =
-            "Tu sei DAN. Stai parlando con Dimitri Azzarone, il tuo utente. "
+            "Tu sei DAN, assistente di Dimitri Azzarone. Non sei Dimitri e non sei "
+          + "le persone descritte nei suoi ricordi. "
           + "Quando Dimitri dice io o mio parla di se stesso, non di te. "
           + "Rispondi in italiano, con calore, rispetto e naturalezza. "
           + "Puoi chiamarlo Dimitri, senza ripeterlo in ogni risposta. "
@@ -1364,7 +1365,8 @@ public final class DanLocalChatActivity extends Activity {
             if (word.length() >= 4 && !stop.contains("|" + word + "|")) terms.add(word);
             if (terms.size() >= limit) break;
         }
-        return terms;
+        LinkedHashSet<String> names = DanPersonalMemoryStore.focusNames(question);
+        return names.isEmpty() ? terms : names;
     }
 
     /** Non usare domande dell'utente come fatti autobiografici. */
@@ -1570,7 +1572,7 @@ public final class DanLocalChatActivity extends Activity {
 
             int directBudget = isNativeEnabled() ? 520 : 1800;
             int historicalBudget = isNativeEnabled() ? 380 : 900;
-            int documentsBudget = isNativeEnabled() ? 760 : 1500;
+            int documentsBudget = isNativeEnabled() ? 850 : 1500;
             direct = compactContext(direct, directBudget);
             historical = compactContext(historical, historicalBudget);
             documents = compactContext(documents, documentsBudget);
