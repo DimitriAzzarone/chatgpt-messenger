@@ -9,6 +9,7 @@ on:
       - dan-v1.98-disable-live-refresh
       - dan-v1.99-memory-ranking
       - dan-v1.100-memory-diagnostics
+      - dan-v1.101-memory-questions-filter
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26

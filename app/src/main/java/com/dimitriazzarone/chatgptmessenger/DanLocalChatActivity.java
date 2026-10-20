@@ -1367,6 +1367,16 @@ public final class DanLocalChatActivity extends Activity {
         return terms;
     }
 
+    /** Non usare domande dell'utente come fatti autobiografici. */
+    private static boolean isQuestionOnlyMemory(String value, String currentQuestion) {
+        if (value == null) return false;
+        String text = value.replace('\n', ' ').replace('\r', ' ').trim();
+        String current = currentQuestion == null ? ""
+                : currentQuestion.replace('\n', ' ').replace('\r', ' ').trim();
+        if (!current.isEmpty() && text.equalsIgnoreCase(current)) return true;
+        return text.length() <= 220 && text.endsWith("?");
+    }
+
     /** DAN 1.99: classifica i ricordi dell'utente per pertinenza, poi usa la recenza solo come spareggio. */
     private String findRelevantMemoryV199(String question) throws Exception {
         LinkedHashSet<String> words = memoryTermsV199(question, 7);
@@ -1390,6 +1400,7 @@ public final class DanLocalChatActivity extends Activity {
             while (cursor.moveToNext()) {
                 String body = cursor.getString(0);
                 if (body == null || body.trim().isEmpty()) continue;
+                if (isQuestionOnlyMemory(body, question)) continue;
                 body = body.replace('\n', ' ').replace('\r', ' ').trim();
                 String lower = body.toLowerCase(Locale.ROOT);
                 int score = 0;
@@ -1483,6 +1494,7 @@ public final class DanLocalChatActivity extends Activity {
                         if (!(part instanceof String)) continue;
                         String body = ((String) part).replace('\n', ' ').replace('\r', ' ').trim();
                         if (body.isEmpty()) continue;
+                        if (isQuestionOnlyMemory(body, question)) continue;
                         String lower = body.toLowerCase(Locale.ROOT);
                         int score = 0;
                         for (String word : words) {
