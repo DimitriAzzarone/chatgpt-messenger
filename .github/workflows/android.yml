@@ -11,6 +11,7 @@ on:
       - dan-v1.100-memory-diagnostics
       - dan-v1.101-memory-questions-filter
       - dan-v1.102-private-history-focus
+      - dan-v1.104-rescue-101
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26

@@ -106,22 +106,6 @@ final class DanPersonalMemoryStore extends SQLiteOpenHelper {
         }
     }
 
-    /** Nomi propri della domanda: prima le persone, poi le parole generiche. */
-    static LinkedHashSet<String> focusNames(String question) {
-        LinkedHashSet<String> names = new LinkedHashSet<>();
-        String ignored = "|raccontami|dimmi|parlami|spiegami|ricordi|ricordo|quando|"
-                + "questa|questo|quella|quello|senza|voglio|vorrei|puoi|"
-                + "dammi|cerca|sapere|descrivi|riassumi|storia|dimitri|"
-                + "cosa|come|quale|quali|perche|perché|adesso|secondo|oggi|";
-        for (String word : question.split("[^\\p{L}\\p{N}]+")) {
-            if (word.length() < 4 || !Character.isUpperCase(word.charAt(0))) continue;
-            String name = word.toLowerCase(Locale.ROOT);
-            if (!ignored.contains("|" + name + "|")) names.add(name);
-            if (names.size() == 2) break;
-        }
-        return names;
-    }
-
     /** Only short quoted context snippets are sent to Qwen. Documents are NOT instructions. */
     String relevant(String question) {
         Set<String> terms = new LinkedHashSet<>();
@@ -131,26 +115,22 @@ final class DanPersonalMemoryStore extends SQLiteOpenHelper {
             if (w.length() >= 4 && !stop.contains("|" + w + "|")) terms.add(w);
             if (terms.size() >= 6) break;
         }
-        Set<String> focus = focusNames(question);
-        if (!focus.isEmpty()) terms = focus;
         List<Match> found = new ArrayList<>();
         try (Cursor c = searchCandidates(terms)) {
             while (c.moveToNext()) {
                 String name = c.getString(0), body = c.getString(1);
                 String low = body.toLowerCase(Locale.ROOT);
                 int score = 0, first = -1;
-                String title = name.toLowerCase(Locale.ROOT);
-                boolean profile = title.contains("profilo") || title.contains("memoria master")
-                        || title.contains("autobiograf");
+                boolean profile = name.toLowerCase(Locale.ROOT).contains("profilo-dan");
+                if (profile) score = 1;
                 for (String term : terms) {
                     int at = low.indexOf(term);
-                    if (at >= 0) { score += 6; if (first < 0 || at < first) first = at; }
-                    if (title.contains(term)) score += 12;
+                    if (at >= 0) { score += 2; if (first < 0 || at < first) first = at; }
+                    if (name.toLowerCase(Locale.ROOT).contains(term)) score += 3;
                 }
-                if (score > 0 && profile) score += 4;
                 if (score <= 0) continue;
                 int begin = first < 0 ? 0 : Math.max(0,first-120);
-                int end = Math.min(body.length(), begin + (profile ? 320 : 260));
+                int end = Math.min(body.length(), begin + (profile ? 520 : 650));
                 found.add(new Match(name,score, (begin > 0 ? "…" : "")
                         + body.substring(begin,end).replace('\r',' ').replace('\n',' ')
                         + (end < body.length() ? "…" : "")));
@@ -160,12 +140,10 @@ final class DanPersonalMemoryStore extends SQLiteOpenHelper {
         StringBuilder out = new StringBuilder();
         int used = 0;
         for (Match m : found) {
-            String title = m.name.length() > 75
-                    ? "…" + m.name.substring(m.name.length() - 74) : m.name;
-            String note = "- [" + title + "] " + m.excerpt + "\n";
+            String note = "- [" + m.name + "] " + m.excerpt + "\n";
             if (out.length() + note.length() > MAX_CONTEXT_CHARS) continue;
             out.append(note);
-            if (++used >= 2) break;
+            if (++used >= 3) break;
         }
         return out.toString();
     }
