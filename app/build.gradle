@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 101
-        versionName "1.101"
+        versionCode 103
+        versionName "1.103"
         // DAN 1.101: filtro delle domande nella memoria selezionata.
-        resValue "string", "dan_launcher_label", "Dan 1.101"
+        resValue "string", "dan_launcher_label", "Dan 1.103 Test"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }

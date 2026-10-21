@@ -109,8 +109,11 @@ final class DanPersonalMemoryStore extends SQLiteOpenHelper {
     /** Only short quoted context snippets are sent to Qwen. Documents are NOT instructions. */
     String relevant(String question) {
         Set<String> terms = new LinkedHashSet<>();
+        // Prevent boilerplate in autobiographical questions from outranking names.
         String stop = "|questa|questo|quello|quella|come|cosa|sono|della|delle|" +
-                "ricordi|ricordo|raccontami|vorrei|quando|perche|perché|sapere|";
+                "ricordi|ricordo|raccontami|vorrei|quando|perche|perché|sapere|" +
+                "dimmi|fammi|parlami|fatti|fatto|concreti|usando|memoria|" +
+                "autobiografica|autobiografico|documenti|secondo|";
         for (String w : question.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
             if (w.length() >= 4 && !stop.contains("|" + w + "|")) terms.add(w);
             if (terms.size() >= 6) break;

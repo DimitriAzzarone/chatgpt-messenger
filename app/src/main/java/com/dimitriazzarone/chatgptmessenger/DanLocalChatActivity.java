@@ -1359,7 +1359,8 @@ public final class DanLocalChatActivity extends Activity {
         String stop = "|questo|questa|quello|quella|cosa|come|sono|delle|della|degli|"
                 + "anche|quando|dove|quale|quali|vorrei|potrei|puoi|ricordi|ricordo|ricordare|"
                 + "dimmi|fammi|sapere|sulla|questi|queste|tutto|tutti|essere|perche|perché|"
-                + "fatto|parlami|raccontami|storia|nostra|avevo|volevo|allora|ancora|";
+                + "fatto|fatti|concreti|usando|memoria|autobiografica|autobiografico|documenti|"
+                + "secondo|parlami|raccontami|storia|nostra|avevo|volevo|allora|ancora|";
         for (String word : question.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
             if (word.length() >= 4 && !stop.contains("|" + word + "|")) terms.add(word);
             if (terms.size() >= limit) break;
@@ -1374,7 +1375,13 @@ public final class DanLocalChatActivity extends Activity {
         String current = currentQuestion == null ? ""
                 : currentQuestion.replace('\n', ' ').replace('\r', ' ').trim();
         if (!current.isEmpty() && text.equalsIgnoreCase(current)) return true;
-        return text.length() <= 220 && text.endsWith("?");
+        // Also exclude short requests written without a final question mark.
+        // Never delete messages: this affects only retrieval during inference.
+        if (text.length() > 300) return false;
+        if (text.endsWith("?")) return true;
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.matches("^(?:dimmi|raccontami|parlami|fammi sapere|cosa|che cosa|chi|" +
+                "come|quando|dove|perché|perche|secondo te|puoi|potresti|ti ricordi)\\b.*");
     }
 
     /** DAN 1.99: classifica i ricordi dell'utente per pertinenza, poi usa la recenza solo come spareggio. */
@@ -1568,12 +1575,15 @@ public final class DanLocalChatActivity extends Activity {
                 android.util.Log.w("DanAutobiography", "Ricerca documenti personali non riuscita", e);
             }
 
-            int directBudget = isNativeEnabled() ? 520 : 1800;
-            int historicalBudget = isNativeEnabled() ? 380 : 900;
-            int documentsBudget = isNativeEnabled() ? 760 : 1500;
+            int directBudget = isNativeEnabled() ? 360 : 1800;
+            int historicalBudget = isNativeEnabled() ? 220 : 900;
+            int documentsBudget = isNativeEnabled() ? 1050 : 1500;
             direct = compactContext(direct, directBudget);
             historical = compactContext(historical, historicalBudget);
             documents = compactContext(documents, documentsBudget);
+            // A personal document is stronger than an old unrelated chat excerpt.
+            // Keep historical snippets only when no document was retrieved.
+            if (isNativeEnabled() && !documents.isEmpty()) historical = "";
 
             StringBuilder memory = new StringBuilder();
             if (!direct.isEmpty())
