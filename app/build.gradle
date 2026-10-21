@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 106
-        versionName "1.106"
-        // DAN 1.106: recupero sessione cuffie e riconoscitore vocale.
-        resValue "string", "dan_launcher_label", "Dan 1.106"
+        versionCode 107
+        versionName "1.107"
+        // DAN 1.107: nome Dan nella casella e nell’intestazione.
+        resValue "string", "dan_launcher_label", "Dan 1.107"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }

@@ -12,6 +12,7 @@ on:
       - dan-v1.101-memory-questions-filter
       - dan-v1.105-voice-composer-repair
       - dan-v1.106-headset-recovery
+      - dan-v1.107-dan-labels
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
