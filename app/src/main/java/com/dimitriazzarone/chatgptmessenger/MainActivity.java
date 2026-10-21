@@ -3983,10 +3983,8 @@ public class MainActivity extends Activity {
                 "  try{" +
                 "   const nodes=Array.from(document.querySelectorAll('body *'));" +
                 "   for(const n of nodes){" +
-                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT' &&" +
-                "       n.closest('header,[data-testid=\"model-switcher-dropdown-button\"]') &&" +
-                "       !n.closest('[data-message-author-role],article')){" +
-                "     n.textContent='Dan';" +
+                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT'){" +
+                "     n.style.display='none';" +
                 "    }" +
                 "   }" +
 
@@ -3999,18 +3997,20 @@ public class MainActivity extends Activity {
                 "      return ct.startsWith('ChatGPT può commettere errori') ||" +
                 "             ct.startsWith('ChatGPT can make mistakes');" +
                 "     });" +
-                "     if(!childMatch && n.style.display!=='none')n.style.display='none';" +
+                "     if(!childMatch)n.style.display='none';" +
                 "    }" +
                 "   }" +
 
                 "   const fields=Array.from(document.querySelectorAll(" +
-                "    'textarea,input,[contenteditable=true],[data-placeholder]'" +
+                "    'textarea,input,[contenteditable=true]'+" +
                 "   ));" +
                 "   for(const f of fields){" +
                 "    for(const a of ['placeholder','data-placeholder','aria-label']){" +
                 "     const v=f.getAttribute(a);" +
                 "     if(v && v.toLowerCase().includes('chatgpt')){" +
-                "          f.setAttribute(a,'Dan');"+
+                "          const low=v.toLowerCase();"+
+                "          const danText=low.includes('rispondi')?'Rispondi a Dan':'Chiedi a Dan';"+
+                "          f.setAttribute(a,danText);"+
                 "     }" +
                 "    }" +
                 "   }" +
@@ -4992,10 +4992,8 @@ public class MainActivity extends Activity {
                 "  try{" +
                 "   const nodes=Array.from(document.querySelectorAll('body *'));" +
                 "   for(const n of nodes){" +
-                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT' &&" +
-                "       n.closest('header,[data-testid=\"model-switcher-dropdown-button\"]') &&" +
-                "       !n.closest('[data-message-author-role],article')){" +
-                "     n.textContent='Dan';" +
+                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT'){" +
+                "     n.style.display='none';" +
                 "    }" +
                 "   }" +
 
@@ -5010,12 +5008,12 @@ public class MainActivity extends Activity {
                 "      return ct.startsWith('ChatGPT può commettere errori') ||" +
                 "        ct.startsWith('ChatGPT can make mistakes');" +
                 "     });" +
-                "     if(!childMatch && n.style.display!=='none')n.style.display='none';" +
+                "     if(!childMatch)n.style.display='none';" +
                 "    }" +
                 "   }" +
 
                 "   const fields=Array.from(document.querySelectorAll(" +
-                "    'textarea,input,[contenteditable=true],[data-placeholder]'" +
+                "    'textarea,input,[contenteditable=true]'" +
                 "   ));" +
 
                 "   for(const f of fields){" +
@@ -5023,7 +5021,7 @@ public class MainActivity extends Activity {
                 "    for(const a of attrs){" +
                 "     const v=f.getAttribute(a);" +
                 "     if(v && v.toLowerCase().includes('chatgpt')){" +
-                "      f.setAttribute(a,'Dan');" +
+                "      f.setAttribute(a,'Chiedi a Dan');" +
                 "     }" +
                 "    }" +
                 "   }" +

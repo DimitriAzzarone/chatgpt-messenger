@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 107
-        versionName "1.107"
-        // DAN 1.107: nome Dan nella casella e nell’intestazione.
-        resValue "string", "dan_launcher_label", "Dan 1.107"
+        versionCode 108
+        versionName "1.108"
+        // DAN 1.108: ripristino del comportamento della 1.106.
+        resValue "string", "dan_launcher_label", "Dan 1.108"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
