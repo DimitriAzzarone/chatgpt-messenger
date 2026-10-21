@@ -216,6 +216,8 @@ public class MainActivity extends Activity {
     private Intent speechIntent;
     private boolean listening = false;
     private boolean recognizerSessionActive = false;
+    private boolean manualStopPending = false;
+    private long voiceSendGeneration = 0L;
     private boolean pressToTalkRequested = false;
     private boolean recordingLocked = false;
     private boolean manualCapture = false;
@@ -487,7 +489,8 @@ public class MainActivity extends Activity {
         engineButton.setContentDescription("Apri i limiti e l'utilizzo ufficiale di Work e Codex");
         engineButton.setOnClickListener(v -> {
             setLuminexVisible(false);
-            webView.loadUrl("https://chatgpt.com/codex/settings/usage");
+            // Keep the authenticated session and navigation inside Dan.
+            webView.loadUrl("https://chatgpt.com/codex/cloud/settings/analytics#usage");
         });
         engineButton.setOnLongClickListener(v -> { showEngineMenu(); return true; });
 
@@ -570,11 +573,20 @@ public class MainActivity extends Activity {
                     }
 
                     touchStartY = event.getRawY();
+                    manualStopPending = false;
+                    lastPartialText = "";
+                    if (speechRecognizer != null && recognizerSessionActive) {
+                        // Abandon the previous recognizer completely: a late
+                        // ERROR_CLIENT from that session must not clear this one.
+                        try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+                        try { speechRecognizer.destroy(); } catch (Exception ignored) {}
+                        speechRecognizer = null;
+                        recognizerSessionActive = false;
+                        listening = false;
+                        createSpeechRecognizer();
+                    }
                     pressToTalkRequested = true;
                     manualCapture = true;
-                    if (speechRecognizer != null && recognizerSessionActive) {
-                        try { speechRecognizer.cancel(); } catch (Exception ignored) {}
-                    }
                     startPressToTalk();
                     return true;
 
@@ -1420,8 +1432,7 @@ public class MainActivity extends Activity {
                         }
                     } catch (Exception ignored) {}
 
-                    recovered =
-                            stripEmojis(recovered).trim();
+                    recovered = cleanSpeechLabels(recovered);
 
                     if (recovered.isEmpty()) {
                         statusText.setText(
@@ -1944,14 +1955,21 @@ public class MainActivity extends Activity {
         dialog.show();
     }
 
+    private String cleanSpeechLabels(String text) {
+        String cleaned = stripEmojis(text == null ? "" : text).trim();
+        for (int i = 0; i < 3; i++) {
+            String next = cleaned.replaceFirst(
+                    "(?iu)^\\s*(?:chatgpt\\s+ha\\s+detto|chat\\s+ha\\s+detto|tu\\s+hai\\s+detto|hai\\s+detto)\\s*[:：,.!?–—-]?\\s*", "").trim();
+            if (next.equals(cleaned)) break;
+            cleaned = next;
+        }
+        return cleaned;
+    }
+
     private void speakAssistantText(String text) {
         if (text == null) return;
 
-        String cleaned =
-                stripEmojis(text).trim()
-                        .replaceFirst("(?iu)^\\s*hai detto\\s*[:：,.!?–—-]?\\s*", "")
-                        .replaceFirst("(?iu)^\\s*chat(?:gpt)? ha detto\\s*[:：,.!?–—-]?\\s*", "")
-                        .trim();
+        String cleaned = cleanSpeechLabels(text);
 
         if (cleaned.isEmpty()
                 || cleaned.equals(lastSpokenText)) {
@@ -2218,14 +2236,25 @@ public class MainActivity extends Activity {
                 RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
                 5000L);
 
+        final SpeechRecognizer owner = speechRecognizer;
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
             @Override
             public void onReadyForSpeech(Bundle params) {
+                if (speechRecognizer != owner) return;
                 listening = true;
                 recognizerSessionActive = true;
                 lastPartialText = "";
                 applyMicStyle(true);
-                if (manualCapture) {
+                if (manualCapture && manualStopPending) {
+                    statusText.setText("🎙 Fine dettatura in corso…");
+                    statusText.postDelayed(() -> {
+                        if (manualStopPending && manualCapture && recognizerSessionActive) {
+                            manualStopPending = false;
+                            try { speechRecognizer.stopListening(); }
+                            catch (Exception e) { statusText.setText("Errore chiusura dettatura"); }
+                        }
+                    }, 400L);
+                } else if (manualCapture) {
                     playRecordingStartSound();
                     statusText.setText("🎙 Ti ascolto… rilascia per inviare");
                 } else if (handsFreeDictating) {
@@ -2237,6 +2266,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onBeginningOfSpeech() {
+                if (speechRecognizer != owner) return;
                 if (manualCapture) {
                     statusText.setText("🎙 Parla…");
                 } else if (handsFreeDictating) {
@@ -2251,13 +2281,16 @@ public class MainActivity extends Activity {
 
             @Override
             public void onEndOfSpeech() {
+                if (speechRecognizer != owner) return;
                 statusText.setText(manualCapture ? "Trascrivo…" : "Elaboro…");
             }
 
             @Override
             public void onError(int error) {
+                if (speechRecognizer != owner) return;
                 listening = false;
                 recognizerSessionActive = false;
+                manualStopPending = false;
                 applyMicStyle(false);
 
                 if (manualCapture) {
@@ -2269,10 +2302,11 @@ public class MainActivity extends Activity {
                     if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                         statusText.setText("Permesso microfono mancante.");
                     } else if (error == SpeechRecognizer.ERROR_NO_MATCH
-                            || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                            || error == SpeechRecognizer.ERROR_CLIENT) {
+                            || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                         playRecognitionErrorSound();
-                        statusText.setText("Non ho capito. Riprova.");
+                        statusText.setText("Nessuna frase riconosciuta (codice " + error + ").");
+                    } else if (error == SpeechRecognizer.ERROR_CLIENT) {
+                        statusText.setText("Errore tecnico del riconoscitore (codice " + error + ").");
                     } else {
                         statusText.setText("Errore riconoscimento vocale: " + error);
                     }
@@ -2294,8 +2328,10 @@ public class MainActivity extends Activity {
 
             @Override
             public void onResults(Bundle results) {
+                if (speechRecognizer != owner) return;
                 listening = false;
                 recognizerSessionActive = false;
+                manualStopPending = false;
                 applyMicStyle(false);
 
                 String text = chooseBestRecognition(results);
@@ -2326,6 +2362,7 @@ public class MainActivity extends Activity {
 
             @Override
             public void onPartialResults(Bundle partialResults) {
+                if (speechRecognizer != owner) return;
                 if (partialResults == null) return;
 
                 ArrayList<String> partials =
@@ -2485,8 +2522,9 @@ public class MainActivity extends Activity {
         }
 
         statusText.postDelayed(() -> {
-            if (manualCapture) startListening();
-        }, 180L);
+            if (manualCapture && speechRecognizer != null && !recognizerSessionActive)
+                startListening();
+        }, 120L);
     }
 
     private void startListening() {
@@ -2494,7 +2532,14 @@ public class MainActivity extends Activity {
 
         try {
             recognizerSessionActive = true;
-            speechRecognizer.startListening(speechIntent);
+            Intent request = new Intent(speechIntent);
+            if (manualCapture) {
+                // Long-listening timeout hints are unsuitable for push-to-talk.
+                request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS);
+                request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS);
+                request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS);
+            }
+            speechRecognizer.startListening(request);
         } catch (Exception e) {
             recognizerSessionActive = false;
             listening = false;
@@ -2525,9 +2570,24 @@ public class MainActivity extends Activity {
         if (manualCapture) {
             playRecordingEndSound();
         }
-        if (speechRecognizer != null && recognizerSessionActive && manualCapture) {
-            statusText.setText("Trascrivo…");
-            try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
+        if (speechRecognizer != null && manualCapture) {
+            if (recognizerSessionActive && listening) {
+                manualStopPending = false;
+                statusText.setText("Trascrivo…");
+                try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
+            } else {
+                // A short press may finish during the Android startup handshake.
+                manualStopPending = true;
+                statusText.setText("🎙 Attendo il riconoscitore…");
+                statusText.postDelayed(() -> {
+                    if (manualStopPending && manualCapture && recognizerSessionActive) {
+                        manualStopPending = false;
+                        statusText.setText("Trascrivo…");
+                        try { speechRecognizer.stopListening(); }
+                        catch (Exception e) { statusText.setText("Errore fine dettatura"); }
+                    }
+                }, 2000L);
+            }
         }
         micButton.setText("🎙");
         applyMicStyle(false);
@@ -4783,15 +4843,13 @@ public class MainActivity extends Activity {
                     + context;
         }
 
-        String escaped = textToSend
-                .replace("\\", "\\\\")
-                .replace("'", "\\'")
-                .replace("\n", "\\n")
-                .replace("\r", "");
+        // JSON quoting prevents apostrophes/newlines in dictated speech from
+        // corrupting the JavaScript injected into the ChatGPT composer.
+        String encodedText = JSONObject.quote(textToSend);
 
         String script =
                 "(function(){" +
-                " const text='" + escaped + "';" +
+                " const text=" + encodedText + ";" +
                 " function findEditor(){" +
                 "  return document.querySelector('#prompt-textarea') ||" +
                 "         document.querySelector(\"textarea[data-testid='prompt-textarea']\") ||" +
@@ -4805,32 +4863,103 @@ public class MainActivity extends Activity {
                 "          return a.includes('send')||a.includes('invia');" +
                 "         });" +
                 " }" +
-                " const editor=findEditor();" +
-                " if(!editor)return 'NO_EDITOR';" +
-                " editor.focus();" +
-                " if(editor.tagName==='TEXTAREA'||editor.tagName==='INPUT'){" +
-                "  const setter=Object.getOwnPropertyDescriptor(Object.getPrototypeOf(editor),'value')?.set;" +
-                "  if(setter)setter.call(editor,text);else editor.value=text;" +
-                " }else{" +
-                "  editor.innerHTML='';" +
-                "  editor.textContent=text;" +
-                " }" +
-                " editor.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));" +
-                " editor.dispatchEvent(new Event('change',{bubbles:true}));" +
-                " setTimeout(()=>{" +
-                "  const send=findSend();" +
-                "  if(send&&!send.disabled)send.click();" +
-                " },350);" +
-                " return 'OK';" +
+                "const editor=findEditor();" +
+                "if(!editor)return 'NO_EDITOR';" +
+                "if(editor.disabled || editor.getAttribute('contenteditable')==='false')return 'READ_ONLY';" +
+                "try{" +
+                "editor.focus();" +
+                "if(editor.tagName==='TEXTAREA'||editor.tagName==='INPUT'){" +
+                "const proto=editor.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
+                "const setter=Object.getOwnPropertyDescriptor(proto,'value').set;" +
+                "setter.call(editor,text);" +
+                "}else{" +
+                "const selection=window.getSelection();" +
+                "const range=document.createRange();" +
+                "range.selectNodeContents(editor);" +
+                "selection.removeAllRanges();" +
+                "selection.addRange(range);" +
+                "const ok=(typeof document.execCommand==='function')&&document.execCommand('insertText',false,text);" +
+                "if(!ok || !(editor.innerText||editor.textContent||'').includes(text.slice(0,Math.min(text.length,40)))){" +
+                "editor.textContent=text;" +
+                "}" +
+                "}" +
+                "try{editor.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));}catch(eventError){editor.dispatchEvent(new Event('input',{bubbles:true}));}" +
+                "editor.dispatchEvent(new Event('change',{bubbles:true}));" +
+                "const draft=(editor.value||editor.innerText||editor.textContent||'');" +
+                "return draft.includes(text.slice(0,Math.min(40,text.length)))?'INSERTED':'NO_INSERT';" +
+                "}catch(err){return 'INSERT_ERROR';}" +
                 "})();";
 
+        final long requestId = ++voiceSendGeneration;
+        final String originalSpeech = text;
         webView.evaluateJavascript(script, value -> runOnUiThread(() -> {
-            if (value != null && value.contains("NO_EDITOR")) {
-                statusText.setText("Casella ChatGPT non trovata");
+            if (requestId != voiceSendGeneration) return;
+            if ("\"INSERTED\"".equals(value)) {
+                statusText.setText("Testo dettato nella casella: preparo invio…");
+                statusText.postDelayed(() -> trySendVoiceDraft(originalSpeech, requestId, 0), 550L);
             } else {
-                statusText.setText("Attendo la risposta…");
+                statusText.setText("Dettatura non inserita nella chat");
+                showUnsentVoiceDraft(originalSpeech, "DAN non è riuscito a scrivere nella casella.");
             }
         }));
+    }
+
+    // A successful JavaScript call is not proof that ChatGPT accepted a message.
+    // First verify the text remains in the composer, then click Send only once.
+    private void trySendVoiceDraft(String originalSpeech, long requestId, int attempt) {
+        if (requestId != voiceSendGeneration || webView == null) return;
+        final String prefix = originalSpeech.substring(0, Math.min(35, originalSpeech.length()));
+        String checkAndSend =
+                "(function(){" +
+                "const e=document.querySelector('#prompt-textarea')||document.querySelector(\"textarea[data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true']\");" +
+                "if(!e)return 'NO_EDITOR';" +
+                "const draft=(e.value||e.innerText||e.textContent||'');" +
+                "if(!draft.includes(" +
+                JSONObject.quote(prefix) +
+                "))return 'TEXT_MISSING';" +
+                "const b=document.querySelector(\"button[data-testid='send-button']\")||Array.from(document.querySelectorAll('button')).find(b=>{" +
+                "const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
+                "return a.includes('send')||a.includes('invia');" +
+                "});" +
+                "if(!b)return 'NO_SEND';" +
+                "if(b.disabled || b.getAttribute('aria-disabled')==='true')return 'DISABLED';" +
+                "try{b.click();return 'CLICKED';}catch(err){return 'CLICK_ERROR';}" +
+                "})()";
+        webView.evaluateJavascript(checkAndSend, value -> runOnUiThread(() -> {
+            if (requestId != voiceSendGeneration) return;
+            if ("\"CLICKED\"".equals(value)) {
+                statusText.setText("Invio premuto; verifica la risposta nella chat");
+            } else if (("\"DISABLED\"".equals(value) || "\"NO_SEND\"".equals(value))
+                    && attempt < 5) {
+                statusText.postDelayed(() -> trySendVoiceDraft(originalSpeech, requestId, attempt + 1), 550L);
+            } else {
+                statusText.setText("Invio non riuscito: il testo è recuperabile");
+                showUnsentVoiceDraft(originalSpeech, "La casella non ha confermato il pulsante Invia.");
+            }
+        }));
+    }
+
+    private void showUnsentVoiceDraft(String text, String reason) {
+        if (isFinishing()) return;
+        EditText draft = new EditText(this);
+        draft.setText(text);
+        draft.setMinLines(2);
+        draft.setMaxLines(8);
+        draft.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(this)
+                .setTitle("Messaggio dettato non inviato")
+                .setMessage(reason + " Puoi riprovare o copiare il testo senza perderlo.")
+                .setView(draft)
+                .setPositiveButton("Riprova", (dialog, which) ->
+                        handleRecognizedCommandOrMessage(draft.getText().toString()))
+                .setNeutralButton("Copia testo", (dialog, which) -> {
+                    android.content.ClipboardManager clipboard =
+                            (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) clipboard.setPrimaryClip(
+                            ClipData.newPlainText("DAN dettatura", draft.getText().toString()));
+                })
+                .setNegativeButton("Chiudi", null)
+                .show();
     }
 
     private void injectDanBranding() {
@@ -5686,6 +5815,7 @@ public class MainActivity extends Activity {
         recognizerSessionActive = false;
         listening = false;
         manualCapture = false;
+        manualStopPending = false;
         headsetRecording = false;
         recordingLocked = false;
         pressToTalkRequested = false;
