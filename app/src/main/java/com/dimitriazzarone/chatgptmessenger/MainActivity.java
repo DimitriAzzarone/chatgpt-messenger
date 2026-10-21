@@ -1528,6 +1528,14 @@ public class MainActivity extends Activity {
         }
 
         createHeadsetMediaSession();
+        if (headsetMediaSession != null) {
+            headsetMediaSession.setPlaybackState(new PlaybackState.Builder()
+                    .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE
+                            | PlaybackState.ACTION_PLAY_PAUSE)
+                    .setState(PlaybackState.STATE_PLAYING,
+                            PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f).build());
+            headsetMediaSession.setActive(true);
+        }
         autoButton.setText("MIC");
         statusText.setText("Cuffie riattivate");
     }
@@ -2184,12 +2192,22 @@ public class MainActivity extends Activity {
         }
         ttsSpeaking = false;
 
-        if (speechRecognizer != null && recognizerSessionActive) {
-            try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+        if (speechRecognizer != null) {
+            SpeechRecognizer previous = speechRecognizer;
+            speechRecognizer = null;
+            try { previous.cancel(); } catch (Exception ignored) {}
+            try { previous.destroy(); } catch (Exception ignored) {}
         }
-
         recognizerSessionActive = false;
         listening = false;
+        manualStopPending = false;
+        lastPartialText = "";
+        createSpeechRecognizer();
+        if (speechRecognizer == null) {
+            headsetRecording = false;
+            statusText.setText("Riconoscimento vocale non disponibile");
+            return;
+        }
         statusText.setText("🎧 Cuffia: preparo il microfono…");
 
         statusText.postDelayed(() -> {
