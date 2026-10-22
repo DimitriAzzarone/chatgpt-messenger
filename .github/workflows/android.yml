@@ -15,6 +15,7 @@ on:
       - dan-v1.107-dan-labels
       - dan-v1.108-rollback-107
       - dan-v1.109-address-composer
+      - dan-v1.110-download-drive
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26

@@ -980,6 +980,7 @@ public class MainActivity extends Activity {
             String initialUrl
     ) {
         WebView tab = new WebView(this);
+        configureDownloads(tab);
 
         if (session != 0) {
             WebViewCompat.setProfile(
@@ -2679,6 +2680,222 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final int REQ_BLOB_SAVE = 4010;
+    private static final int REQ_UPLOAD_FOLDER = 4011;
+    private final BlobDownloadBridge blobDownload = new BlobDownloadBridge();
+    private File blobSaveFile;
+    private boolean folderUploadBusy;
+
+    private void configureDownloads(WebView source) {
+        source.addJavascriptInterface(blobDownload, "DanFileDownload");
+        source.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+            if (url == null || url.trim().isEmpty()) {
+                Toast.makeText(
+                        MainActivity.this,
+                        "Download non disponibile",
+                        Toast.LENGTH_SHORT
+                ).show();
+                return;
+            }
+
+            if (url.startsWith("blob:")) {
+                beginBlobDownload(source, url, mimetype);
+                return;
+            }
+
+            String guessed = URLUtil.guessFileName(
+                    url,
+                    contentDisposition,
+                    mimetype
+            );
+
+            String suggested = null;
+
+            long age = System.currentTimeMillis() - pendingDownloadNameAt;
+            if (pendingDownloadName != null
+                    && !pendingDownloadName.trim().isEmpty()
+                    && age >= 0
+                    && age <= 10000L) {
+                suggested = sanitizeFilename(pendingDownloadName);
+            }
+
+            pendingDownloadName = null;
+            pendingDownloadNameAt = 0L;
+
+            if (suggested == null || suggested.isEmpty()) {
+                suggested = sanitizeFilename(guessed);
+            }
+
+            if (suggested == null || suggested.isEmpty()
+                    || suggested.toLowerCase(Locale.ROOT).matches(
+                    "^content(?:[-_]?\\d+)?\\.[a-z0-9]{2,5}$")) {
+                suggested = fallbackDownloadName(guessed);
+            }
+
+            showDownloadNameDialog(
+                    url,
+                    userAgent,
+                    mimetype,
+                    suggested
+            );
+        });
+    }
+
+    private void beginBlobDownload(WebView source, String url, String mime) {
+        if (blobSaveFile != null || blobDownload.busy()) {
+            Toast.makeText(this, "Completa prima il salvataggio in corso", Toast.LENGTH_LONG).show();
+            return;
+        }
+        final String token;
+        try { token = blobDownload.begin(); }
+        catch (Exception e) {
+            Toast.makeText(this, "Spazio temporaneo non disponibile", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String name = pendingDownloadName;
+        pendingDownloadName = null;
+        pendingDownloadNameAt = 0L;
+        if (TextUtils.isEmpty(name)) name = URLUtil.guessFileName("file", null, mime);
+        final String filename = sanitizeFilename(name);
+        final String contentType = TextUtils.isEmpty(mime) ? "application/octet-stream" : mime;
+        statusText.setText("Preparazione del file da salvare…");
+        String js = "(async function(){const token=" + JSONObject.quote(token)
+                + ";try{const r=await fetch(" + JSONObject.quote(url) + ");"
+                + "if(!r.ok)throw new Error('HTTP '+r.status);const b=await r.blob();"
+                + "for(let i=0;i<b.size;i+=49152){const data=await new Promise((ok,no)=>{"
+                + "const f=new FileReader();f.onload=()=>ok(String(f.result).split(',')[1]||'');"
+                + "f.onerror=()=>no(new Error('Lettura file'));f.readAsDataURL(b.slice(i,i+49152));});"
+                + "if(!window.DanFileDownload.append(token,data))throw new Error('Scrittura file');}"
+                + "window.DanFileDownload.finish(token,b.size," + JSONObject.quote(filename)
+                + "," + JSONObject.quote(contentType) + ");"
+                + "}catch(e){window.DanFileDownload.fail(token,String(e));}})();";
+        source.evaluateJavascript(js, null);
+    }
+
+    private final class BlobDownloadBridge {
+        private String token;
+        private File file;
+        private java.io.FileOutputStream output;
+        private long bytes;
+        synchronized boolean busy() { return token != null; }
+        synchronized String begin() throws Exception {
+            file = File.createTempFile("dan-download-", ".part", getCacheDir());
+            output = new java.io.FileOutputStream(file);
+            bytes = 0;
+            token = java.util.UUID.randomUUID().toString();
+            return token;
+        }
+        @JavascriptInterface
+        public synchronized boolean append(String key, String data) {
+            if (token == null || !token.equals(key) || data == null || data.length() > 65536) return false;
+            try {
+                byte[] part = android.util.Base64.decode(data, android.util.Base64.DEFAULT);
+                output.write(part); bytes += part.length; return true;
+            } catch (Exception e) { fail(key, "Scrittura non riuscita"); return false; }
+        }
+        @JavascriptInterface
+        public synchronized void finish(String key, long size, String name, String mime) {
+            if (token == null || !token.equals(key)) return;
+            if (size != bytes) { fail(key, "File incompleto"); return; }
+            try { output.close(); }
+            catch (Exception e) { fail(key, "Chiusura file non riuscita"); return; }
+            final File ready = file;
+            output = null; file = null; token = null;
+            runOnUiThread(() -> {
+                blobSaveFile = ready;
+                try {
+                    Intent save = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                    save.addCategory(Intent.CATEGORY_OPENABLE);
+                    save.setType(TextUtils.isEmpty(mime) ? "application/octet-stream" : mime);
+                    save.putExtra(Intent.EXTRA_TITLE, sanitizeFilename(name));
+                    startActivityForResult(save, REQ_BLOB_SAVE);
+                } catch (Exception e) {
+                    ready.delete(); blobSaveFile = null;
+                    statusText.setText("Impossibile aprire il salvataggio del file");
+                }
+            });
+        }
+        @JavascriptInterface
+        public synchronized void fail(String key, String reason) {
+            if (token == null || !token.equals(key)) return;
+            try { if (output != null) output.close(); } catch (Exception ignored) {}
+            if (file != null) file.delete();
+            output = null; file = null; token = null;
+            runOnUiThread(() -> {
+                statusText.setText("Download temporaneo non riuscito");
+                Toast.makeText(MainActivity.this, "Download non riuscito: " + reason, Toast.LENGTH_LONG).show();
+            });
+        }
+    }
+
+    private void chooseFolderForDrive() {
+        if (folderUploadBusy) {
+            Toast.makeText(this, "Preparazione cartella già in corso", Toast.LENGTH_SHORT).show(); return;
+        }
+        Intent select = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        select.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivityForResult(select, REQ_UPLOAD_FOLDER); }
+        catch (Exception e) { statusText.setText("Selettore cartelle non disponibile"); }
+    }
+
+    private void collectFolderFiles(Uri tree, String id, ArrayList<Uri> files,
+                                    java.util.Set<String> visited) throws Exception {
+        if (!visited.add(id)) return;
+        Uri children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(tree, id);
+        ArrayList<String> directories = new ArrayList<>();
+        try (Cursor c = getContentResolver().query(children, new String[]{
+                android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE}, null, null, null)) {
+            if (c == null) throw new java.io.IOException("Cartella non leggibile");
+            while (c.moveToNext()) {
+                String child = c.getString(0);
+                if (android.provider.DocumentsContract.Document.MIME_TYPE_DIR.equals(c.getString(1)))
+                    directories.add(child);
+                else files.add(android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, child));
+            }
+        }
+        for (String directory : directories) collectFolderFiles(tree, directory, files, visited);
+    }
+
+    private void prepareFolderForDrive(Uri tree) {
+        folderUploadBusy = true;
+        statusText.setText("Raccolgo i file della cartella e delle sottocartelle…");
+        memoryExecutor.execute(() -> {
+            try {
+                ArrayList<Uri> files = new ArrayList<>();
+                collectFolderFiles(tree, android.provider.DocumentsContract.getTreeDocumentId(tree),
+                        files, new java.util.HashSet<>());
+                runOnUiThread(() -> {
+                    folderUploadBusy = false;
+                    if (files.isEmpty()) { statusText.setText("La cartella non contiene file"); return; }
+                    Intent send = new Intent(Intent.ACTION_SEND_MULTIPLE);
+                    send.setType("*/*");
+                    send.setPackage("com.google.android.apps.docs");
+                    send.putParcelableArrayListExtra(Intent.EXTRA_STREAM, files);
+                    ClipData clip = ClipData.newUri(getContentResolver(), "File della cartella", files.get(0));
+                    for (int i = 1; i < files.size(); i++) clip.addItem(new ClipData.Item(files.get(i)));
+                    send.setClipData(clip);
+                    send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    try {
+                        startActivity(send);
+                        statusText.setText(files.size() + " file passati a Drive: scegli destinazione e Salva");
+                    } catch (Exception e) {
+                        statusText.setText("Impossibile passare la cartella a Drive");
+                        new AlertDialog.Builder(MainActivity.this).setTitle("Copia su Drive non avviata")
+                                .setMessage("Verifica che l’app Google Drive sia installata e aggiornata. "
+                                        + "Nessun file originale è stato modificato.")
+                                .setPositiveButton("OK", null).show();
+                    }
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    folderUploadBusy = false;
+                    statusText.setText("Cartella non leggibile: " + e.getMessage());
+                });
+            }
+        });
+    }
+
     private void showDownloadNameDialog(
             String url,
             String userAgent,
@@ -2875,6 +3092,7 @@ public class MainActivity extends Activity {
     // Dan Luminex AI Integration v1.25
     private void createLuminexWebView() {
         luminexWebView = new WebView(this);
+        configureDownloads(luminexWebView);
         luminexWebView.setBackgroundColor(Color.WHITE);
 
         WebSettings settings = luminexWebView.getSettings();
@@ -4124,61 +4342,7 @@ public class MainActivity extends Activity {
         cookies.setAcceptCookie(true);
         cookies.setAcceptThirdPartyCookies(webView, true);
 
-        webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
-            if (url == null || url.trim().isEmpty()) {
-                Toast.makeText(
-                        MainActivity.this,
-                        "Download non disponibile",
-                        Toast.LENGTH_SHORT
-                ).show();
-                return;
-            }
-
-            if (url.startsWith("blob:")) {
-                Toast.makeText(
-                        MainActivity.this,
-                        "Questo file usa un collegamento temporaneo blob. Se non parte, dimmelo e lo adattiamo.",
-                        Toast.LENGTH_LONG
-                ).show();
-                return;
-            }
-
-            String guessed = URLUtil.guessFileName(
-                    url,
-                    contentDisposition,
-                    mimetype
-            );
-
-            String suggested = null;
-
-            long age = System.currentTimeMillis() - pendingDownloadNameAt;
-            if (pendingDownloadName != null
-                    && !pendingDownloadName.trim().isEmpty()
-                    && age >= 0
-                    && age <= 10000L) {
-                suggested = sanitizeFilename(pendingDownloadName);
-            }
-
-            pendingDownloadName = null;
-            pendingDownloadNameAt = 0L;
-
-            if (suggested == null || suggested.isEmpty()) {
-                suggested = sanitizeFilename(guessed);
-            }
-
-            if (suggested == null || suggested.isEmpty()
-                    || suggested.toLowerCase(Locale.ROOT).matches(
-                    "^content(?:[-_]?\\d+)?\\.[a-z0-9]{2,5}$")) {
-                suggested = fallbackDownloadName(guessed);
-            }
-
-            showDownloadNameDialog(
-                    url,
-                    userAgent,
-                    mimetype,
-                    suggested
-            );
-        });
+        configureDownloads(webView);
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
@@ -4191,6 +4355,7 @@ public class MainActivity extends Activity {
                 closePopupWebView();
 
                 popupWebView = new WebView(MainActivity.this);
+                configureDownloads(popupWebView);
                 WebSettings popupSettings = popupWebView.getSettings();
                 popupSettings.setJavaScriptEnabled(true);
                 popupSettings.setDomStorageEnabled(true);
@@ -4459,7 +4624,8 @@ public class MainActivity extends Activity {
                 "Sincronizza cartella collegata",
                 "Conta chat archiviate",
                 "Collega Tutta la mia storia o quasi (lettura)",
-                "Aggiorna documenti autobiografici"
+                "Aggiorna documenti autobiografici",
+                "Carica una cartella su Drive"
         };
         new AlertDialog.Builder(this)
                 .setTitle("Memoria di Dan")
@@ -4494,6 +4660,8 @@ public class MainActivity extends Activity {
                         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
                                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
                         startActivityForResult(intent, REQ_STORY_FOLDER);
+                    } else if (which == 9) {
+                        chooseFolderForDrive();
                     } else {
                         syncPersonalFolder(true);
                     }
@@ -4585,6 +4753,33 @@ public class MainActivity extends Activity {
             Intent data
     ) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_UPLOAD_FOLDER) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null)
+                prepareFolderForDrive(data.getData());
+            return;
+        }
+        if (requestCode == REQ_BLOB_SAVE) {
+            final File ready = blobSaveFile;
+            blobSaveFile = null;
+            if (ready == null) return;
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                ready.delete(); statusText.setText("Salvataggio annullato"); return;
+            }
+            final Uri destination = data.getData();
+            memoryExecutor.execute(() -> {
+                try (InputStream input = new java.io.FileInputStream(ready);
+                     OutputStream output = getContentResolver().openOutputStream(destination, "w")) {
+                    if (output == null) throw new java.io.IOException("Destinazione non scrivibile");
+                    byte[] buffer = new byte[65536]; int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                    output.flush();
+                    runOnUiThread(() -> statusText.setText("File salvato"));
+                } catch (Exception e) {
+                    runOnUiThread(() -> statusText.setText("Salvataggio non riuscito: " + e.getMessage()));
+                } finally { ready.delete(); }
+            });
+            return;
+        }
 
         if (requestCode == REQ_STORY_FOLDER) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null) {
@@ -4815,6 +5010,10 @@ public class MainActivity extends Activity {
         if (clean.isEmpty()) return;
 
         String lower = clean.toLowerCase(Locale.ROOT);
+        if (lower.matches("(?:carica|copia|invia) (?:una |la )?cartella su drive[.!?]?")) {
+            chooseFolderForDrive();
+            return;
+        }
 
         if (lower.startsWith("apri ")) {
             String target = clean.substring(5).trim();
