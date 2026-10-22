@@ -201,6 +201,8 @@ public class MainActivity extends Activity {
         }
     };
     private WebView popupWebView;
+    private LinearLayout luminexAddressBar;
+    private EditText luminexAddress;
     private FrameLayout webContainer;
     private ProgressBar progressBar;
     private TextView statusText;
@@ -509,6 +511,32 @@ public class MainActivity extends Activity {
 
         root.addView(topBar);
         root.addView(controlsBar);
+        luminexAddressBar = new LinearLayout(this);
+        luminexAddressBar.setOrientation(LinearLayout.HORIZONTAL);
+        luminexAddressBar.setVisibility(View.GONE);
+        luminexAddress = new EditText(this);
+        luminexAddress.setSingleLine(true);
+        luminexAddress.setTextSize(14);
+        luminexAddress.setTextColor(Color.BLACK);
+        luminexAddress.setBackgroundColor(Color.WHITE);
+        luminexAddress.setContentDescription("Indirizzo completo della pagina Luminex");
+        luminexAddress.setKeyListener(null);
+        luminexAddress.setTextIsSelectable(true);
+        luminexAddressBar.addView(luminexAddress,
+                new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button copyAddress = makeButton("Copia URL");
+        copyAddress.setOnClickListener(v -> {
+            String url = luminexAddress.getText().toString();
+            android.content.ClipboardManager clipboard =
+                    (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null && !url.isEmpty()) {
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("URL", url));
+                Toast.makeText(this, "Indirizzo copiato", Toast.LENGTH_SHORT).show();
+            }
+        });
+        luminexAddressBar.addView(copyAddress,
+                new LinearLayout.LayoutParams(dp(100), dp(48)));
+        root.addView(luminexAddressBar);
         root.addView(progressBar, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(3)));
         root.addView(webContainer, new LinearLayout.LayoutParams(
@@ -910,7 +938,20 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void updateLuminexAddress() {
+        if (luminexAddressBar == null || luminexAddress == null) return;
+        luminexAddressBar.setVisibility(luminexVisible ? View.VISIBLE : View.GONE);
+        WebView active = getActiveLuminexWebView();
+        String url = active == null ? "" : active.getUrl();
+        if (url == null) url = "";
+        if (!url.contentEquals(luminexAddress.getText())) {
+            luminexAddress.setText(url);
+            luminexAddress.setSelection(0);
+        }
+    }
+
     private void showActiveLuminexTab() {
+        updateLuminexAddress();
         hideAllLuminexTabs();
         if (!luminexVisible) return;
         WebView active = getActiveLuminexWebView();
@@ -2918,6 +2959,7 @@ public class MainActivity extends Activity {
     }
 
     private void sendLuminexPageState(WebView source, Runnable completion) {
+        updateLuminexAddress();
         if (source == null) {
             if (completion != null) completion.run();
             return;
@@ -3102,6 +3144,7 @@ public class MainActivity extends Activity {
 
     private void setLuminexVisible(boolean visible) {
         luminexVisible = visible;
+        updateLuminexAddress();
 
         if (webView != null) {
             webView.setVisibility(luminexVisible ? View.GONE : View.VISIBLE);
@@ -4885,7 +4928,7 @@ public class MainActivity extends Activity {
                 "if(!editor)return 'NO_EDITOR';" +
                 "if(editor.disabled || editor.getAttribute('contenteditable')==='false')return 'READ_ONLY';" +
                 "try{" +
-                "editor.focus();" +
+                "editor.click();editor.focus();" +
                 "if(editor.tagName==='TEXTAREA'||editor.tagName==='INPUT'){" +
                 "const proto=editor.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
                 "const setter=Object.getOwnPropertyDescriptor(proto,'value').set;" +
@@ -4939,7 +4982,7 @@ public class MainActivity extends Activity {
                 "const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
                 "return a.includes('send')||a.includes('invia');" +
                 "});" +
-                "if(!b)return 'NO_SEND';" +
+                "if(!b){try{e.click();e.focus();}catch(ignore){}return 'NO_SEND';}" +
                 "if(b.disabled || b.getAttribute('aria-disabled')==='true')return 'DISABLED';" +
                 "try{b.click();return 'CLICKED';}catch(err){return 'CLICK_ERROR';}" +
                 "})()";
