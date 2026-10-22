@@ -25,6 +25,8 @@ final class DanDriveSync {
     static final String PREF_FOLDER = "dan_drive_folder";
     private static final String PREF_ARCHIVE = "dan_drive_archive_stamp";
     private static final String PREF_SLOT = "dan_drive_slot";
+    private final java.util.List<Map.Entry<String, Uri>> backupCopies = new java.util.ArrayList<>();
+    private final Set<String> duplicateNames = new HashSet<>();
     private final Context context;
     private final SharedPreferences prefs;
     private final DanMemoryStore memory;
@@ -66,7 +68,7 @@ final class DanDriveSync {
         int added = 0;
         Set<String> goodDevices = new HashSet<>();
         Set<String> damagedDevices = new HashSet<>();
-        for (Map.Entry<String, Uri> file : files.entrySet()) {
+        for (Map.Entry<String, Uri> file : backupCopies) {
             String name = file.getKey();
             if (name.equals("Dan-memory.jsonl") || (name.startsWith("Dan-device-")
                     && name.endsWith(".jsonl"))) {
@@ -86,7 +88,12 @@ final class DanDriveSync {
         if (saveBackup) {
             String id = deviceId();
             String slot = prefs.getBoolean(PREF_SLOT, false) ? "A" : "B";
-            String name = "Dan-device-" + id + "-" + slot + ".jsonl";
+            String slotKey = "dan_drive_backup_name_" + slot;
+            String name = prefs.getString(slotKey, "Dan-device-" + id + "-" + slot + ".jsonl");
+            if (!name.startsWith("Dan-device-" + id + "-"))
+                name = "Dan-device-" + id + "-" + slot + ".jsonl";
+            if (duplicateNames.contains(name))
+                name = "Dan-device-" + id + "-recovered-" + UUID.randomUUID() + "-" + slot + ".jsonl";
             Uri target = files.get(name);
             if (target == null) {
                 Uri parent = DocumentsContract.buildDocumentUriUsingTree(tree,
@@ -99,7 +106,8 @@ final class DanDriveSync {
                 if (output == null) throw new IOException("Backup Drive non scrivibile");
                 memory.exportJsonl(output);
             }
-            prefs.edit().putBoolean(PREF_SLOT, !prefs.getBoolean(PREF_SLOT, false)).apply();
+            prefs.edit().putString(slotKey, name)
+                    .putBoolean(PREF_SLOT, !prefs.getBoolean(PREF_SLOT, false)).apply();
         }
         return new Result(historic, added, archive != null);
     }
@@ -133,14 +141,23 @@ final class DanDriveSync {
         String id = DocumentsContract.getTreeDocumentId(tree);
         Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, id);
         Map<String, Uri> result = new HashMap<>();
+        backupCopies.clear();
+        duplicateNames.clear();
         try (Cursor c = resolver.query(children, new String[]{
                 DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                 DocumentsContract.Document.COLUMN_DISPLAY_NAME}, null, null, null)) {
             if (c == null) throw new IOException("Cartella Drive non leggibile");
             while (c.moveToNext()) {
-                if (result.put(c.getString(1),
-                        DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0))) != null)
-                    throw new IOException("Nomi duplicati nella cartella: " + c.getString(1));
+                String name = c.getString(1);
+                Uri document = DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0));
+                boolean backup = name != null && (name.equals("Dan-memory.jsonl")
+                        || (name.startsWith("Dan-device-") && name.endsWith(".jsonl")));
+                if (backup) backupCopies.add(new java.util.AbstractMap.SimpleImmutableEntry<>(name, document));
+                if (result.containsKey(name)) {
+                    duplicateNames.add(name);
+                    if ("Dan-storico-completo.zip".equals(name))
+                        throw new IOException("Più archivi Dan-storico-completo.zip: selezione ambigua; nessun archivio sovrascritto");
+                } else result.put(name, document);
             }
         }
         return result;

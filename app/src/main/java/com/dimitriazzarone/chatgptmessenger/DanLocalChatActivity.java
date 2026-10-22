@@ -1377,7 +1377,7 @@ public final class DanLocalChatActivity extends Activity {
 
     private static String identitySubject(String question) {
         java.util.regex.Matcher m = java.util.regex.Pattern.compile(
-                "(?iu)^\\s*chi\\s+(?:è|e'|era)\\s+([\\p{L}][\\p{L} '’-]{0,70})[?!.]*\\s*$")
+                "(?iu)^\\s*(?:(?:ricordi|sai|ti ricordi|mi dici|puoi dirmi)\\s+)?chi\\s+(?:è|e'|era)\\s+([\\p{L}][\\p{L} '’-]{0,70})[?!.]*\\s*$")
                 .matcher(question);
         return m.matches() ? m.group(1).trim().toLowerCase(Locale.ROOT) : "";
     }
@@ -1639,6 +1639,28 @@ public final class DanLocalChatActivity extends Activity {
             personal.index(source, "profilo-dan-essenziale-integrato", 1L, size, profile);
     }
 
+    private static boolean isProfileQuestion(String question) {
+        String q = java.text.Normalizer.normalize(question.toLowerCase(Locale.ROOT),
+                java.text.Normalizer.Form.NFD).replaceAll("\\p{M}+", "")
+                .replaceAll("[^a-z0-9 ]", " ").replaceAll(" +", " ").trim();
+        return q.matches("(?:ricordi |sai |mi dici |puoi dirmi )?(?:cosa faccio nella vita|"
+                + "che lavoro faccio|qual e il mio lavoro|qual e la mia professione|"
+                + "di cosa mi occupo|cosa sai di me|cosa ricordi di me)");
+    }
+
+    private static String profileExcerpt(String body) {
+        StringBuilder out = new StringBuilder();
+        for (String sentence : body.split("(?<=[.!?])\\s+|[\\r\\n]+")) {
+            String clean = sentence.trim();
+            if (clean.startsWith("Dimitri Azzarone è ")
+                    || clean.startsWith("È specializzato ") || clean.startsWith("È presidente ")) {
+                if (out.length() > 0) out.append(' ');
+                out.append(clean);
+            }
+        }
+        return out.toString();
+    }
+
     private String requestLocalReply(List<ChatMessage> snapshot) throws Exception {
         long memoryStarted = SystemClock.elapsedRealtime();
         lastMemoryMillis = 0;
@@ -1651,17 +1673,18 @@ public final class DanLocalChatActivity extends Activity {
         final boolean standaloneCalculation = isNativeEnabled()
                 && isStandaloneCalculation(snapshot.get(snapshot.size() - 1).content);
         final String person = identitySubject(snapshot.get(snapshot.size() - 1).content);
-        final boolean identityQuestion = !person.isEmpty();
+        final boolean profileQuestion = isProfileQuestion(snapshot.get(snapshot.size() - 1).content);
+        final boolean identityQuestion = !person.isEmpty() || profileQuestion;
         String identitySource = "";
         if (isMemoryEnabled() && !standaloneCalculation) {
             String question = snapshot.get(snapshot.size() - 1).content;
-            String direct = findRelevantMemoryV199(question);
-            String historical = identityQuestion && !direct.isEmpty()
+            String direct = profileQuestion ? "" : findRelevantMemoryV199(question);
+            String historical = profileQuestion || (identityQuestion && !direct.isEmpty())
                     ? "" : findHistoricalMemoryV199(question);
             String documents = "";
             try (DanPersonalMemoryStore personal = new DanPersonalMemoryStore(this)) {
                 ensureEssentialProfile(personal);
-                documents = personal.relevant(question);
+                documents = personal.relevant(profileQuestion ? "Dimitri" : question);
                 if (!identityQuestion && !memoryTermsV199(question, 6).isEmpty()
                         && !relevantMemoryBody(documents, memoryTermsV199(question, 6)))
                     documents = "";
@@ -1669,7 +1692,8 @@ public final class DanLocalChatActivity extends Activity {
                 android.util.Log.w("DanAutobiography", "Ricerca documenti personali non riuscita", e);
             }
 
-            if (identityQuestion) {
+            if (profileQuestion) identitySource = profileExcerpt(documents);
+            if (identityQuestion && !profileQuestion) {
                 // Return source text, never a generated personal biography.
                 for (String candidate : new String[]{direct, historical, documents}) {
                     String excerpt = identityExcerpt(candidate, person);
