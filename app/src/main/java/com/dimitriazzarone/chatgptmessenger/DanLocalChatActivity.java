@@ -104,7 +104,9 @@ public final class DanLocalChatActivity extends Activity {
             "Sei DAN, l'assistente di Dimitri Azzarone. Rispondi in italiano alla domanda dell'utente. "
           + "Usa poche frasi chiare, salvo richiesta di approfondimento. "
           + "Usa i ricordi solo quando servono alla domanda e non inventare fatti personali. "
-          + "Non ripetere le istruzioni o le note tecniche.";
+          + "Non ripetere le istruzioni o le note tecniche. "
+          + "Per identificare una persona usa soltanto un rapporto descritto nei ricordi; "
+          + "se non è indicato, rispondi che non hai informazioni sufficienti.";
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final ExecutorService memoryExecutor = Executors.newSingleThreadExecutor();
@@ -854,9 +856,10 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     private void showLastMemoryDebug() {
-        String report = lastMemoryDebug == null || lastMemoryDebug.trim().isEmpty()
-                ? "Nessuna memoria selezionata per l'ultima domanda."
-                : lastMemoryDebug;
+        String report = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getString("last_memory_report", lastMemoryDebug);
+        if (report == null || report.trim().isEmpty())
+            report = "Nessuna memoria selezionata per l'ultima domanda.";
         new AlertDialog.Builder(this)
                 .setTitle("Memoria usata nell'ultima risposta")
                 .setMessage(report)
@@ -1371,10 +1374,59 @@ public final class DanLocalChatActivity extends Activity {
         return text.length() <= 220 && text.endsWith("?");
     }
 
+    private static String identitySubject(String question) {
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?iu)^\\s*chi\\s+(?:è|e'|era)\\s+([\\p{L}][\\p{L} '’-]{0,70})[?!.]*\\s*$")
+                .matcher(question);
+        return m.matches() ? m.group(1).trim().toLowerCase(Locale.ROOT) : "";
+    }
+
+    private static String identityExcerpt(String body, String subject) {
+        if (subject.isEmpty()) return body;
+        java.util.regex.Matcher names = java.util.regex.Pattern.compile(
+                "(?iu)(?<!\\p{L})" + java.util.regex.Pattern.quote(subject) + "(?!\\p{L})")
+                .matcher(body);
+        String best = "";
+        int bestScore = -1;
+        while (names.find()) {
+            int start = Math.max(0, names.start() - 70);
+            int end = Math.min(body.length(), names.end() + 250);
+            String excerpt = body.substring(start, end);
+            int score = identityEvidence(excerpt, subject);
+            if (score > bestScore) {
+                bestScore = score;
+                best = excerpt;
+            }
+        }
+        return best;
+    }
+
+    private static int identityEvidence(String text, String subject) {
+        if (subject.isEmpty()) return 0;
+        String name = java.util.regex.Pattern.quote(subject);
+        String roles = "(?:compagna|compagno|fidanzata|fidanzato|moglie|marito|partner|"
+                + "sorella|fratello|madre|padre|mamma|papà|amica|amico|allieva|allievo|"
+                + "studentessa|studente|docente|collega|coinquilina|coinquilino|ex)";
+        String t = text.toLowerCase(Locale.ROOT);
+        String relation = "(?iu)(?<!\\p{L})" + name + "(?!\\p{L})"
+                + "\\s*[,:(-]?\\s*(?:(?:è|era|e'|è stata|è stato|e stata|e stato)\\s+)?"
+                + "(?:(?:la|il|una|un|mia|mio|nostra|nostro)\\s+){0,3}" + roles + "(?!\\p{L})";
+        if (java.util.regex.Pattern.compile(relation).matcher(t).find()) return 80;
+        String reverse = "(?iu)\\b(?:mia|mio|nostra|nostro)\\s+" + roles
+                + "\\s*[,:(-]?\\s*(?:(?:si chiama|si chiamava|è|era)\\s+)?"
+                + name + "(?!\\p{L})";
+        if (java.util.regex.Pattern.compile(reverse).matcher(t).find()) return 80;
+        String together = "(?iu)\\b(?:relazione|rapporto|convivenza)\\s+con\\s+"
+                + name + "(?!\\p{L})";
+        if (java.util.regex.Pattern.compile(together).matcher(t).find()) return 40;
+        return 0;
+    }
+
     /** DAN 1.99: classifica i ricordi dell'utente per pertinenza, poi usa la recenza solo come spareggio. */
     private String findRelevantMemoryV199(String question) throws Exception {
         LinkedHashSet<String> words = memoryTermsV199(question, 7);
         if (words.isEmpty()) return "";
+        String subject = identitySubject(question);
 
         StringBuilder sql = new StringBuilder(
                 "SELECT body, recorded_at FROM turns WHERE role='user' AND (");
@@ -1384,7 +1436,8 @@ public final class DanLocalChatActivity extends Activity {
             sql.append("instr(lower(body), ?) > 0");
             args.add(word);
         }
-        sql.append(") ORDER BY recorded_at DESC LIMIT 80");
+        sql.append(subject.isEmpty() ? ") ORDER BY recorded_at DESC LIMIT 80"
+                : ") ORDER BY recorded_at DESC LIMIT 600");
 
         ArrayList<JSONObject> ranked = new ArrayList<>();
         try (DanMemoryStore store = new DanMemoryStore(getApplicationContext());
@@ -1404,6 +1457,13 @@ public final class DanLocalChatActivity extends Activity {
                         score += 4;
                         if (at < 90) score += 1;
                     }
+                }
+                if (!subject.isEmpty()) {
+                    String excerpt = identityExcerpt(body, subject);
+                    int evidence = identityEvidence(excerpt, subject);
+                    if (evidence == 0) continue;
+                    body = excerpt;
+                    score += evidence;
                 }
                 if (score == 0) continue;
                 if (recency < 8) score += 2;
@@ -1445,6 +1505,7 @@ public final class DanLocalChatActivity extends Activity {
     private String findHistoricalMemoryV199(String question) {
         LinkedHashSet<String> words = memoryTermsV199(question, 6);
         if (words.isEmpty()) return "";
+        String subject = identitySubject(question);
 
         StringBuilder sql = new StringBuilder(
                 "SELECT title, raw_json, updated_at FROM conversations WHERE ");
@@ -1494,6 +1555,13 @@ public final class DanLocalChatActivity extends Activity {
                         for (String word : words) {
                             if (lower.contains(word)) score += 4;
                             if (titleLower.contains(word)) score += 3;
+                        }
+                        if (!subject.isEmpty()) {
+                            String excerpt = identityExcerpt(body, subject);
+                            int evidence = identityEvidence(excerpt, subject);
+                            if (evidence == 0) continue;
+                            body = excerpt;
+                            score += evidence;
                         }
                         if (score > bestScore) {
                             bestScore = score;
@@ -1558,6 +1626,7 @@ public final class DanLocalChatActivity extends Activity {
         messages.put(sys);
         final boolean standaloneCalculation = isNativeEnabled()
                 && isStandaloneCalculation(snapshot.get(snapshot.size() - 1).content);
+        final boolean identityQuestion = !identitySubject(snapshot.get(snapshot.size() - 1).content).isEmpty();
         if (isMemoryEnabled() && !standaloneCalculation) {
             String question = snapshot.get(snapshot.size() - 1).content;
             String direct = findRelevantMemoryV199(question);
@@ -1619,12 +1688,14 @@ public final class DanLocalChatActivity extends Activity {
                     ? "Calcolo autonomo: nessuna ricerca nella memoria personale."
                     : "Memoria Dan disattivata: nessun ricordo inviato al modello.";
         }
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putString("last_memory_report", lastMemoryDebug).apply();
         lastMemoryMillis = SystemClock.elapsedRealtime() - memoryStarted;
         int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 5 : MAX_CONTEXT_MESSAGES));
         int previousBudget = 1600;
         if (isNativeEnabled()) {
             start = snapshot.size() - 1;
-            for (int i = standaloneCalculation ? -1 : snapshot.size() - 2;
+            for (int i = standaloneCalculation || identityQuestion ? -1 : snapshot.size() - 2;
                     i >= Math.max(0, snapshot.size() - 5); i--) {
                 int cost = Math.min(600, snapshot.get(i).content.length());
                 if (cost > previousBudget) break;

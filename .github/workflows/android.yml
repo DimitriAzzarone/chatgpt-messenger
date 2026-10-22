@@ -18,6 +18,7 @@ on:
       - dan-v1.110-download-drive
       - dan-v1.111-stable108-download-drive
       - dan-v1.112-local-prompt
+      - dan-v1.113-identity-memory
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
