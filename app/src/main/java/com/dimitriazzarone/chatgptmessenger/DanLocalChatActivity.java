@@ -1437,7 +1437,7 @@ public final class DanLocalChatActivity extends Activity {
             args.add(word);
         }
         sql.append(subject.isEmpty() ? ") ORDER BY recorded_at DESC LIMIT 80"
-                : ") ORDER BY recorded_at DESC LIMIT 600");
+                : ") ORDER BY recorded_at DESC");
 
         ArrayList<JSONObject> ranked = new ArrayList<>();
         try (DanMemoryStore store = new DanMemoryStore(getApplicationContext());
@@ -1515,7 +1515,8 @@ public final class DanLocalChatActivity extends Activity {
             sql.append("lower(raw_json) LIKE ?");
             args.add("%" + word + "%");
         }
-        sql.append(" ORDER BY updated_at DESC LIMIT 40");
+        sql.append(subject.isEmpty() ? " ORDER BY updated_at DESC LIMIT 40"
+                : " ORDER BY updated_at DESC");
 
         ArrayList<JSONObject> ranked = new ArrayList<>();
         try (DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
@@ -1615,6 +1616,20 @@ public final class DanLocalChatActivity extends Activity {
                 && q.matches(".*[0-9].*");
     }
 
+    private void ensureEssentialProfile(DanPersonalMemoryStore personal) throws Exception {
+        String profile = "Profilo essenziale confermato da Dimitri, aggiornato al 22 ottobre 2026.\n"
+                + "Dimitri Azzarone è un docente di matematica e fisica, autore e programmatore. "
+                + "È specializzato nel supporto ad allievi con DSA e ADHD. Vive in Canton Ticino. "
+                + "È presidente dell'Associazione Gruppo Form-azione. Non è uno chef a domicilio.\n"
+                + "Fiorella è stata la compagna di Dimitri. Dimitri desidera un riavvicinamento con lei.\n"
+                + "Carla è la sorella di Dimitri ed è vicepresidente dell'associazione.\n"
+                + "Raffaella è la sorella di Dimitri e si occupa dell'amministrazione dell'associazione.\n";
+        String source = "dan:essential-profile:2026-10-22";
+        long size = profile.getBytes(StandardCharsets.UTF_8).length;
+        if (!personal.unchanged(source, 1L, size))
+            personal.index(source, "profilo-dan-essenziale-integrato", 1L, size, profile);
+    }
+
     private String requestLocalReply(List<ChatMessage> snapshot) throws Exception {
         long memoryStarted = SystemClock.elapsedRealtime();
         lastMemoryMillis = 0;
@@ -1626,16 +1641,30 @@ public final class DanLocalChatActivity extends Activity {
         messages.put(sys);
         final boolean standaloneCalculation = isNativeEnabled()
                 && isStandaloneCalculation(snapshot.get(snapshot.size() - 1).content);
-        final boolean identityQuestion = !identitySubject(snapshot.get(snapshot.size() - 1).content).isEmpty();
+        final String person = identitySubject(snapshot.get(snapshot.size() - 1).content);
+        final boolean identityQuestion = !person.isEmpty();
+        String identitySource = "";
         if (isMemoryEnabled() && !standaloneCalculation) {
             String question = snapshot.get(snapshot.size() - 1).content;
             String direct = findRelevantMemoryV199(question);
             String historical = findHistoricalMemoryV199(question);
             String documents = "";
             try (DanPersonalMemoryStore personal = new DanPersonalMemoryStore(this)) {
+                ensureEssentialProfile(personal);
                 documents = personal.relevant(question);
             } catch (Exception e) {
                 android.util.Log.w("DanAutobiography", "Ricerca documenti personali non riuscita", e);
+            }
+
+            if (identityQuestion) {
+                // Return source text, never a generated personal biography.
+                for (String candidate : new String[]{direct, historical, documents}) {
+                    String excerpt = identityExcerpt(candidate, person);
+                    if (identityEvidence(excerpt, person) > 0) {
+                        identitySource = excerpt.trim();
+                        break;
+                    }
+                }
             }
 
             int directBudget = isNativeEnabled() ? 520 : 1800;
@@ -1691,6 +1720,13 @@ public final class DanLocalChatActivity extends Activity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("last_memory_report", lastMemoryDebug).apply();
         lastMemoryMillis = SystemClock.elapsedRealtime() - memoryStarted;
+        if (identityQuestion) {
+            if (!isMemoryEnabled())
+                return "La memoria personale è disattivata. Attivala per cercare questa persona.";
+            if (identitySource.isEmpty())
+                return "Non ho trovato nei ricordi disponibili una descrizione affidabile di questa persona.";
+            return "Nei ricordi disponibili ho trovato questo estratto:\n«" + identitySource + "»";
+        }
         int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 5 : MAX_CONTEXT_MESSAGES));
         int previousBudget = 1600;
         if (isNativeEnabled()) {
