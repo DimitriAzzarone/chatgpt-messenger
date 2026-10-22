@@ -202,7 +202,7 @@ public class MainActivity extends Activity {
     };
     private WebView popupWebView;
     private LinearLayout luminexAddressBar;
-    private EditText luminexAddress;
+    private TextView luminexAddress;
     private FrameLayout webContainer;
     private ProgressBar progressBar;
     private TextView statusText;
@@ -514,14 +514,14 @@ public class MainActivity extends Activity {
         luminexAddressBar = new LinearLayout(this);
         luminexAddressBar.setOrientation(LinearLayout.HORIZONTAL);
         luminexAddressBar.setVisibility(View.GONE);
-        luminexAddress = new EditText(this);
+        luminexAddress = new TextView(this);
         luminexAddress.setSingleLine(true);
         luminexAddress.setTextSize(14);
         luminexAddress.setTextColor(Color.BLACK);
         luminexAddress.setBackgroundColor(Color.WHITE);
         luminexAddress.setContentDescription("Indirizzo completo della pagina Luminex");
-        luminexAddress.setKeyListener(null);
-        luminexAddress.setTextIsSelectable(true);
+        luminexAddress.setPadding(dp(10), dp(12), dp(10), dp(12));
+        luminexAddress.setHorizontallyScrolling(true);
         luminexAddressBar.addView(luminexAddress,
                 new LinearLayout.LayoutParams(0, dp(48), 1));
         Button copyAddress = makeButton("Copia URL");
@@ -946,7 +946,7 @@ public class MainActivity extends Activity {
         if (url == null) url = "";
         if (!url.contentEquals(luminexAddress.getText())) {
             luminexAddress.setText(url);
-            luminexAddress.setSelection(0);
+            // La barra mostra soltanto l’URL.
         }
     }
 
@@ -1024,6 +1024,10 @@ public class MainActivity extends Activity {
         cookies.flush();
 
         tab.setWebViewClient(new WebViewClient() {
+            @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
+                updateLuminexAddress();
+            }
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (session != 0) {
@@ -3123,6 +3127,10 @@ public class MainActivity extends Activity {
 
         luminexWebView.setWebViewClient(new WebViewClient() {
             @Override
+            public void doUpdateVisitedHistory(WebView view, String url, boolean reload) {
+                updateLuminexAddress();
+            }
+            @Override
             public void onPageFinished(
                     WebView view,
                     String url
@@ -3177,7 +3185,6 @@ public class MainActivity extends Activity {
     }
 
     private void sendLuminexPageState(WebView source, Runnable completion) {
-        updateLuminexAddress();
         if (source == null) {
             if (completion != null) completion.run();
             return;
@@ -5127,7 +5134,7 @@ public class MainActivity extends Activity {
                 "if(!editor)return 'NO_EDITOR';" +
                 "if(editor.disabled || editor.getAttribute('contenteditable')==='false')return 'READ_ONLY';" +
                 "try{" +
-                "editor.click();editor.focus();" +
+                "editor.focus();" +
                 "if(editor.tagName==='TEXTAREA'||editor.tagName==='INPUT'){" +
                 "const proto=editor.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
                 "const setter=Object.getOwnPropertyDescriptor(proto,'value').set;" +
@@ -5181,7 +5188,7 @@ public class MainActivity extends Activity {
                 "const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
                 "return a.includes('send')||a.includes('invia');" +
                 "});" +
-                "if(!b){try{e.click();e.focus();}catch(ignore){}return 'NO_SEND';}" +
+                "if(!b)return 'NO_SEND';" +
                 "if(b.disabled || b.getAttribute('aria-disabled')==='true')return 'DISABLED';" +
                 "try{b.click();return 'CLICKED';}catch(err){return 'CLICK_ERROR';}" +
                 "})()";
