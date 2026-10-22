@@ -1356,7 +1356,8 @@ public final class DanLocalChatActivity extends Activity {
         String stop = "|questo|questa|quello|quella|cosa|come|sono|delle|della|degli|"
                 + "anche|quando|dove|quale|quali|vorrei|potrei|puoi|ricordi|ricordo|ricordare|"
                 + "dimmi|fammi|sapere|sulla|questi|queste|tutto|tutti|essere|perche|perché|"
-                + "fatto|parlami|raccontami|storia|nostra|avevo|volevo|allora|ancora|";
+                + "fatto|parlami|raccontami|storia|nostra|avevo|volevo|allora|ancora|"
+                + "queste|questi|questo|dato|prova|quanto|quindi|grazie|favore|oggi|adesso|";
         for (String word : question.toLowerCase(Locale.ROOT).split("[^\\p{L}\\p{N}]+")) {
             if (word.length() >= 4 && !stop.contains("|" + word + "|")) terms.add(word);
             if (terms.size() >= limit) break;
@@ -1383,22 +1384,28 @@ public final class DanLocalChatActivity extends Activity {
 
     private static String identityExcerpt(String body, String subject) {
         if (subject.isEmpty()) return body;
-        java.util.regex.Matcher names = java.util.regex.Pattern.compile(
-                "(?iu)(?<!\\p{L})" + java.util.regex.Pattern.quote(subject) + "(?!\\p{L})")
-                .matcher(body);
         String best = "";
-        int bestScore = -1;
-        while (names.find()) {
-            int start = Math.max(0, names.start() - 70);
-            int end = Math.min(body.length(), names.end() + 250);
-            String excerpt = body.substring(start, end);
-            int score = identityEvidence(excerpt, subject);
+        int bestScore = 0;
+        for (String sentence : body.split("(?<=[.!?])\\s+|[\\r\\n]+")) {
+            String clean = sentence.replaceFirst("^\\s*-\\s*(?:\\[[^\\]]+\\]\\s*)?", "").trim();
+            int score = identityEvidence(clean, subject);
             if (score > bestScore) {
                 bestScore = score;
-                best = excerpt;
+                best = clean;
             }
         }
         return best;
+    }
+
+    private static boolean relevantMemoryBody(String body, Set<String> words) {
+        if (words.isEmpty()) return false;
+        int matched = 0;
+        for (String word : words) {
+            if (java.util.regex.Pattern.compile("(?iu)(?<!\\p{L})"
+                    + java.util.regex.Pattern.quote(word) + "(?!\\p{L})")
+                    .matcher(body).find()) matched++;
+        }
+        return matched >= Math.max(1, (words.size() * 2 + 2) / 3);
     }
 
     private static int identityEvidence(String text, String subject) {
@@ -1449,6 +1456,7 @@ public final class DanLocalChatActivity extends Activity {
                 if (body == null || body.trim().isEmpty()) continue;
                 if (isQuestionOnlyMemory(body, question)) continue;
                 body = body.replace('\n', ' ').replace('\r', ' ').trim();
+                if (subject.isEmpty() && !relevantMemoryBody(body, words)) continue;
                 String lower = body.toLowerCase(Locale.ROOT);
                 int score = 0;
                 for (String word : words) {
@@ -1551,6 +1559,7 @@ public final class DanLocalChatActivity extends Activity {
                         String body = ((String) part).replace('\n', ' ').replace('\r', ' ').trim();
                         if (body.isEmpty()) continue;
                         if (isQuestionOnlyMemory(body, question)) continue;
+                        if (subject.isEmpty() && !relevantMemoryBody(body, words)) continue;
                         String lower = body.toLowerCase(Locale.ROOT);
                         int score = 0;
                         for (String word : words) {
@@ -1647,11 +1656,15 @@ public final class DanLocalChatActivity extends Activity {
         if (isMemoryEnabled() && !standaloneCalculation) {
             String question = snapshot.get(snapshot.size() - 1).content;
             String direct = findRelevantMemoryV199(question);
-            String historical = findHistoricalMemoryV199(question);
+            String historical = identityQuestion && !direct.isEmpty()
+                    ? "" : findHistoricalMemoryV199(question);
             String documents = "";
             try (DanPersonalMemoryStore personal = new DanPersonalMemoryStore(this)) {
                 ensureEssentialProfile(personal);
                 documents = personal.relevant(question);
+                if (!identityQuestion && !memoryTermsV199(question, 6).isEmpty()
+                        && !relevantMemoryBody(documents, memoryTermsV199(question, 6)))
+                    documents = "";
             } catch (Exception e) {
                 android.util.Log.w("DanAutobiography", "Ricerca documenti personali non riuscita", e);
             }
@@ -1692,7 +1705,9 @@ public final class DanLocalChatActivity extends Activity {
                     .append(historical.isEmpty() ? "(nessuno)\n" : historical);
             debug.append("\nDOCUMENTI:\n")
                     .append(documents.isEmpty() ? "(nessuno)\n" : documents);
-            debug.append("\nCONTESTO EFFETTIVAMENTE INVIATO:\n")
+            debug.append(identityQuestion
+                    ? "\nFONTI SELEZIONATE PER RISPOSTA DIRETTA (modello non usato):\n"
+                    : "\nCONTESTO EFFETTIVAMENTE INVIATO:\n")
                     .append(memoryText.isEmpty() ? "(nessuno)" : memoryText);
             lastMemoryDebug = debug.toString();
 
