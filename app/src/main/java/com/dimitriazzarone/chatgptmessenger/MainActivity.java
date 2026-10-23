@@ -1397,31 +1397,7 @@ public class MainActivity extends Activity {
         statusText.setText("⏹ Lettura interrotta");
     }
 
-    private String danAnswerScript() {
-        return "function danLatestAnswer(){function shown(e){if(!e||e.closest('[hidden],[inert],[aria-hidden=true],nav,aside,[role=dialog]'))return false;for(let n=e;n&&n.nodeType===1;n=n.parentElement){const s=getComputedStyle(n);if(s.display==='none'||s.visibility==='hidden')return false;}return e.getClientRects().length>0;}const roots=Array.from(document.querySelectorAll('main,[role=main]')).filter(shown);if(!roots.length)return '';const root=roots[roots.length-1];const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant]')).filter(shown);for(let i=turns.length-1;i>=0;i--){const e=turns[i];const blocks=Array.from(e.querySelectorAll('.markdown,.prose,[data-testid=response-content],[data-testid=message-content]')).filter(shown);const leaves=blocks.filter(x=>!blocks.some(y=>x!==y&&x.contains(y)));const t=(leaves.length?leaves:[e]).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join('\\n').trim();if(t&&t.length<=12000)return t;}return ''; }";
-    }
-
     private void replayLastSpeech() {
-        if (!recordingSoundsEnabled) { statusText.setText("Audio di Dan disattivato"); return; }
-        if (webView == null) return;
-        final String requestedPage = webView.getUrl();
-        String script = "(function(){" + danAnswerScript()
-                + "return JSON.stringify({url:location.href,text:danLatestAnswer()});})()";
-        webView.evaluateJavascript(script, value -> runOnUiThread(() -> {
-            if (webView == null || !sameSpeechPage(requestedPage, webView.getUrl())) return;
-            try {
-                String decoded = new org.json.JSONArray("[" + value + "]").getString(0);
-                JSONObject result = new JSONObject(decoded);
-                if (!sameSpeechPage(result.optString("url"), webView.getUrl())) return;
-                String text = cleanSpeechLabels(result.optString("text"));
-                if (text.isEmpty()) { statusText.setText("Risposta della chat aperta non individuata"); return; }
-                lastSpokenText = text;
-                replaySpeechText(text);
-            } catch (Exception e) { statusText.setText("Impossibile leggere la chat aperta"); }
-        }));
-    }
-
-    private void replayLastSpeechLegacyUnused() {
         if (!recordingSoundsEnabled) {
             statusText.setText("🔕 Audio di Dan disattivato");
             return;
@@ -1443,8 +1419,6 @@ public class MainActivity extends Activity {
                 + " const root=document.querySelector('main')||document.body;"
                 + " if(!root)return '';"
 
-                + danAnswerScript()
-                + " const direct=danLatestAnswer();if(direct)return direct;"
                 + " const buttons=Array.from(root.querySelectorAll('button'));"
 
                 + " for(let i=buttons.length-1;i>=0;i--){"
@@ -5062,15 +5036,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void assistantReady(String text) {
-            // Old unscoped page callbacks must not speak another conversation.
-        }
-
-        @JavascriptInterface
-        public void assistantReadyForPage(String url, String text) {
-            runOnUiThread(() -> {
-                if (webView == null || !sameSpeechPage(url, webView.getUrl())) return;
-                speakAssistantText(text);
-            });
+            speakAssistantText(text);
         }
 
         @JavascriptInterface
@@ -5081,11 +5047,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void danChatChanged(String url) {
             if (url == null) return;
-            runOnUiThread(() -> {
-                memoryPageUrl = url;
-                updateActiveDanChat(url);
-                injectAssistantObserver();
-            });
+            runOnUiThread(() -> updateActiveDanChat(url));
         }
 
         @JavascriptInterface
@@ -5181,10 +5143,6 @@ public class MainActivity extends Activity {
         }));
     }
 
-    private String danComposerScript() {
-        return "function findEditor(){return document.querySelector('#prompt-textarea')||document.querySelector(\"textarea[data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true']\");}";
-    }
-
     private void injectTextAndSend(String text) {
         if (webView == null) return;
 
@@ -5210,7 +5168,12 @@ public class MainActivity extends Activity {
         String script =
                 "(function(){" +
                 " const text=" + encodedText + ";" +
-                danComposerScript() +
+                " function findEditor(){" +
+                "  return document.querySelector('#prompt-textarea') ||" +
+                "         document.querySelector(\"textarea[data-testid='prompt-textarea']\") ||" +
+                "         document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\") ||" +
+                "         document.querySelector(\"div[contenteditable='true']\");" +
+                " }" +
                 " function findSend(){" +
                 "  return document.querySelector(\"button[data-testid='send-button']\") ||" +
                 "         Array.from(document.querySelectorAll('button')).find(b=>{" +
@@ -5266,8 +5229,7 @@ public class MainActivity extends Activity {
         final String prefix = originalSpeech.substring(0, Math.min(35, originalSpeech.length()));
         String checkAndSend =
                 "(function(){" +
-                danComposerScript() +
-                "const e=findEditor();" +
+                "const e=document.querySelector('#prompt-textarea')||document.querySelector(\"textarea[data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true']\");" +
                 "if(!e)return 'NO_EDITOR';" +
                 "const draft=(e.value||e.innerText||e.textContent||'');" +
                 "if(!draft.includes(" +
@@ -5385,16 +5347,6 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(script, null);
     }
 
-    private boolean sameSpeechPage(String first, String second) {
-        if (first == null || second == null) return false;
-        try {
-            Uri a = Uri.parse(first), b = Uri.parse(second);
-            return "https".equals(a.getScheme()) && "https".equals(b.getScheme())
-                    && "chatgpt.com".equals(a.getHost()) && "chatgpt.com".equals(b.getHost())
-                    && a.getPath() != null && a.getPath().equals(b.getPath());
-        } catch (Exception e) { return false; }
-    }
-
     private void updateActiveDanChat(String url) {
         if (TextUtils.isEmpty(url)) return;
 
@@ -5424,9 +5376,6 @@ public class MainActivity extends Activity {
 
         if (!newKey.equals(activeDanChatKey)) {
             activeDanChatKey = newKey;
-            lastSpokenText = "";
-            if (tts != null) tts.stop();
-            ttsSpeaking = false;
 
             lastLuminexContext = "";
             syncLuminexContextToChatGpt();
@@ -5801,11 +5750,6 @@ public class MainActivity extends Activity {
 
     private void injectAssistantObserver() {
         if (webView == null) return;
-        webView.evaluateJavascript("(function(){if(window.__danScopedRead121)return;window.__danScopedRead121=true;function danLatestAnswer(){function shown(e){if(!e||e.closest('[hidden],[inert],[aria-hidden=true],nav,aside,[role=dialog]'))return false;for(let n=e;n&&n.nodeType===1;n=n.parentElement){const s=getComputedStyle(n);if(s.display==='none'||s.visibility==='hidden')return false;}return e.getClientRects().length>0;}const roots=Array.from(document.querySelectorAll('main,[role=main]')).filter(shown);if(!roots.length)return '';const root=roots[roots.length-1];const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant]')).filter(shown);for(let i=turns.length-1;i>=0;i--){const e=turns[i];const blocks=Array.from(e.querySelectorAll('.markdown,.prose,[data-testid=response-content],[data-testid=message-content]')).filter(shown);const leaves=blocks.filter(x=>!blocks.some(y=>x!==y&&x.contains(y)));const t=(leaves.length?leaves:[e]).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join('\\n').trim();if(t&&t.length<=12000)return t;}return ''; }let page=location.href,last=danLatestAnswer(),candidate='',since=0;function check(){if(page!==location.href){page=location.href;last=danLatestAnswer();candidate='';since=0;return;}if(document.querySelector('[data-testid=stop-button],[data-is-streaming=true]')){candidate='';return;}const text=danLatestAnswer();if(!text||text===last)return;if(candidate!==text){candidate=text;since=Date.now();return;}if(Date.now()-since<1600)return;try{if(window.AndroidRadio&&window.AndroidRadio.assistantReadyForPage){window.AndroidRadio.assistantReadyForPage(page,text);last=text;}}catch(e){}}setInterval(check,700);})();", null);
-    }
-
-    private void injectAssistantObserverLegacyUnused() {
-        if (webView == null) return;
 
         String script =
                 "(function(){"
@@ -5816,7 +5760,6 @@ public class MainActivity extends Activity {
                 + " let candidate='';"
                 + " let candidateSince=0;"
                 + " let lastHandled='';"
-                + " let pageKey=location.pathname;"
 
                 + " function txt(e){"
                 + "  if(!e)return '';"
@@ -5924,12 +5867,19 @@ public class MainActivity extends Activity {
                 + "  return txt(best);"
                 + " }"
 
-                + danAnswerScript()
-                + " function latestResponse(){const direct=danLatestAnswer();if(direct)return direct;const root=document.querySelector('main')||document.body;return root?fromActionButtons(root):'';}"
+        + " function latestResponse(){"
+        + "   const root=document.querySelector('main')||document.body;"
+        + "   const turns=Array.from(root.querySelectorAll('[data-message-author-role=\\\"assistant\\\"],[data-testid=\\\"assistant\\\"]'));"
+        + "   for(let i=turns.length-1;i>=0;i--){"
+        + "     const turn=turns[i];"
+        + "     const blocks=Array.from(turn.querySelectorAll('.markdown,.prose,[data-testid=\\\"response-content\\\"],[data-testid=\\\"message-content\\\"]'));"
+        + "     const text=(blocks.length?blocks:[turn]).map(e=>(e.innerText||'').trim()).filter(Boolean).join('\\n').trim();"
+        + "     if(text.length>0 && text.length<12000){ return text; }"
+        + "   }"
+      + "  return fromActionButtons(root);"
+        + " }"
 
                 + "function check(){"
-                + "  if(pageKey!==location.pathname){pageKey=location.pathname;candidate='';lastHandled='';candidateSince=0;return;}"
-                + "  if(document.querySelector('[data-testid=stop-button],[data-is-streaming=true]')){candidate='';return;}"
                 + "  const text=latestResponse();"
                 + "  if(!text||text===lastHandled)return;"
                 + "  if(text!==candidate){"
