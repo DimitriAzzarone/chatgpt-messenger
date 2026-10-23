@@ -1407,6 +1407,7 @@ public class MainActivity extends Activity {
             return;
         }
 
+        final String replayPage = webView.getUrl();
         String script =
                 "(function(){"
                 + " function txt(e){"
@@ -1419,6 +1420,8 @@ public class MainActivity extends Activity {
                 + " const root=document.querySelector('main')||document.body;"
                 + " if(!root)return '';"
 
+                + danPageScript()
+                + " const direct=danAnswer();if(direct)return direct;"
                 + " const buttons=Array.from(root.querySelectorAll('button'));"
 
                 + " for(let i=buttons.length-1;i>=0;i--){"
@@ -1464,6 +1467,7 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(
                 script,
                 value -> runOnUiThread(() -> {
+                    if (webView == null || !sameVoicePage(replayPage, webView.getUrl())) return;
                     String recovered = "";
 
                     try {
@@ -5036,7 +5040,14 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void assistantReady(String text) {
-            speakAssistantText(text);
+            // Unscoped callbacks are retained for binary compatibility only.
+        }
+
+        @JavascriptInterface
+        public void assistantReadyForPage(String url, String text) {
+            runOnUiThread(() -> {
+                if (webView != null && sameVoicePage(url, webView.getUrl())) speakAssistantText(text);
+            });
         }
 
         @JavascriptInterface
@@ -5143,6 +5154,20 @@ public class MainActivity extends Activity {
         }));
     }
 
+    private String danPageScript() {
+        return "function danRoots(){const roots=[],seen=new Set();function visit(root){if(!root||seen.has(root))return;seen.add(root);roots.push(root);for(const e of root.querySelectorAll('*')){if(e.shadowRoot&&danVisible(e))visit(e.shadowRoot);if(e.tagName==='IFRAME'&&danVisible(e)){try{visit(e.contentDocument);}catch(ignore){}}}}visit(document);return roots;}\nfunction danVisible(e){if(!e||e.closest('[hidden],[inert],[aria-hidden=true]'))return false;for(let n=e;n&&n.nodeType===1;n=n.parentElement){const c=n.ownerDocument.defaultView.getComputedStyle(n);if(c.display==='none'||c.visibility==='hidden')return false;}return e.getClientRects().length>0;}\nfunction danEditor(){const strong=[],other=[];for(const root of danRoots())for(const e of root.querySelectorAll('#prompt-textarea,textarea,[contenteditable=true],[role=textbox]')){if(!danVisible(e)||e.disabled||e.readOnly||e.getAttribute('contenteditable')==='false'||e.closest('nav,aside,[role=dialog]'))continue;if(!(e.isContentEditable||e.tagName==='TEXTAREA'||e.tagName==='INPUT'))continue;const hint=((e.id||'')+' '+(e.getAttribute('data-testid')||'')+' '+(e.getAttribute('aria-label')||'')+' '+(e.getAttribute('placeholder')||'')+' '+(e.getAttribute('data-placeholder')||'')).toLowerCase();const list=/prompt|composer|message|messaggio|chiedi|ask|reply|rispondi/.test(hint)?strong:other;if(!list.includes(e))list.push(e);}const a=strong.length?strong:other;return a.length===1?a[0]:null;}\nfunction danSend(e){if(!e)return null;const root=e.getRootNode();const form=e.closest('form');const scope=form||root;const buttons=Array.from(scope.querySelectorAll('button,[role=button]')).filter(danVisible);const exact=buttons.filter(b=>/^(send-button|composer-submit-button)$/.test(b.getAttribute('data-testid')||''));if(exact.length===1)return exact[0];const a=buttons.filter(b=>{const t=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')).trim().toLowerCase();return /send|invia|submit|inviare/.test(t)&&!/voice|vocale|stop|interrompi/.test(t);});return a.length===1?a[0]:null;}\nfunction danAnswer(){const roots=danRoots(),answers=[];for(const root of roots){const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant],[data-testid=assistant-message]')).filter(danVisible);for(const e of turns){const blocks=Array.from(e.querySelectorAll('.markdown,.prose,[data-testid=response-content],[data-testid=message-content]')).filter(danVisible);const leaves=blocks.filter(x=>!blocks.some(y=>x!==y&&x.contains(y)));const text=(leaves.length?leaves:[e]).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join('\\n').trim();if(text)answers.push(text);}}if(answers.length)return answers[answers.length-1].slice(0,12000);for(const root of roots){const buttons=Array.from(root.querySelectorAll('button')).filter(danVisible);for(let i=buttons.length-1;i>=0;i--){const b=buttons[i];const label=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')+' '+(b.getAttribute('title')||'')).toLowerCase();if(!/read aloud|leggi|good-response|bad-response/.test(label))continue;let e=b.parentElement;for(let j=0;e&&j<6;j++,e=e.parentElement){if(e.tagName==='MAIN'||e.tagName==='BODY'||e.getAttribute('role')==='main')break;if(e.querySelector('[data-message-author-role=user]'))break;const blocks=Array.from(e.querySelectorAll('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6')).filter(danVisible);const text=blocks.map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join(' ').trim();if(text.length>=2&&text.length<=12000)return text;}}}return '';}\n";
+    }
+
+    private boolean sameVoicePage(String first, String second) {
+        if (first == null || second == null) return false;
+        try {
+            Uri a = Uri.parse(first), b = Uri.parse(second);
+            return "https".equals(a.getScheme()) && "https".equals(b.getScheme())
+                    && "chatgpt.com".equals(a.getHost()) && "chatgpt.com".equals(b.getHost())
+                    && a.getPath() != null && a.getPath().equals(b.getPath());
+        } catch (Exception e) { return false; }
+    }
+
     private void injectTextAndSend(String text) {
         if (webView == null) return;
 
@@ -5168,41 +5193,29 @@ public class MainActivity extends Activity {
         String script =
                 "(function(){" +
                 " const text=" + encodedText + ";" +
-                " function findEditor(){" +
-                "  return document.querySelector('#prompt-textarea') ||" +
-                "         document.querySelector(\"textarea[data-testid='prompt-textarea']\") ||" +
-                "         document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\") ||" +
-                "         document.querySelector(\"div[contenteditable='true']\");" +
-                " }" +
-                " function findSend(){" +
-                "  return document.querySelector(\"button[data-testid='send-button']\") ||" +
-                "         Array.from(document.querySelectorAll('button')).find(b=>{" +
-                "          const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
-                "          return a.includes('send')||a.includes('invia');" +
-                "         });" +
-                " }" +
-                "const editor=findEditor();" +
+                danPageScript() +
+                "const editor=danEditor();" +
                 "if(!editor)return 'NO_EDITOR';" +
                 "if(editor.disabled || editor.getAttribute('contenteditable')==='false')return 'READ_ONLY';" +
                 "try{" +
                 "editor.focus();" +
                 "if(editor.tagName==='TEXTAREA'||editor.tagName==='INPUT'){" +
-                "const proto=editor.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
+                "const win=editor.ownerDocument.defaultView;const proto=editor.tagName==='TEXTAREA'?win.HTMLTextAreaElement.prototype:win.HTMLInputElement.prototype;" +
                 "const setter=Object.getOwnPropertyDescriptor(proto,'value').set;" +
                 "setter.call(editor,text);" +
                 "}else{" +
-                "const selection=window.getSelection();" +
-                "const range=document.createRange();" +
+                "const doc=editor.ownerDocument;const selection=doc.defaultView.getSelection();" +
+                "const range=doc.createRange();" +
                 "range.selectNodeContents(editor);" +
                 "selection.removeAllRanges();" +
                 "selection.addRange(range);" +
-                "const ok=(typeof document.execCommand==='function')&&document.execCommand('insertText',false,text);" +
+                "const ok=(typeof doc.execCommand==='function')&&doc.execCommand('insertText',false,text);" +
                 "if(!ok || !(editor.innerText||editor.textContent||'').includes(text.slice(0,Math.min(text.length,40)))){" +
                 "editor.textContent=text;" +
                 "}" +
                 "}" +
-                "try{editor.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:text}));}catch(eventError){editor.dispatchEvent(new Event('input',{bubbles:true}));}" +
-                "editor.dispatchEvent(new Event('change',{bubbles:true}));" +
+                "const events=editor.ownerDocument.defaultView;try{editor.dispatchEvent(new events.InputEvent('input',{bubbles:true,composed:true,inputType:'insertText',data:text}));}catch(eventError){editor.dispatchEvent(new events.Event('input',{bubbles:true,composed:true}));}" +
+                "editor.dispatchEvent(new events.Event('change',{bubbles:true,composed:true}));" +
                 "const draft=(editor.value||editor.innerText||editor.textContent||'');" +
                 "return draft.includes(text.slice(0,Math.min(40,text.length)))?'INSERTED':'NO_INSERT';" +
                 "}catch(err){return 'INSERT_ERROR';}" +
@@ -5210,11 +5223,16 @@ public class MainActivity extends Activity {
 
         final long requestId = ++voiceSendGeneration;
         final String originalSpeech = text;
+        final String voicePage = webView.getUrl();
         webView.evaluateJavascript(script, value -> runOnUiThread(() -> {
             if (requestId != voiceSendGeneration) return;
+            if (webView == null || !sameVoicePage(voicePage, webView.getUrl())) {
+                showUnsentVoiceDraft(originalSpeech, "Hai cambiato chat: messaggio non inviato.");
+                return;
+            }
             if ("\"INSERTED\"".equals(value)) {
                 statusText.setText("Testo dettato nella casella: preparo invio…");
-                statusText.postDelayed(() -> trySendVoiceDraft(originalSpeech, requestId, 0), 550L);
+                statusText.postDelayed(() -> trySendVoiceDraft(originalSpeech, requestId, voicePage, 0), 550L);
             } else {
                 statusText.setText("Dettatura non inserita nella chat");
                 showUnsentVoiceDraft(originalSpeech, "DAN non è riuscito a scrivere nella casella.");
@@ -5224,21 +5242,23 @@ public class MainActivity extends Activity {
 
     // A successful JavaScript call is not proof that ChatGPT accepted a message.
     // First verify the text remains in the composer, then click Send only once.
-    private void trySendVoiceDraft(String originalSpeech, long requestId, int attempt) {
+    private void trySendVoiceDraft(String originalSpeech, long requestId, String voicePage, int attempt) {
         if (requestId != voiceSendGeneration || webView == null) return;
+        if (!sameVoicePage(voicePage, webView.getUrl())) {
+            showUnsentVoiceDraft(originalSpeech, "Hai cambiato chat: messaggio non inviato.");
+            return;
+        }
         final String prefix = originalSpeech.substring(0, Math.min(35, originalSpeech.length()));
         String checkAndSend =
                 "(function(){" +
-                "const e=document.querySelector('#prompt-textarea')||document.querySelector(\"textarea[data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true']\");" +
+                danPageScript() +
+                "const e=danEditor();" +
                 "if(!e)return 'NO_EDITOR';" +
                 "const draft=(e.value||e.innerText||e.textContent||'');" +
                 "if(!draft.includes(" +
                 JSONObject.quote(prefix) +
                 "))return 'TEXT_MISSING';" +
-                "const b=document.querySelector(\"button[data-testid='send-button']\")||Array.from(document.querySelectorAll('button')).find(b=>{" +
-                "const a=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')).toLowerCase();" +
-                "return a.includes('send')||a.includes('invia');" +
-                "});" +
+                "const b=danSend(e);" +
                 "if(!b)return 'NO_SEND';" +
                 "if(b.disabled || b.getAttribute('aria-disabled')==='true')return 'DISABLED';" +
                 "try{b.click();return 'CLICKED';}catch(err){return 'CLICK_ERROR';}" +
@@ -5249,7 +5269,7 @@ public class MainActivity extends Activity {
                 statusText.setText("Invio premuto; verifica la risposta nella chat");
             } else if (("\"DISABLED\"".equals(value) || "\"NO_SEND\"".equals(value))
                     && attempt < 5) {
-                statusText.postDelayed(() -> trySendVoiceDraft(originalSpeech, requestId, attempt + 1), 550L);
+                statusText.postDelayed(() -> trySendVoiceDraft(originalSpeech, requestId, voicePage, attempt + 1), 550L);
             } else {
                 statusText.setText("Invio non riuscito: il testo è recuperabile");
                 showUnsentVoiceDraft(originalSpeech, "La casella non ha confermato il pulsante Invia.");
@@ -5376,6 +5396,7 @@ public class MainActivity extends Activity {
 
         if (!newKey.equals(activeDanChatKey)) {
             activeDanChatKey = newKey;
+            lastSpokenText = "";
 
             lastLuminexContext = "";
             syncLuminexContextToChatGpt();
@@ -5760,6 +5781,7 @@ public class MainActivity extends Activity {
                 + " let candidate='';"
                 + " let candidateSince=0;"
                 + " let lastHandled='';"
+                + " let page=location.href;"
 
                 + " function txt(e){"
                 + "  if(!e)return '';"
@@ -5867,19 +5889,12 @@ public class MainActivity extends Activity {
                 + "  return txt(best);"
                 + " }"
 
-        + " function latestResponse(){"
-        + "   const root=document.querySelector('main')||document.body;"
-        + "   const turns=Array.from(root.querySelectorAll('[data-message-author-role=\\\"assistant\\\"],[data-testid=\\\"assistant\\\"]'));"
-        + "   for(let i=turns.length-1;i>=0;i--){"
-        + "     const turn=turns[i];"
-        + "     const blocks=Array.from(turn.querySelectorAll('.markdown,.prose,[data-testid=\\\"response-content\\\"],[data-testid=\\\"message-content\\\"]'));"
-        + "     const text=(blocks.length?blocks:[turn]).map(e=>(e.innerText||'').trim()).filter(Boolean).join('\\n').trim();"
-        + "     if(text.length>0 && text.length<12000){ return text; }"
-        + "   }"
-      + "  return fromActionButtons(root);"
-        + " }"
+                + danPageScript()
+                + " function latestResponse(){return danAnswer();}"
 
                 + "function check(){"
+                + "  if(page!==location.href){page=location.href;candidate='';candidateSince=0;lastHandled=latestResponse();return;}"
+                + "  const roots=danRoots();if(roots.some(r=>r.querySelector('[data-testid=stop-button],[data-is-streaming=true]'))){candidate='';return;}"
                 + "  const text=latestResponse();"
                 + "  if(!text||text===lastHandled)return;"
                 + "  if(text!==candidate){"
@@ -5893,8 +5908,8 @@ public class MainActivity extends Activity {
                 + "  lastHandled=text;"
 
                 + "  try{"
-                + "   if(window.AndroidRadio&&window.AndroidRadio.assistantReady){"
-                + "    window.AndroidRadio.assistantReady(text);"
+                + "   if(window.AndroidRadio&&window.AndroidRadio.assistantReadyForPage){"
+                + "    window.AndroidRadio.assistantReadyForPage(page,text);"
                 + "   }"
                 + "  }catch(e){}"
                 + " }"
