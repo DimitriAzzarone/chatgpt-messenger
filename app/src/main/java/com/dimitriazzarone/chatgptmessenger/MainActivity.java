@@ -5154,7 +5154,7 @@ public class MainActivity extends Activity {
     }
 
     private String danComposerScript() {
-        return "function findEditor(){const root=document.querySelector('main')||document;const all=Array.from(root.querySelectorAll('#prompt-textarea,textarea[data-testid=prompt-textarea],[contenteditable=true][data-testid=prompt-textarea],[contenteditable=true][role=textbox],form [contenteditable=true],form textarea'));return all.find(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.height>0&&!e.disabled&&e.getAttribute('contenteditable')!=='false';})||null;}";
+        return "function findEditor(){return document.querySelector('#prompt-textarea')||document.querySelector(\"textarea[data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true'][data-testid='prompt-textarea']\")||document.querySelector(\"div[contenteditable='true']\");}";
     }
 
     private void injectTextAndSend(String text) {
