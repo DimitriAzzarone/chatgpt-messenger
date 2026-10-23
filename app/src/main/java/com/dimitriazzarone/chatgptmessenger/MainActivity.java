@@ -1398,10 +1398,30 @@ public class MainActivity extends Activity {
     }
 
     private String danAnswerScript() {
-        return "function danLatestAnswer(){const root=document.querySelector('main')||document.body;if(!root)return '';const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant]'));for(let i=turns.length-1;i>=0;i--){const e=turns[i];if(e.closest('nav,aside,[role=dialog]'))continue;const t=(e.innerText||e.textContent||'').trim();if(t&&t.length<=12000)return t;}return ''; }";
+        return "function danLatestAnswer(){function shown(e){if(!e||e.closest('[hidden],[inert],[aria-hidden=true],nav,aside,[role=dialog]'))return false;for(let n=e;n&&n.nodeType===1;n=n.parentElement){const s=getComputedStyle(n);if(s.display==='none'||s.visibility==='hidden')return false;}return e.getClientRects().length>0;}const roots=Array.from(document.querySelectorAll('main,[role=main]')).filter(shown);if(!roots.length)return '';const root=roots[roots.length-1];const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant]')).filter(shown);for(let i=turns.length-1;i>=0;i--){const e=turns[i];const blocks=Array.from(e.querySelectorAll('.markdown,.prose,[data-testid=response-content],[data-testid=message-content]')).filter(shown);const leaves=blocks.filter(x=>!blocks.some(y=>x!==y&&x.contains(y)));const t=(leaves.length?leaves:[e]).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join('\\n').trim();if(t&&t.length<=12000)return t;}return ''; }";
     }
 
     private void replayLastSpeech() {
+        if (!recordingSoundsEnabled) { statusText.setText("Audio di Dan disattivato"); return; }
+        if (webView == null) return;
+        final String requestedPage = webView.getUrl();
+        String script = "(function(){" + danAnswerScript()
+                + "return JSON.stringify({url:location.href,text:danLatestAnswer()});})()";
+        webView.evaluateJavascript(script, value -> runOnUiThread(() -> {
+            if (webView == null || !sameSpeechPage(requestedPage, webView.getUrl())) return;
+            try {
+                String decoded = new org.json.JSONArray("[" + value + "]").getString(0);
+                JSONObject result = new JSONObject(decoded);
+                if (!sameSpeechPage(result.optString("url"), webView.getUrl())) return;
+                String text = cleanSpeechLabels(result.optString("text"));
+                if (text.isEmpty()) { statusText.setText("Risposta della chat aperta non individuata"); return; }
+                lastSpokenText = text;
+                replaySpeechText(text);
+            } catch (Exception e) { statusText.setText("Impossibile leggere la chat aperta"); }
+        }));
+    }
+
+    private void replayLastSpeechLegacyUnused() {
         if (!recordingSoundsEnabled) {
             statusText.setText("🔕 Audio di Dan disattivato");
             return;
@@ -5042,7 +5062,15 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void assistantReady(String text) {
-            speakAssistantText(text);
+            // Old unscoped page callbacks must not speak another conversation.
+        }
+
+        @JavascriptInterface
+        public void assistantReadyForPage(String url, String text) {
+            runOnUiThread(() -> {
+                if (webView == null || !sameSpeechPage(url, webView.getUrl())) return;
+                speakAssistantText(text);
+            });
         }
 
         @JavascriptInterface
@@ -5357,6 +5385,16 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(script, null);
     }
 
+    private boolean sameSpeechPage(String first, String second) {
+        if (first == null || second == null) return false;
+        try {
+            Uri a = Uri.parse(first), b = Uri.parse(second);
+            return "https".equals(a.getScheme()) && "https".equals(b.getScheme())
+                    && "chatgpt.com".equals(a.getHost()) && "chatgpt.com".equals(b.getHost())
+                    && a.getPath() != null && a.getPath().equals(b.getPath());
+        } catch (Exception e) { return false; }
+    }
+
     private void updateActiveDanChat(String url) {
         if (TextUtils.isEmpty(url)) return;
 
@@ -5386,6 +5424,9 @@ public class MainActivity extends Activity {
 
         if (!newKey.equals(activeDanChatKey)) {
             activeDanChatKey = newKey;
+            lastSpokenText = "";
+            if (tts != null) tts.stop();
+            ttsSpeaking = false;
 
             lastLuminexContext = "";
             syncLuminexContextToChatGpt();
@@ -5759,6 +5800,11 @@ public class MainActivity extends Activity {
     }
 
     private void injectAssistantObserver() {
+        if (webView == null) return;
+        webView.evaluateJavascript("(function(){if(window.__danScopedRead121)return;window.__danScopedRead121=true;function danLatestAnswer(){function shown(e){if(!e||e.closest('[hidden],[inert],[aria-hidden=true],nav,aside,[role=dialog]'))return false;for(let n=e;n&&n.nodeType===1;n=n.parentElement){const s=getComputedStyle(n);if(s.display==='none'||s.visibility==='hidden')return false;}return e.getClientRects().length>0;}const roots=Array.from(document.querySelectorAll('main,[role=main]')).filter(shown);if(!roots.length)return '';const root=roots[roots.length-1];const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant]')).filter(shown);for(let i=turns.length-1;i>=0;i--){const e=turns[i];const blocks=Array.from(e.querySelectorAll('.markdown,.prose,[data-testid=response-content],[data-testid=message-content]')).filter(shown);const leaves=blocks.filter(x=>!blocks.some(y=>x!==y&&x.contains(y)));const t=(leaves.length?leaves:[e]).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join('\\n').trim();if(t&&t.length<=12000)return t;}return ''; }let page=location.href,last=danLatestAnswer(),candidate='',since=0;function check(){if(page!==location.href){page=location.href;last=danLatestAnswer();candidate='';since=0;return;}if(document.querySelector('[data-testid=stop-button],[data-is-streaming=true]')){candidate='';return;}const text=danLatestAnswer();if(!text||text===last)return;if(candidate!==text){candidate=text;since=Date.now();return;}if(Date.now()-since<1600)return;try{if(window.AndroidRadio&&window.AndroidRadio.assistantReadyForPage){window.AndroidRadio.assistantReadyForPage(page,text);last=text;}}catch(e){}}setInterval(check,700);})();", null);
+    }
+
+    private void injectAssistantObserverLegacyUnused() {
         if (webView == null) return;
 
         String script =
