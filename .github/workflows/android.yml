@@ -22,6 +22,7 @@ on:
       - dan-v1.114-grounded-profile
       - dan-v1.115-memory-precision
       - dan-v1.116-profile-drive
+      - dan-v1.117-history-professions
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26

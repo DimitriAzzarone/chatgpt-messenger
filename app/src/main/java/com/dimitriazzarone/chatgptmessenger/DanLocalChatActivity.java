@@ -139,6 +139,7 @@ public final class DanLocalChatActivity extends Activity {
     private long lastEngineMillis;
     // DAN 1.100: conserva esattamente la memoria selezionata per l'ultima domanda.
     private String lastMemoryDebug = "Nessuna memoria ancora analizzata.";
+    private String lastHistorySearch = "Storico non interrogato per questa domanda.";
 
     private static final class ChatMessage {
         final String role;
@@ -1413,10 +1414,12 @@ public final class DanLocalChatActivity extends Activity {
         String name = java.util.regex.Pattern.quote(subject);
         String roles = "(?:compagna|compagno|fidanzata|fidanzato|moglie|marito|partner|"
                 + "sorella|fratello|madre|padre|mamma|papà|amica|amico|allieva|allievo|"
-                + "studentessa|studente|docente|collega|coinquilina|coinquilino|ex)";
+                + "studentessa|studente|docente|collega|coinquilina|coinquilino|ex|"
+                + "psicologa|psicologo|psichiatra|medico|medica|dottoressa|dottore|"
+                + "terapeuta|psicoterapeuta|coach|insegnante|collaboratrice|collaboratore)";
         String t = text.toLowerCase(Locale.ROOT);
         String relation = "(?iu)(?<!\\p{L})" + name + "(?!\\p{L})"
-                + "\\s*[,:(-]?\\s*(?:(?:è|era|e'|è stata|è stato|e stata|e stato)\\s+)?"
+                + "\\s+(?:è stata|è stato|e stata|e stato|è|era|e')\\s+"
                 + "(?:(?:la|il|una|un|mia|mio|nostra|nostro)\\s+){0,3}" + roles + "(?!\\p{L})";
         if (java.util.regex.Pattern.compile(relation).matcher(t).find()) return 80;
         String reverse = "(?iu)\\b(?:mia|mio|nostra|nostro)\\s+" + roles
@@ -1526,11 +1529,14 @@ public final class DanLocalChatActivity extends Activity {
         sql.append(subject.isEmpty() ? " ORDER BY updated_at DESC LIMIT 40"
                 : " ORDER BY updated_at DESC");
 
+        int chatsRead = 0, userParts = 0, nameMentions = 0, accepted = 0;
+        String readError = "nessuno";
         ArrayList<JSONObject> ranked = new ArrayList<>();
         try (DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
              Cursor cursor = archive.getReadableDatabase().rawQuery(
                      sql.toString(), args.toArray(new String[0]))) {
             while (cursor.moveToNext()) {
+                chatsRead++;
                 JSONObject chat = new JSONObject(cursor.getString(1));
                 if (chat.optBoolean("is_do_not_remember", false)) continue;
                 JSONObject mapping = chat.optJSONObject("mapping");
@@ -1558,6 +1564,9 @@ public final class DanLocalChatActivity extends Activity {
                         if (!(part instanceof String)) continue;
                         String body = ((String) part).replace('\n', ' ').replace('\r', ' ').trim();
                         if (body.isEmpty()) continue;
+                        userParts++;
+                        if (!subject.isEmpty() && body.toLowerCase(Locale.ROOT).contains(subject))
+                            nameMentions++;
                         if (isQuestionOnlyMemory(body, question)) continue;
                         if (subject.isEmpty() && !relevantMemoryBody(body, words)) continue;
                         String lower = body.toLowerCase(Locale.ROOT);
@@ -1573,6 +1582,7 @@ public final class DanLocalChatActivity extends Activity {
                             body = excerpt;
                             score += evidence;
                         }
+                        if (score > 0) accepted++;
                         if (score > bestScore) {
                             bestScore = score;
                             best = body;
@@ -1590,8 +1600,14 @@ public final class DanLocalChatActivity extends Activity {
                 ranked.add(hit);
             }
         } catch (Exception e) {
+            readError = e.getClass().getSimpleName();
             android.util.Log.w("DanLocalMemory", "Ricerca storico 1.99 non riuscita", e);
         }
+        lastHistorySearch = "Chat candidate lette: " + chatsRead
+                + "\nParti testuali utente lette: " + userParts
+                + "\nCitazioni del nome cercato: " + nameMentions
+                + "\nEstratti ammessi dal filtro: " + accepted
+                + "\nErrore di lettura: " + readError;
 
         Collections.sort(ranked, (a, b) -> {
             int score = Integer.compare(b.optInt("score"), a.optInt("score"));
@@ -1665,6 +1681,7 @@ public final class DanLocalChatActivity extends Activity {
         long memoryStarted = SystemClock.elapsedRealtime();
         lastMemoryMillis = 0;
         lastEngineMillis = 0;
+        lastHistorySearch = "Storico non interrogato per questa domanda.";
         JSONArray messages = new JSONArray();
         JSONObject sys = new JSONObject();
         sys.put("role", "system");
@@ -1729,6 +1746,7 @@ public final class DanLocalChatActivity extends Activity {
                     .append(historical.isEmpty() ? "(nessuno)\n" : historical);
             debug.append("\nDOCUMENTI:\n")
                     .append(documents.isEmpty() ? "(nessuno)\n" : documents);
+            debug.append("\nDIAGNOSTICA STORICO:\n").append(lastHistorySearch).append('\n');
             debug.append(identityQuestion
                     ? "\nFONTI SELEZIONATE PER RISPOSTA DIRETTA (modello non usato):\n"
                     : "\nCONTESTO EFFETTIVAMENTE INVIATO:\n")
