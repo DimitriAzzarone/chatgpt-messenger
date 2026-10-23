@@ -603,7 +603,7 @@ public class MainActivity extends Activity {
                     touchStartY = event.getRawY();
                     manualStopPending = false;
                     lastPartialText = "";
-                    if (speechRecognizer != null && recognizerSessionActive) {
+                    if (speechRecognizer != null) {
                         // Abandon the previous recognizer completely: a late
                         // ERROR_CLIENT from that session must not clear this one.
                         try { speechRecognizer.cancel(); } catch (Exception ignored) {}
@@ -2218,6 +2218,7 @@ public class MainActivity extends Activity {
 
             if (speechRecognizer != null && recognizerSessionActive && manualCapture) {
                 statusText.setText("🎧 Trascrivo e invio…");
+                armDictationResultTimeout();
                 try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
             } else {
                 manualCapture = false;
@@ -2267,6 +2268,37 @@ public class MainActivity extends Activity {
             statusText.setText("🎧 Registrazione cuffia — premi di nuovo per inviare");
             startPressToTalk();
         }, 350L);
+    }
+
+    private void recoverStalledDictation(SpeechRecognizer owner, String reason) {
+        if (speechRecognizer != owner || !manualCapture || !recognizerSessionActive) return;
+        String partial = lastPartialText == null ? "" : lastPartialText.trim();
+        speechRecognizer = null;
+        recognizerSessionActive = false;
+        listening = false;
+        manualCapture = false;
+        manualStopPending = false;
+        headsetRecording = false;
+        recordingLocked = false;
+        pressToTalkRequested = false;
+        lastPartialText = "";
+        try { owner.cancel(); } catch (Exception ignored) {}
+        try { owner.destroy(); } catch (Exception ignored) {}
+        micButton.setText("🎙");
+        applyMicStyle(false);
+        createSpeechRecognizer();
+        statusText.setText(reason + (partial.isEmpty()
+                ? " · microfono ripristinato, riprova"
+                : " · testo parziale recuperato"));
+        if (!partial.isEmpty()) showUnsentVoiceDraft(partial,
+                reason + " Il testo è parziale: controllalo prima di inviarlo.");
+        scheduleHandsFreeRestart(700L);
+    }
+
+    private void armDictationResultTimeout() {
+        final SpeechRecognizer owner = speechRecognizer;
+        if (owner != null && manualCapture) statusText.postDelayed(() ->
+                recoverStalledDictation(owner, "Il riconoscitore non ha restituito il testo"), 12000L);
     }
 
     private void createSpeechRecognizer() {
@@ -2347,17 +2379,22 @@ public class MainActivity extends Activity {
             public void onEndOfSpeech() {
                 if (speechRecognizer != owner) return;
                 statusText.setText(manualCapture ? "Trascrivo…" : "Elaboro…");
+                if (manualCapture) statusText.postDelayed(() ->
+                        recoverStalledDictation(owner, "Il riconoscitore non ha concluso la trascrizione"), 12000L);
             }
 
             @Override
             public void onError(int error) {
                 if (speechRecognizer != owner) return;
+                boolean wasManual = manualCapture;
+                String recoveredPartial = lastPartialText == null ? "" : lastPartialText.trim();
+                lastPartialText = "";
                 listening = false;
                 recognizerSessionActive = false;
                 manualStopPending = false;
                 applyMicStyle(false);
 
-                if (manualCapture) {
+                if (wasManual) {
                     manualCapture = false;
                     headsetRecording = false;
                     recordingLocked = false;
@@ -2374,6 +2411,13 @@ public class MainActivity extends Activity {
                     } else {
                         statusText.setText("Errore riconoscimento vocale: " + error);
                     }
+                    speechRecognizer = null;
+                    try { owner.cancel(); } catch (Exception ignored) {}
+                    try { owner.destroy(); } catch (Exception ignored) {}
+                    createSpeechRecognizer();
+                    if (!recoveredPartial.isEmpty()) showUnsentVoiceDraft(recoveredPartial,
+                            "Riconoscimento interrotto (codice " + error
+                            + "). Testo parziale recuperato: controllalo prima di inviare.");
                     scheduleHandsFreeRestart(500L);
                     return;
                 }
@@ -2603,6 +2647,11 @@ public class MainActivity extends Activity {
                 request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS);
                 request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS);
             }
+            final SpeechRecognizer startedRecognizer = speechRecognizer;
+            if (manualCapture) statusText.postDelayed(() -> {
+                if (speechRecognizer == startedRecognizer && !listening)
+                    recoverStalledDictation(startedRecognizer, "Il servizio vocale non ha avviato l'ascolto");
+            }, 8000L);
             speechRecognizer.startListening(request);
         } catch (Exception e) {
             recognizerSessionActive = false;
@@ -2617,6 +2666,7 @@ public class MainActivity extends Activity {
 
     private void finishLockedRecording() {
         if (!recordingLocked) return;
+        armDictationResultTimeout();
 
         playRecordingEndSound();
         recordingLocked = false;
@@ -2631,6 +2681,7 @@ public class MainActivity extends Activity {
     }
 
     private void stopPressToTalk() {
+        armDictationResultTimeout();
         if (manualCapture) {
             playRecordingEndSound();
         }

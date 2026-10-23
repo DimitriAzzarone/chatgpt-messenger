@@ -23,6 +23,7 @@ on:
       - dan-v1.115-memory-precision
       - dan-v1.116-profile-drive
       - dan-v1.117-history-professions
+      - dan-v1.118-online-dictation
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
