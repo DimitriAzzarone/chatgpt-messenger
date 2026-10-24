@@ -1748,7 +1748,7 @@ public final class DanLocalChatActivity extends Activity {
                     .append(documents.isEmpty() ? "(nessuno)\n" : documents);
             debug.append("\nDIAGNOSTICA STORICO:\n").append(lastHistorySearch).append('\n');
             debug.append(identityQuestion
-                    ? "\nFONTI SELEZIONATE PER RISPOSTA DIRETTA (modello non usato):\n"
+                    ? "\nFONTI SELEZIONATE PER LA RISPOSTA DEL MODELLO:\n"
                     : "\nCONTESTO EFFETTIVAMENTE INVIATO:\n")
                     .append(memoryText.isEmpty() ? "(nessuno)" : memoryText);
             lastMemoryDebug = debug.toString();
@@ -1782,7 +1782,11 @@ public final class DanLocalChatActivity extends Activity {
                 return "La memoria personale è disattivata. Attivala per cercare questa persona.";
             if (identitySource.isEmpty())
                 return "Non ho trovato nei ricordi disponibili una descrizione affidabile di questa persona.";
-            return "Nei ricordi disponibili ho trovato questo estratto:\n«" + identitySource + "»";
+            sys.put("content", sys.getString("content")
+                    + "\nRispondi in modo naturale alla domanda usando soltanto i fatti "
+                    + "dell'estratto verificato qui sotto. Non aggiungere rapporti, eventi "
+                    + "o dettagli non presenti. Non presentare il testo come un rapporto tecnico."
+                    + "\nESTRATTO VERIFICATO:\n" + identitySource);
         }
         int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 5 : MAX_CONTEXT_MESSAGES));
         int previousBudget = 1600;
