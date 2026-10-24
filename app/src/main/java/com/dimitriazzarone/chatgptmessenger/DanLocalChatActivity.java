@@ -585,7 +585,7 @@ public final class DanLocalChatActivity extends Activity {
         redrawMessages();
         waiting = true;
         send.setEnabled(false);
-        setStatus("Dan sta interrogando il motore locale…", true);
+        setStatus("Dan sta preparando la risposta e cercando nella memoria…", true);
         List<ChatMessage> snapshot = new ArrayList<>(history);
         String knownAnswer = knownIdentityReply(question);
         long startedAt = SystemClock.elapsedRealtime();
@@ -1515,21 +1515,24 @@ public final class DanLocalChatActivity extends Activity {
     /** DAN 1.99: cerca nello storico con più termini e ordina i risultati per pertinenza globale. */
     private static String readHistoryJsonV125(
             android.database.sqlite.SQLiteDatabase db, long rowId) throws Exception {
-        StringBuilder text = new StringBuilder();
-        final int chunkSize = 32768;
+        java.io.ByteArrayOutputStream text = new java.io.ByteArrayOutputStream();
+        final int chunkSize = 262144;
         for (long offset = 1; ; offset += chunkSize) {
+            if (Thread.currentThread().isInterrupted())
+                throw new java.io.InterruptedIOException("Ricerca interrotta");
             try (Cursor part = db.rawQuery(
-                    "SELECT substr(raw_json, ?, ?) FROM conversations WHERE rowid = ?",
+                    "SELECT substr(CAST(raw_json AS BLOB), ?, ?) FROM conversations WHERE rowid = ?",
                     new String[]{Long.toString(offset), Integer.toString(chunkSize),
                             Long.toString(rowId)})) {
                 if (!part.moveToFirst() || part.isNull(0))
                     throw new java.io.IOException("Chat storica non leggibile: " + rowId);
-                String chunk = part.getString(0);
-                if (chunk.isEmpty()) break;
-                text.append(chunk);
+                byte[] chunk = part.getBlob(0);
+                if (chunk.length == 0) break;
+                text.write(chunk, 0, chunk.length);
+                if (chunk.length < chunkSize) break;
             }
         }
-        return text.toString();
+        return new String(text.toByteArray(), StandardCharsets.UTF_8);
     }
 
     private String findHistoricalMemoryV199(String question) {
@@ -1556,6 +1559,8 @@ public final class DanLocalChatActivity extends Activity {
                      sql.toString(), args.toArray(new String[0]))) {
             while (cursor.moveToNext()) {
                 chatsRead++;
+            final int scannedChats = chatsRead;
+            runOnUiThread(() -> setStatus("● Ricerca nella memoria: chat " + scannedChats + "…", true));
                 JSONObject chat = new JSONObject(readHistoryJsonV125(
                         archive.getReadableDatabase(), cursor.getLong(1)));
                 if (chat.optBoolean("is_do_not_remember", false)) continue;
