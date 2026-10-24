@@ -1513,13 +1513,32 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     /** DAN 1.99: cerca nello storico con più termini e ordina i risultati per pertinenza globale. */
+    private static String readHistoryJsonV125(
+            android.database.sqlite.SQLiteDatabase db, long rowId) throws Exception {
+        StringBuilder text = new StringBuilder();
+        final int chunkSize = 32768;
+        for (long offset = 1; ; offset += chunkSize) {
+            try (Cursor part = db.rawQuery(
+                    "SELECT substr(raw_json, ?, ?) FROM conversations WHERE rowid = ?",
+                    new String[]{Long.toString(offset), Integer.toString(chunkSize),
+                            Long.toString(rowId)})) {
+                if (!part.moveToFirst() || part.isNull(0))
+                    throw new java.io.IOException("Chat storica non leggibile: " + rowId);
+                String chunk = part.getString(0);
+                if (chunk.isEmpty()) break;
+                text.append(chunk);
+            }
+        }
+        return text.toString();
+    }
+
     private String findHistoricalMemoryV199(String question) {
         LinkedHashSet<String> words = memoryTermsV199(question, 6);
         if (words.isEmpty()) return "";
         String subject = identitySubject(question);
 
         StringBuilder sql = new StringBuilder(
-                "SELECT title, raw_json, updated_at FROM conversations WHERE ");
+                "SELECT substr(title, 1, 200), rowid, updated_at FROM conversations WHERE ");
         ArrayList<String> args = new ArrayList<>();
         for (String word : words) {
             if (!args.isEmpty()) sql.append(" OR ");
@@ -1537,7 +1556,8 @@ public final class DanLocalChatActivity extends Activity {
                      sql.toString(), args.toArray(new String[0]))) {
             while (cursor.moveToNext()) {
                 chatsRead++;
-                JSONObject chat = new JSONObject(cursor.getString(1));
+                JSONObject chat = new JSONObject(readHistoryJsonV125(
+                        archive.getReadableDatabase(), cursor.getLong(1)));
                 if (chat.optBoolean("is_do_not_remember", false)) continue;
                 JSONObject mapping = chat.optJSONObject("mapping");
                 if (mapping == null) continue;
