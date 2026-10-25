@@ -1389,6 +1389,7 @@ public final class DanLocalChatActivity extends Activity {
         int bestScore = 0;
         for (String sentence : body.split("(?<=[.!?])\\s+|[\\r\\n]+")) {
             String clean = sentence.replaceFirst("^\\s*-\\s*(?:\\[[^\\]]+\\]\\s*)?", "").trim();
+            if (!clean.toLowerCase(Locale.ROOT).contains(subject)) continue;
             int score = identityEvidence(clean, subject);
             if (score > bestScore) {
                 bestScore = score;
@@ -1535,37 +1536,104 @@ public final class DanLocalChatActivity extends Activity {
         return new String(text.toByteArray(), StandardCharsets.UTF_8);
     }
 
+    /** Disposable search copy; original archive remains unchanged. */
+    private void ensureHistoryIndexV127(android.database.sqlite.SQLiteDatabase db) throws Exception {
+        db.execSQL("CREATE TABLE IF NOT EXISTS dan_search_parts_v127 (chat_id TEXT NOT NULL, body TEXT NOT NULL, folded TEXT NOT NULL)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS dan_search_chat_v127 ON dan_search_parts_v127(chat_id)");
+        db.execSQL("CREATE TABLE IF NOT EXISTS dan_search_done_v127 (chat_id TEXT PRIMARY KEY)");
+        for (String operation : new String[]{"INSERT", "UPDATE", "DELETE"}) {
+            String ref = "INSERT".equals(operation) ? "NEW" : "OLD";
+            db.execSQL("CREATE TRIGGER IF NOT EXISTS dan_search_invalidate_v127_" + operation
+                    + " AFTER " + operation + " ON conversations BEGIN DELETE FROM dan_search_done_v127 WHERE chat_id="
+                    + ref + ".id; DELETE FROM dan_search_parts_v127 WHERE chat_id=" + ref + ".id; END");
+        }
+        int prepared = 0;
+        while (true) {
+            if (Thread.currentThread().isInterrupted())
+                throw new java.io.InterruptedIOException("Indicizzazione interrotta");
+            db.beginTransaction();
+            try {
+                long rowId;
+                String chatId;
+                try (Cursor next = db.rawQuery("SELECT rowid,id FROM conversations WHERE id NOT IN (SELECT chat_id FROM dan_search_done_v127) LIMIT 1", null)) {
+                    if (!next.moveToFirst()) { db.setTransactionSuccessful(); break; }
+                    rowId = next.getLong(0);
+                    chatId = next.getString(1);
+                }
+                final int progress = ++prepared;
+                runOnUiThread(() -> setStatus("● Preparazione indice memoria: chat " + progress + " (solo chat nuove o modificate)…", true));
+                JSONObject chat = new JSONObject(readHistoryJsonV125(db, rowId));
+                db.delete("dan_search_parts_v127", "chat_id=?", new String[]{chatId});
+                JSONObject mapping = chat.optJSONObject("mapping");
+                if (!chat.optBoolean("is_do_not_remember", false) && mapping != null) {
+                    java.util.Iterator<String> ids = mapping.keys();
+                    while (ids.hasNext()) {
+                        JSONObject node = mapping.optJSONObject(ids.next());
+                        JSONObject msg = node == null ? null : node.optJSONObject("message");
+                        JSONObject author = msg == null ? null : msg.optJSONObject("author");
+                        if (author == null || !"user".equals(author.optString("role"))) continue;
+                        JSONObject content = msg.optJSONObject("content");
+                        JSONArray parts = content == null ? null : content.optJSONArray("parts");
+                        if (parts == null) continue;
+                        for (int i = 0; i < parts.length(); i++) {
+                            Object value = parts.opt(i);
+                            if (!(value instanceof String)) continue;
+                            String body = (String) value;
+                            for (int offset = 0; offset < body.length(); offset += 7488) {
+                                if (Thread.currentThread().isInterrupted())
+                                    throw new java.io.InterruptedIOException("Indicizzazione interrotta");
+                                int end = Math.min(body.length(), offset + 8000);
+                                // Overlap retains relationships crossing a block boundary.
+                                String block = body.substring(offset, end);
+                                android.content.ContentValues values = new android.content.ContentValues();
+                                values.put("chat_id", chatId);
+                                values.put("body", block);
+                                values.put("folded", block.toLowerCase(Locale.ROOT));
+                                if (db.insertOrThrow("dan_search_parts_v127", null, values) < 0)
+                                    throw new java.io.IOException("Indice non salvato");
+                                if (end == body.length()) break;
+                            }
+                        }
+                    }
+                }
+                android.content.ContentValues done = new android.content.ContentValues();
+                done.put("chat_id", chatId);
+                db.insertOrThrow("dan_search_done_v127", null, done);
+                db.setTransactionSuccessful();
+            } finally { db.endTransaction(); }
+        }
+    }
+
     private String findHistoricalMemoryV199(String question) {
         LinkedHashSet<String> words = memoryTermsV199(question, 6);
         if (words.isEmpty()) return "";
         String subject = identitySubject(question);
 
         StringBuilder sql = new StringBuilder(
-                "SELECT substr(title, 1, 200), rowid, updated_at FROM conversations WHERE ");
+                "SELECT substr(c.title, 1, 200), p.body, c.updated_at FROM dan_search_parts_v127 p JOIN conversations c ON c.id=p.chat_id WHERE ");
         ArrayList<String> args = new ArrayList<>();
         for (String word : words) {
             if (!args.isEmpty()) sql.append(" OR ");
-            sql.append("lower(raw_json) LIKE ?");
+            sql.append("p.folded LIKE ?");
             args.add("%" + word + "%");
         }
-        sql.append(subject.isEmpty() ? " ORDER BY updated_at DESC LIMIT 40"
-                : " ORDER BY updated_at DESC");
+        sql.append(" ORDER BY c.updated_at DESC");
 
         int chatsRead = 0, userParts = 0, nameMentions = 0, accepted = 0;
         String readError = "nessuno";
         ArrayList<JSONObject> ranked = new ArrayList<>();
-        try (DanHistoryStore archive = new DanHistoryStore(getApplicationContext());
-             Cursor cursor = archive.getReadableDatabase().rawQuery(
-                     sql.toString(), args.toArray(new String[0]))) {
+        try (DanHistoryStore archive = new DanHistoryStore(getApplicationContext())) {
+            android.database.sqlite.SQLiteDatabase searchDb = archive.getWritableDatabase();
+            ensureHistoryIndexV127(searchDb);
+            try (Cursor cursor = searchDb.rawQuery(sql.toString(), args.toArray(new String[0]))) {
             while (cursor.moveToNext()) {
                 chatsRead++;
             final int scannedChats = chatsRead;
             runOnUiThread(() -> setStatus("● Ricerca nella memoria: chat " + scannedChats + "…", true));
-                JSONObject chat = new JSONObject(readHistoryJsonV125(
-                        archive.getReadableDatabase(), cursor.getLong(1)));
-                if (chat.optBoolean("is_do_not_remember", false)) continue;
-                JSONObject mapping = chat.optJSONObject("mapping");
-                if (mapping == null) continue;
+                JSONObject message = new JSONObject();
+                message.put("author", new JSONObject().put("role", "user"));
+                message.put("content", new JSONObject().put("parts", new JSONArray().put(cursor.getString(1))));
+                JSONObject mapping = new JSONObject().put("indexed", new JSONObject().put("message", message));
 
                 String title = cursor.getString(0);
                 if (title == null) title = "Senza titolo";
@@ -1592,6 +1660,7 @@ public final class DanLocalChatActivity extends Activity {
                         userParts++;
                         if (!subject.isEmpty() && body.toLowerCase(Locale.ROOT).contains(subject))
                             nameMentions++;
+                        if (!subject.isEmpty() && !body.toLowerCase(Locale.ROOT).contains(subject)) continue;
                         if (isQuestionOnlyMemory(body, question)) continue;
                         if (subject.isEmpty() && !relevantMemoryBody(body, words)) continue;
                         String lower = body.toLowerCase(Locale.ROOT);
@@ -1624,11 +1693,12 @@ public final class DanLocalChatActivity extends Activity {
                 hit.put("time", cursor.getLong(2));
                 ranked.add(hit);
             }
+            }
         } catch (Exception e) {
-            readError = e.getClass().getSimpleName();
-            android.util.Log.w("DanLocalMemory", "Ricerca storico 1.99 non riuscita", e);
+            lastHistorySearch = "Ricerca indice non completata: " + e.getClass().getSimpleName();
+            throw new IllegalStateException("Ricerca memoria non completata; nessun dato originale cancellato. " + e.getClass().getSimpleName(), e);
         }
-        lastHistorySearch = "Chat candidate lette: " + chatsRead
+        lastHistorySearch = "Blocchi indicizzati pertinenti letti: " + chatsRead
                 + "\nParti testuali utente lette: " + userParts
                 + "\nCitazioni del nome cercato: " + nameMentions
                 + "\nEstratti ammessi dal filtro: " + accepted
