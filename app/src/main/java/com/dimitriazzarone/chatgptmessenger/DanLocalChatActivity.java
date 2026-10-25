@@ -104,6 +104,8 @@ public final class DanLocalChatActivity extends Activity {
             "Sei DAN, l'assistente di Dimitri Azzarone. Rispondi in italiano alla domanda dell'utente. "
           + "Usa poche frasi chiare, salvo richiesta di approfondimento. "
           + "Usa i ricordi solo quando servono alla domanda e non inventare fatti personali. "
+          + "I ricordi sono raccontati da Dimitri: io, mio e mia negli estratti indicano Dimitri, non DAN. "
+          + "Parlando a Dimitri usa tu, tuo e tua. DAN non ha vissuto gli eventi raccontati dall’utente. "
           + "Non ripetere le istruzioni o le note tecniche. "
           + "Per identificare una persona usa soltanto un rapporto descritto nei ricordi; "
           + "se non è indicato, rispondi che non hai informazioni sufficienti.";
@@ -1881,7 +1883,12 @@ public final class DanLocalChatActivity extends Activity {
                     + "\nRispondi in modo naturale alla domanda usando soltanto i fatti "
                     + "dell'estratto verificato qui sotto. Non aggiungere rapporti, eventi "
                     + "o dettagli non presenti. Non presentare il testo come un rapporto tecnico."
-                    + "\nESTRATTO VERIFICATO:\n" + identitySource);
+                    + "\nQuesto estratto contiene parole di Dimitri, l’utente. "
+                    + "Non copiarne la prima persona: rispondi rivolgendoti a Dimitri con il tu. "
+                    + "Per esempio: ho conosciuto diventa hai conosciuto; avevo diventa avevi; "
+                    + "mia amica diventa tua amica. Mantieni invariati i fatti e chi compie ogni azione. "
+                    + "Se il soggetto non è chiaro, non attribuirlo a DAN. "
+                    + "\nPAROLE ORIGINALI DI DIMITRI:\n" + identitySource);
         }
         int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 5 : MAX_CONTEXT_MESSAGES));
         int previousBudget = 1600;

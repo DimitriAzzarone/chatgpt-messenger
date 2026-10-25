@@ -33,6 +33,7 @@ on:
       - dan-v1.125-history-chunk-read
       - dan-v1.126-history-byte-read
       - dan-v1.127-history-message-index
+      - dan-v1.128-memory-speaker
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
