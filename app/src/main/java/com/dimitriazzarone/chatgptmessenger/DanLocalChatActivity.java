@@ -1421,12 +1421,14 @@ public final class DanLocalChatActivity extends Activity {
         String name = java.util.regex.Pattern.quote(subject);
         String roles = "(?:compagna|compagno|fidanzata|fidanzato|moglie|marito|partner|"
                 + "sorella|fratello|madre|padre|mamma|papà|amica|amico|allieva|allievo|"
-                + "studentessa|studente|docente|collega|coinquilina|coinquilino|ex|"
+                + "studentessa|studente|docente|collega|coinquilina|coinquilino|"
+                + "informatica|informatico|"
                 + "psicologa|psicologo|psichiatra|medico|medica|dottoressa|dottore|"
                 + "terapeuta|psicoterapeuta|coach|insegnante|collaboratrice|collaboratore)";
+        roles = "(?:ex\\s+)?" + roles;
         String relation = "(?iu)(?<!\\p{L})" + name + "(?!\\p{L})"
                 + "\\s+(?:è stata|è stato|e stata|e stato|è|era|e')\\s+"
-                + "(?:(?:la|il|una|un|mia|mio|nostra|nostro)\\s+){0,3}" + roles + "(?!\\p{L})";
+                + "((?:(?:la|il|una|un|mia|mio|nostra|nostro)\\s+){0,3}" + roles + ")(?!\\p{L})";
         // Punctuation between a role and a name is not enough to identify a person.
         String reverse = "(?iu)\\b(?:mia|mio|nostra|nostro)\\s+" + roles
                 + "\\s+(?:(?:si chiama|si chiamava|è|era)\\s+)?"
@@ -1440,6 +1442,18 @@ public final class DanLocalChatActivity extends Activity {
         if (IDENTITY_PATTERNS_V131.size() >= 64) IDENTITY_PATTERNS_V131.clear();
         IDENTITY_PATTERNS_V131.put(subject, cached);
         return cached;
+    }
+
+    private static String sourceIdentityReplyV132(String source, String person) {
+        java.util.regex.Matcher fact = identityPatternsV131(person)[0].matcher(source);
+        if (fact.find()) {
+            String prefix = source.substring(0, fact.start()).toLowerCase(Locale.ROOT);
+            // Keep uncertain or quoted contexts as quotes, not factual summaries.
+            if (prefix.trim().isEmpty())
+                return "Mi hai descritto " + source.substring(fact.start(),
+                        fact.start() + person.length()) + " come «" + fact.group(1) + "».";
+        }
+        return "Mi hai raccontato: «" + source + "»";
     }
 
     private static int identityEvidence(String text, String subject) {
@@ -1896,6 +1910,13 @@ public final class DanLocalChatActivity extends Activity {
                 return "La memoria personale è disattivata. Attivala per cercare questa persona.";
             if (identitySource.isEmpty())
                 return "Non ho trovato nei ricordi disponibili una descrizione affidabile di questa persona.";
+            if (!person.isEmpty() && !profileQuestion) {
+                String answer = sourceIdentityReplyV132(identitySource, person);
+                lastMemoryDebug += "\n\nRISPOSTA DA FONTE, SENZA GENERAZIONE DEL MODELLO:\n" + answer;
+                getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                        .putString("last_memory_report", lastMemoryDebug).apply();
+                return answer;
+            }
             sys.put("content", "Sei DAN e rispondi a Dimitri in italiano. "
                     + "Il messaggio precedente contiene un ricordo scritto da Dimitri. "
                     + "Descrivi i fatti rivolgendoti a lui con il tu, senza aggiungere dettagli. "

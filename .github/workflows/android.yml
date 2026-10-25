@@ -36,6 +36,7 @@ on:
       - dan-v1.128-memory-speaker
       - dan-v1.129-memory-attribution
       - dan-v1.131-identity-evidence
+      - dan-v1.132-sourced-identity
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
