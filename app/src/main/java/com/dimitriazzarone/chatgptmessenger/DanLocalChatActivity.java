@@ -1412,26 +1412,43 @@ public final class DanLocalChatActivity extends Activity {
         return matched >= Math.max(1, (words.size() * 2 + 2) / 3);
     }
 
-    private static int identityEvidence(String text, String subject) {
-        if (subject.isEmpty()) return 0;
+    private static final java.util.Map<String, java.util.regex.Pattern[]> IDENTITY_PATTERNS_V131 =
+            new java.util.LinkedHashMap<>();
+
+    private static synchronized java.util.regex.Pattern[] identityPatternsV131(String subject) {
+        java.util.regex.Pattern[] cached = IDENTITY_PATTERNS_V131.get(subject);
+        if (cached != null) return cached;
         String name = java.util.regex.Pattern.quote(subject);
         String roles = "(?:compagna|compagno|fidanzata|fidanzato|moglie|marito|partner|"
                 + "sorella|fratello|madre|padre|mamma|papà|amica|amico|allieva|allievo|"
                 + "studentessa|studente|docente|collega|coinquilina|coinquilino|ex|"
                 + "psicologa|psicologo|psichiatra|medico|medica|dottoressa|dottore|"
                 + "terapeuta|psicoterapeuta|coach|insegnante|collaboratrice|collaboratore)";
-        String t = text.toLowerCase(Locale.ROOT);
         String relation = "(?iu)(?<!\\p{L})" + name + "(?!\\p{L})"
                 + "\\s+(?:è stata|è stato|e stata|e stato|è|era|e')\\s+"
                 + "(?:(?:la|il|una|un|mia|mio|nostra|nostro)\\s+){0,3}" + roles + "(?!\\p{L})";
-        if (java.util.regex.Pattern.compile(relation).matcher(t).find()) return 80;
+        // Punctuation between a role and a name is not enough to identify a person.
         String reverse = "(?iu)\\b(?:mia|mio|nostra|nostro)\\s+" + roles
-                + "\\s*[,:(-]?\\s*(?:(?:si chiama|si chiamava|è|era)\\s+)?"
+                + "\\s+(?:(?:si chiama|si chiamava|è|era)\\s+)?"
                 + name + "(?!\\p{L})";
-        if (java.util.regex.Pattern.compile(reverse).matcher(t).find()) return 80;
         String together = "(?iu)\\b(?:relazione|rapporto|convivenza)\\s+con\\s+"
                 + name + "(?!\\p{L})";
-        if (java.util.regex.Pattern.compile(together).matcher(t).find()) return 40;
+        cached = new java.util.regex.Pattern[]{
+                java.util.regex.Pattern.compile(relation),
+                java.util.regex.Pattern.compile(reverse),
+                java.util.regex.Pattern.compile(together)};
+        if (IDENTITY_PATTERNS_V131.size() >= 64) IDENTITY_PATTERNS_V131.clear();
+        IDENTITY_PATTERNS_V131.put(subject, cached);
+        return cached;
+    }
+
+    private static int identityEvidence(String text, String subject) {
+        if (subject.isEmpty()) return 0;
+        String t = text.toLowerCase(Locale.ROOT);
+        if (!t.contains(subject.toLowerCase(Locale.ROOT))) return 0;
+        java.util.regex.Pattern[] patterns = identityPatternsV131(subject);
+        if (patterns[0].matcher(t).find() || patterns[1].matcher(t).find()) return 80;
+        if (patterns[2].matcher(t).find()) return 40;
         return 0;
     }
 

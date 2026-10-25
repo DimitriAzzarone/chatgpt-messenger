@@ -35,6 +35,7 @@ on:
       - dan-v1.127-history-message-index
       - dan-v1.128-memory-speaker
       - dan-v1.129-memory-attribution
+      - dan-v1.131-identity-evidence
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
