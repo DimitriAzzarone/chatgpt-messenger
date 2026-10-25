@@ -1379,9 +1379,11 @@ public final class DanLocalChatActivity extends Activity {
     }
 
     private static String identitySubject(String question) {
+        String normalized = question.trim().replaceFirst(
+                "(?iu)^(?:(?:ok|okay|va bene|sì|si|ma|e|allora|quindi|a parte questo|a parte ciò|oltre a questo|invece|dimmi|scusa)[\\s,:;.!]+)*", "");
         java.util.regex.Matcher m = java.util.regex.Pattern.compile(
                 "(?iu)^\\s*(?:(?:ricordi|sai|ti ricordi|mi dici|puoi dirmi)\\s+)?chi\\s+(?:è|e'|era)\\s+([\\p{L}][\\p{L} '’-]{0,70})[?!.]*\\s*$")
-                .matcher(question);
+                .matcher(normalized);
         return m.matches() ? m.group(1).trim().toLowerCase(Locale.ROOT) : "";
     }
 
