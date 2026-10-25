@@ -1879,16 +1879,16 @@ public final class DanLocalChatActivity extends Activity {
                 return "La memoria personale è disattivata. Attivala per cercare questa persona.";
             if (identitySource.isEmpty())
                 return "Non ho trovato nei ricordi disponibili una descrizione affidabile di questa persona.";
-            sys.put("content", sys.getString("content")
-                    + "\nRispondi in modo naturale alla domanda usando soltanto i fatti "
-                    + "dell'estratto verificato qui sotto. Non aggiungere rapporti, eventi "
-                    + "o dettagli non presenti. Non presentare il testo come un rapporto tecnico."
-                    + "\nQuesto estratto contiene parole di Dimitri, l’utente. "
-                    + "Non copiarne la prima persona: rispondi rivolgendoti a Dimitri con il tu. "
-                    + "Per esempio: ho conosciuto diventa hai conosciuto; avevo diventa avevi; "
-                    + "mia amica diventa tua amica. Mantieni invariati i fatti e chi compie ogni azione. "
-                    + "Se il soggetto non è chiaro, non attribuirlo a DAN. "
-                    + "\nPAROLE ORIGINALI DI DIMITRI:\n" + identitySource);
+            sys.put("content", "Sei DAN e rispondi a Dimitri in italiano. "
+                    + "Il messaggio precedente contiene un ricordo scritto da Dimitri. "
+                    + "Descrivi i fatti rivolgendoti a lui con il tu, senza aggiungere dettagli. "
+                    + "Le esperienze raccontate appartengono a Dimitri, non a te.");
+            messages = new JSONArray();
+            messages.put(sys);
+            messages.put(new JSONObject().put("role", "user").put("content",
+                    "Questo e' un mio ricordo passato:\n" + identitySource));
+            messages.put(new JSONObject().put("role", "assistant").put("content",
+                    "Il ricordo riguarda te, Dimitri."));
         }
         int start = Math.max(0, snapshot.size() - (isNativeEnabled() ? 5 : MAX_CONTEXT_MESSAGES));
         int previousBudget = 1600;
@@ -1922,7 +1922,7 @@ public final class DanLocalChatActivity extends Activity {
                 throw new Exception("Importa un modello GGUF o scegli il server locale.");
             runOnUiThread(() -> setStatus("● Caricamento nativo del modello…", true));
             long engineStarted = SystemClock.elapsedRealtime();
-            try { return DanNativeQwen.answer(this, messages); }
+            try { return attributeMemoryReplyV129(DanNativeQwen.answer(this, messages), identityQuestion ? identitySource : ""); }
             finally { lastEngineMillis = SystemClock.elapsedRealtime() - engineStarted; }
         }
         runOnUiThread(() -> setStatus("● Invio al server locale sul tablet…", true));
@@ -1953,10 +1953,22 @@ public final class DanLocalChatActivity extends Activity {
             JSONObject message = choices.getJSONObject(0).getJSONObject("message");
             String result = message.optString("content", "");
             if (result.isEmpty()) throw new Exception("Il modello ha restituito contenuto vuoto.");
-            return result.length() > MAX_REPLY_CHARS ? result.substring(0, MAX_REPLY_CHARS) : result;
+            result = result.length() > MAX_REPLY_CHARS ? result.substring(0, MAX_REPLY_CHARS) : result;
+            return attributeMemoryReplyV129(result, identityQuestion ? identitySource : "");
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    private static String attributeMemoryReplyV129(String reply, String source) {
+        if (source.isEmpty()) return reply;
+        // Never silently rewrite verbs: preserve the original as an attributed quote
+        // when the model still presents personal memories in the first person.
+        if (java.util.regex.Pattern.compile(
+                "(?iu)(?<!\\p{L})(?:io|ho|avevo|ero|mio|mia|miei|mie)(?!\\p{L})")
+                .matcher(reply).find())
+            return "Mi hai raccontato: «" + source + "»";
+        return reply;
     }
 
     private static String readLimit(InputStream in, int maxChars) throws Exception {
