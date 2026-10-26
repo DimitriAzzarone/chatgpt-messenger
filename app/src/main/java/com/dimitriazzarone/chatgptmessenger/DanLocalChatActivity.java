@@ -1446,7 +1446,33 @@ public final class DanLocalChatActivity extends Activity {
         return cached;
     }
 
+    private static String collectIdentitySourcesV134(String person, String... candidates) {
+        LinkedHashSet<String> seen = new LinkedHashSet<>();
+        StringBuilder result = new StringBuilder();
+        int used = 0;
+        for (String candidate : candidates) {
+            if (candidate == null) continue;
+            for (String line : candidate.split("[\\r\\n]+")) {
+                String excerpt = identityExcerpt(line, person).trim();
+                if (identityEvidence(excerpt, person) == 0) continue;
+                String key = excerpt.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+                if (!seen.add(key)) continue;
+                if (result.length() + excerpt.length() > 1600 && used > 0) continue;
+                if (used > 0) result.append('\n');
+                result.append(excerpt);
+                if (++used == 3) return result.toString();
+            }
+        }
+        return result.toString();
+    }
+
     private static String sourceIdentityReplyV132(String source, String person) {
+        if (source.indexOf('\n') >= 0) {
+            StringBuilder answer = new StringBuilder("Nei tuoi racconti ho trovato questi passaggi distinti:");
+            for (String excerpt : source.split("\\n"))
+                answer.append("\n\n• «").append(excerpt).append("»");
+            return answer.toString();
+        }
         java.util.regex.Matcher fact = identityPatternsV131(person)[0].matcher(source);
         if (fact.find()) {
             String prefix = source.substring(0, fact.start()).toLowerCase(Locale.ROOT);
@@ -1826,8 +1852,7 @@ public final class DanLocalChatActivity extends Activity {
         if (isMemoryEnabled() && !standaloneCalculation) {
             String question = snapshot.get(snapshot.size() - 1).content;
             String direct = profileQuestion ? "" : findRelevantMemoryV199(question);
-            String historical = profileQuestion || (identityQuestion && !direct.isEmpty())
-                    ? "" : findHistoricalMemoryV199(question);
+            String historical = profileQuestion ? "" : findHistoricalMemoryV199(question);
             String documents = "";
             try (DanPersonalMemoryStore personal = new DanPersonalMemoryStore(this)) {
                 ensureEssentialProfile(personal);
@@ -1841,14 +1866,7 @@ public final class DanLocalChatActivity extends Activity {
 
             if (profileQuestion) identitySource = profileExcerpt(documents);
             if (identityQuestion && !profileQuestion) {
-                // Return source text, never a generated personal biography.
-                for (String candidate : new String[]{direct, historical, documents}) {
-                    String excerpt = identityExcerpt(candidate, person);
-                    if (identityEvidence(excerpt, person) > 0) {
-                        identitySource = excerpt.trim();
-                        break;
-                    }
-                }
+                identitySource = collectIdentitySourcesV134(person, direct, historical, documents);
             }
 
             int directBudget = isNativeEnabled() ? 520 : 1800;
