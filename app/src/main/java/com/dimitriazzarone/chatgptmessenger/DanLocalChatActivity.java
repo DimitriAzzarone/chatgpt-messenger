@@ -1845,11 +1845,19 @@ public final class DanLocalChatActivity extends Activity {
         messages.put(sys);
         final boolean standaloneCalculation = isNativeEnabled()
                 && isStandaloneCalculation(snapshot.get(snapshot.size() - 1).content);
+        final boolean suppliedSummary = java.util.regex.Pattern.compile(
+                "(?isu)^\\s*riassumi\\b[^:]{0,160}\\b(?:questo testo|queste informazioni|il seguente testo|quanto segue)\\s*:\\s*\\S.*$")
+                .matcher(snapshot.get(snapshot.size() - 1).content).matches();
+        if (suppliedSummary)
+            sys.put("content", "Sei DAN. Riassumi in italiano soltanto il testo fornito nel messaggio. "
+                    + "Rispetta il numero di frasi richiesto. Non ripetere le informazioni. "
+                    + "Mantieni la distinzione tra fatti, desideri e informazioni non confermate. "
+                    + "Non aggiungere premesse, elenchi o conclusioni estranee al testo.");
         final String person = identitySubject(snapshot.get(snapshot.size() - 1).content);
         final boolean profileQuestion = isProfileQuestion(snapshot.get(snapshot.size() - 1).content);
         final boolean identityQuestion = !person.isEmpty() || profileQuestion;
         String identitySource = "";
-        if (isMemoryEnabled() && !standaloneCalculation) {
+        if (isMemoryEnabled() && !standaloneCalculation && !suppliedSummary) {
             String question = snapshot.get(snapshot.size() - 1).content;
             String direct = profileQuestion ? "" : findRelevantMemoryV199(question);
             String historical = profileQuestion ? "" : findHistoricalMemoryV199(question);
@@ -1918,7 +1926,9 @@ public final class DanLocalChatActivity extends Activity {
                 else messages.put(context);
             }
         } else {
-            lastMemoryDebug = standaloneCalculation
+            lastMemoryDebug = suppliedSummary
+                    ? "Riassunto del testo fornito: nessuna ricerca nei ricordi; nessun messaggio precedente inviato."
+                    : standaloneCalculation
                     ? "Calcolo autonomo: nessuna ricerca nella memoria personale."
                     : "Memoria Dan disattivata: nessun ricordo inviato al modello.";
         }
@@ -1960,6 +1970,7 @@ public final class DanLocalChatActivity extends Activity {
                 start = i;
             }
         }
+        if (suppliedSummary) start = snapshot.size() - 1;
         for (int i = start; i < snapshot.size(); i++) {
             ChatMessage m = snapshot.get(i);
             JSONObject j = new JSONObject();

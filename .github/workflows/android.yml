@@ -39,6 +39,7 @@ on:
       - dan-v1.132-sourced-identity
       - dan-v1.133-identity-followup
       - dan-v1.134-identity-sources
+      - dan-v1.135-supplied-summary
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
