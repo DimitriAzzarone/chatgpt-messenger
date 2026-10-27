@@ -5484,7 +5484,7 @@ public class MainActivity extends Activity {
     private void injectPageBehaviors() {
         injectDanChatWatcher();
         injectDanBranding();
-        injectPinnedChatOrder();
+        // Riordino automatico sospeso per verificare la lista delle chat.
         injectEnterToSend();
         injectManualLuminexContext();
         syncLuminexContextToChatGpt();
