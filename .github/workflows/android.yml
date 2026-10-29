@@ -42,6 +42,7 @@ on:
       - dan-v1.135-supplied-summary
       - dan-v1.136-sidebar-test
       - dan-v1.137-voice-dedup
+      - dan-v1.138-local-sampling
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26

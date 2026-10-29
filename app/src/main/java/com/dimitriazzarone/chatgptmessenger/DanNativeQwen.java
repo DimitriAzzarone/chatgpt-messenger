@@ -192,7 +192,20 @@ final class DanNativeQwen {
         }
         boolean detailed = lastQuestion.contains("dettagli") || lastQuestion.contains("spiega")
                 || lastQuestion.contains("approfond") || lastQuestion.contains("raccont");
+        long generationStarted = android.os.SystemClock.elapsedRealtime();
         String reply = nativeGenerate(prompt.toString(), detailed ? 220 : 128);
+        long generationMillis = android.os.SystemClock.elapsedRealtime() - generationStarted;
+        android.content.SharedPreferences reportPrefs = context.getSharedPreferences(
+                "dan_local_chat_165", Context.MODE_PRIVATE);
+        String report = reportPrefs.getString("last_memory_report", "");
+        reportPrefs.edit().putString("last_memory_report", report
+                + "\n\nMOTORE NATIVO 1.138\nModello: " + model.getName()
+                + "\nCaratteri del prompt: " + prompt.length()
+                + "\nLimite token: " + (detailed ? 220 : 128)
+                + "\nGenerazione: " + generationMillis + " ms"
+                + "\nPenalita ripetizione: 1.10 su 128 token generati"
+                + "\nRISPOSTA GREZZA:\n" + (reply == null ? "(null)" : reply))
+                .apply();
         if (reply == null || reply.trim().isEmpty())
             throw new IOException("Qwen non ha generato una risposta");
         return reply.trim();
