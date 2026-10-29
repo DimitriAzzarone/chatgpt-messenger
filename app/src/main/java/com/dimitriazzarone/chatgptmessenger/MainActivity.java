@@ -2014,10 +2014,11 @@ public class MainActivity extends Activity {
     }
 
     private String cleanSpeechLabels(String text) {
-        String cleaned = stripEmojis(text == null ? "" : text).trim();
+        String cleaned = stripEmojis(text == null ? "" : text)
+                .replaceAll("[\\s\\u00a0\\u202f]+", " ").trim();
         for (int i = 0; i < 3; i++) {
             String next = cleaned.replaceFirst(
-                    "(?iu)^\\s*(?:chatgpt\\s+ha\\s+detto|chat\\s+ha\\s+detto|tu\\s+hai\\s+detto|hai\\s+detto)\\s*[:：,.!?–—-]?\\s*", "").trim();
+                    "(?iu)^\\s*(?:dan\\s+ha\\s+detto|chatgpt\\s+ha\\s+detto|chat\\s+ha\\s+detto|tu\\s+hai\\s+detto|hai\\s+detto)\\s*[:：,.!?–—-]?\\s*", "").trim();
             if (next.equals(cleaned)) break;
             cleaned = next;
         }
