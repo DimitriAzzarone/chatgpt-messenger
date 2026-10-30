@@ -1,5 +1,7 @@
 package com.dimitriazzarone.chatgptmessenger;
 
+import android.widget.Toast;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Color;
