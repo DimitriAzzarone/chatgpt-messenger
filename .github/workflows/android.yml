@@ -43,6 +43,7 @@ on:
       - dan-v1.136-sidebar-test
       - dan-v1.137-voice-dedup
       - dan-v1.138-local-sampling
+      - dan-v1.139-recent-context
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26

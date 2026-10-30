@@ -1833,6 +1833,32 @@ public final class DanLocalChatActivity extends Activity {
         return out.toString();
     }
 
+    private static String recentSuppliedTextV139(List<ChatMessage> snapshot) {
+        String question = snapshot.get(snapshot.size() - 1).content;
+        String lower = question.toLowerCase(Locale.ROOT);
+        if (java.util.regex.Pattern.compile(
+                "(?iu)\\b(?:archivio|storico|ricordi|biografia|passato)\\b").matcher(lower).find())
+            return "";
+        LinkedHashSet<String> terms = memoryTermsV199(question, 12);
+        java.util.regex.Pattern supplied = java.util.regex.Pattern.compile(
+                "(?isu)^\\s*riassumi\\b[^:]{0,160}\\b(?:questo testo|queste informazioni|il seguente testo|quanto segue)\\s*:\\s*\\S.*$");
+        for (int i = snapshot.size() - 2; i >= Math.max(0, snapshot.size() - 7); i--) {
+            ChatMessage message = snapshot.get(i);
+            if (!"user".equals(message.role) || !supplied.matcher(message.content).matches())
+                continue;
+            String text = message.content.substring(message.content.indexOf(':') + 1).trim();
+            if (text.length() > 1800) return "";
+            LinkedHashSet<String> sourceTerms = memoryTermsV199(text, 200);
+            for (String term : terms)
+                if (sourceTerms.contains(term)) return text;
+            if (java.util.regex.Pattern.compile(
+                    "(?iu)\\b(?:lei|lui|questo testo|queste informazioni|quanto sopra)\\b")
+                    .matcher(question).find()) return text;
+            return "";
+        }
+        return "";
+    }
+
     private String requestLocalReply(List<ChatMessage> snapshot) throws Exception {
         long memoryStarted = SystemClock.elapsedRealtime();
         lastMemoryMillis = 0;
@@ -1853,11 +1879,13 @@ public final class DanLocalChatActivity extends Activity {
                     + "Rispetta il numero di frasi richiesto. Non ripetere le informazioni. "
                     + "Mantieni la distinzione tra fatti, desideri e informazioni non confermate. "
                     + "Non aggiungere premesse, elenchi o conclusioni estranee al testo.");
+        final String recentSuppliedText = suppliedSummary ? "" : recentSuppliedTextV139(snapshot);
         final String person = identitySubject(snapshot.get(snapshot.size() - 1).content);
         final boolean profileQuestion = isProfileQuestion(snapshot.get(snapshot.size() - 1).content);
         final boolean identityQuestion = !person.isEmpty() || profileQuestion;
         String identitySource = "";
-        if (isMemoryEnabled() && !standaloneCalculation && !suppliedSummary) {
+        if (isMemoryEnabled() && !standaloneCalculation && !suppliedSummary
+                && recentSuppliedText.isEmpty()) {
             String question = snapshot.get(snapshot.size() - 1).content;
             String direct = profileQuestion ? "" : findRelevantMemoryV199(question);
             String historical = profileQuestion ? "" : findHistoricalMemoryV199(question);
@@ -1926,7 +1954,9 @@ public final class DanLocalChatActivity extends Activity {
                 else messages.put(context);
             }
         } else {
-            lastMemoryDebug = suppliedSummary
+            lastMemoryDebug = !recentSuppliedText.isEmpty()
+                    ? "Domanda sul testo recente dell’utente: archivio non interrogato; risposte precedenti del modello escluse."
+                    : suppliedSummary
                     ? "Riassunto del testo fornito: nessuna ricerca nei ricordi; nessun messaggio precedente inviato."
                     : standaloneCalculation
                     ? "Calcolo autonomo: nessuna ricerca nella memoria personale."
@@ -1935,7 +1965,7 @@ public final class DanLocalChatActivity extends Activity {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("last_memory_report", lastMemoryDebug).apply();
         lastMemoryMillis = SystemClock.elapsedRealtime() - memoryStarted;
-        if (identityQuestion) {
+        if (identityQuestion && recentSuppliedText.isEmpty()) {
             if (!isMemoryEnabled())
                 return "La memoria personale è disattivata. Attivala per cercare questa persona.";
             if (identitySource.isEmpty())
@@ -1979,6 +2009,17 @@ public final class DanLocalChatActivity extends Activity {
             j.put("content", isNativeEnabled() && i < snapshot.size() - 1
                     ? compactContext(m.content, 600) : m.content);
             messages.put(j);
+        }
+        if (!recentSuppliedText.isEmpty()) {
+            sys.put("content", "Sei DAN. Rispondi in italiano alla domanda usando solo il testo fornito. "
+                    + "Non aggiungere professioni, eventi o dettagli assenti dal testo. "
+                    + "Distingui fatti, desideri e informazioni non confermate. "
+                    + "Se manca un dato, dillo. Rispondi brevemente senza ripetizioni.");
+            messages = new JSONArray();
+            messages.put(sys);
+            messages.put(new JSONObject().put("role", "user").put("content",
+                    "TESTO FORNITO DALL’UTENTE:\n" + recentSuppliedText
+                    + "\n\nDOMANDA:\n" + snapshot.get(snapshot.size() - 1).content));
         }
         JSONObject payload = new JSONObject();
         payload.put("messages", messages);
