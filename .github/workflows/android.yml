@@ -47,6 +47,7 @@ on:
       - dan-v1.140-faithful-decoding
       - dan-v1.141-prompt-report
       - dan-v1.142-report-build-fix
+      - dan-v1.143-isolated-test
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26

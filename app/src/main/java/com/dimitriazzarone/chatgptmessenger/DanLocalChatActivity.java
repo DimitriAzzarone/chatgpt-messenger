@@ -1876,6 +1876,28 @@ public final class DanLocalChatActivity extends Activity {
         lastMemoryMillis = 0;
         lastEngineMillis = 0;
         lastHistorySearch = "Storico non interrogato per questa domanda.";
+        String currentText = snapshot.get(snapshot.size() - 1).content.trim();
+        if (isNativeEnabled() && (currentText.equalsIgnoreCase("/test")
+                || currentText.matches("(?is)^/test\\s+.*$"))) {
+            String testText = currentText.substring(5).trim();
+            if (testText.isEmpty())
+                return "Dopo /test scrivi il testo e la domanda da verificare.";
+            JSONArray isolated = new JSONArray();
+            isolated.put(new JSONObject().put("role", "system").put("content",
+                    "Rispondi alla domanda usando solo il testo fornito. "
+                    + "Rispetta il formato richiesto. Non aggiungere informazioni."));
+            isolated.put(new JSONObject().put("role", "user").put("content", testText));
+            lastMemoryDebug = "PROVA ISOLATA 1.143: archivio e cronologia esclusi.";
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                    .putString("last_memory_report", lastMemoryDebug).apply();
+            lastMemoryMillis = SystemClock.elapsedRealtime() - memoryStarted;
+            if (!DanNativeQwen.hasImportedModel(this))
+                throw new Exception("Importa un modello GGUF o scegli il server locale.");
+            runOnUiThread(() -> setStatus("● Prova isolata di Qwen…", true));
+            long testStarted = SystemClock.elapsedRealtime();
+            try { return DanNativeQwen.answer(this, isolated); }
+            finally { lastEngineMillis = SystemClock.elapsedRealtime() - testStarted; }
+        }
         JSONArray messages = new JSONArray();
         JSONObject sys = new JSONObject();
         sys.put("role", "system");
