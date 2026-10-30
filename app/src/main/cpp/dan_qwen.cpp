@@ -45,7 +45,7 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeLoad(JNIEnv *env, 
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *env, jclass, jstring input, jint max_tokens) {
+Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *env, jclass, jstring input, jint max_tokens, jboolean faithful) {
     std::lock_guard<std::mutex> lock(engine_lock);
     if (!context || !model) { throw_java(env, "Motore Qwen non caricato"); return nullptr; }
     const char *utf = env->GetStringUTFChars(input, nullptr);
@@ -88,9 +88,13 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *e
     // Penalize recently generated tokens to reduce repetition loops.
     llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
             llama_vocab_n_tokens(vocab), 128, 1.10f, 0.0f, 0.0f));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.90f, 1));
-    llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.65f));
-    llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    if (faithful == JNI_TRUE) {
+        llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    } else {
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.90f, 1));
+        llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.65f));
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    }
     std::string output;
     for (int i = 0; i < max_tokens; i++) {
         llama_token token = llama_sampler_sample(sampler, context, -1);

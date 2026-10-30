@@ -31,7 +31,7 @@ final class DanNativeQwen {
     private DanNativeQwen() {}
 
     private static native boolean nativeLoad(String path);
-    private static native String nativeGenerate(String prompt, int maxTokens);
+    private static native String nativeGenerate(String prompt, int maxTokens, boolean faithful);
     private static native void nativeUnload();
 
     static File modelFile(Context context) {
@@ -193,13 +193,17 @@ final class DanNativeQwen {
         boolean detailed = lastQuestion.contains("dettagli") || lastQuestion.contains("spiega")
                 || lastQuestion.contains("approfond") || lastQuestion.contains("raccont");
         long generationStarted = android.os.SystemClock.elapsedRealtime();
-        String reply = nativeGenerate(prompt.toString(), detailed ? 220 : 128);
+        boolean faithful = messages.length() > 0
+                && "system".equals(messages.getJSONObject(0).optString("role"))
+                && messages.getJSONObject(0).optString("content").contains("testo fornito");
+        String reply = nativeGenerate(prompt.toString(), detailed ? 220 : 128, faithful);
         long generationMillis = android.os.SystemClock.elapsedRealtime() - generationStarted;
         android.content.SharedPreferences reportPrefs = context.getSharedPreferences(
                 "dan_local_chat_165", Context.MODE_PRIVATE);
         String report = reportPrefs.getString("last_memory_report", "");
         reportPrefs.edit().putString("last_memory_report", report
-                + "\n\nMOTORE NATIVO 1.138\nModello: " + model.getName()
+                + "\n\nMOTORE NATIVO 1.140\nModello: " + model.getName()
+                + "\nDecodifica: " + (faithful ? "greedy su testo fornito" : "campionamento abituale")
                 + "\nCaratteri del prompt: " + prompt.length()
                 + "\nLimite token: " + (detailed ? 220 : 128)
                 + "\nGenerazione: " + generationMillis + " ms"

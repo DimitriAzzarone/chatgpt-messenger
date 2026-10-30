@@ -44,6 +44,7 @@ on:
       - dan-v1.137-voice-dedup
       - dan-v1.138-local-sampling
       - dan-v1.139-recent-context
+      - dan-v1.140-faithful-decoding
       - main
       - luminex-integration-v1.25
       - dan-luminex-ai-v1.26
