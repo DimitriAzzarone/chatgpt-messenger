@@ -863,9 +863,19 @@ public final class DanLocalChatActivity extends Activity {
                 .getString("last_memory_report", lastMemoryDebug);
         if (report == null || report.trim().isEmpty())
             report = "Nessuna memoria selezionata per l'ultima domanda.";
+        final String reportToCopy = report;
         new AlertDialog.Builder(this)
                 .setTitle("Memoria usata nell'ultima risposta")
                 .setMessage(report)
+                .setNeutralButton("Copia rapporto", (dialog, which) -> {
+                    android.content.ClipboardManager clipboard =
+                            (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (clipboard != null) {
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText(
+                                "Diagnostica Dan", reportToCopy));
+                        Toast.makeText(this, "Rapporto copiato", Toast.LENGTH_SHORT).show();
+                    }
+                })
                 .setPositiveButton("Chiudi", null)
                 .show();
     }

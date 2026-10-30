@@ -208,7 +208,9 @@ final class DanNativeQwen {
                 + "\nLimite token: " + (detailed ? 220 : 128)
                 + "\nGenerazione: " + generationMillis + " ms"
                 + "\nPenalita ripetizione: 1.10 su 128 token generati"
-                + "\nRISPOSTA GREZZA:\n" + (reply == null ? "(null)" : reply))
+                + "\n\nINIZIO PROMPT EFFETTIVO\n" + prompt.toString()
+                + "\nFINE PROMPT EFFETTIVO"
+                + "\n\nRISPOSTA GREZZA:\n" + (reply == null ? "(null)" : reply))
                 .apply();
         if (reply == null || reply.trim().isEmpty())
             throw new IOException("Qwen non ha generato una risposta");

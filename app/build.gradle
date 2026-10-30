@@ -21,10 +21,10 @@ android {
                           '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
             }
         }
-        versionCode 140
-        versionName "1.140"
+        versionCode 141
+        versionName "1.141"
         // DAN 1.108: ripristino del comportamento della 1.106.
-        resValue "string", "dan_launcher_label", "Dan 1.140"
+        resValue "string", "dan_launcher_label", "Dan 1.141"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
