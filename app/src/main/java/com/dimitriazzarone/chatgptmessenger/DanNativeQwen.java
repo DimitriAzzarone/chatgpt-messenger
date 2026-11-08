@@ -21,10 +21,12 @@ final class DanNativeQwen {
     private static final String Q3_SHA256 = "468787b643ef9081a75c6e7bd98da987f46583250248e0a0a7aca173308e8d34";
     private static final String SPARK_NAME = "SparkAI-0.5b.Q3_K_S.gguf";
     private static final String SPARK_SHA256 = "88682e6bf44109dacea0dfde8a5f02dba5eddade9522007894742d57e653343c";
+    private static final String QWEN3_NAME = "qwen3.gguf";
+    private static final String QWEN3_SHA256 = "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb";
     private static final String PREFS = "dan_native_qwen";
     private static final String SELECTED = "selected_verified_model";
     private static final long MIN_FILE_SIZE = 300L * 1024L * 1024L;
-    private static final long MAX_FILE_SIZE = 800L * 1024L * 1024L;
+    private static final long MAX_FILE_SIZE = 1282439584L;
     private static boolean libraryReady;
     private static boolean modelReady;
 
@@ -38,13 +40,13 @@ final class DanNativeQwen {
         String selected = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(SELECTED, Q4_NAME);
         if (!Q4_NAME.equals(selected) && !Q3_NAME.equals(selected)
-                && !SPARK_NAME.equals(selected)) selected = Q4_NAME;
+                && !SPARK_NAME.equals(selected) && !QWEN3_NAME.equals(selected)) selected = Q4_NAME;
         return new File(new File(context.getFilesDir(), "models"), selected);
     }
 
     static String[] availableModels(Context context) {
         File dir = new File(context.getFilesDir(), "models");
-        String[] names = {Q4_NAME, Q3_NAME, SPARK_NAME};
+        String[] names = {Q4_NAME, Q3_NAME, SPARK_NAME, QWEN3_NAME};
         java.util.ArrayList<String> found = new java.util.ArrayList<>();
         for (String name : names) {
             File file = new File(dir, name);
@@ -59,6 +61,7 @@ final class DanNativeQwen {
         if (Q4_NAME.equals(name)) expected = Q4_SHA256;
         else if (Q3_NAME.equals(name)) expected = Q3_SHA256;
         else if (SPARK_NAME.equals(name)) expected = SPARK_SHA256;
+        else if (QWEN3_NAME.equals(name)) expected = QWEN3_SHA256;
         else throw new IOException("Modello non supportato");
         File file = new File(new File(context.getFilesDir(), "models"), name);
         if (!file.isFile() || file.length() < MIN_FILE_SIZE || file.length() > MAX_FILE_SIZE
@@ -124,6 +127,7 @@ final class DanNativeQwen {
             if (Q4_SHA256.equals(verified)) name = Q4_NAME;
             else if (Q3_SHA256.equals(verified)) name = Q3_NAME;
             else if (SPARK_SHA256.equals(verified)) name = SPARK_NAME;
+            else if (QWEN3_SHA256.equals(verified)) name = QWEN3_NAME;
             else throw new IOException("SHA-256 non riconosciuto: modello Qwen o SparkAI non verificato");
             try (FileInputStream in = new FileInputStream(tmp)) {
                 byte[] head = new byte[4];
