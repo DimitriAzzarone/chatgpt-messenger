@@ -184,7 +184,7 @@ final class DanNativeQwen {
         prompt.append("<|im_start|>assistant\n");
         // SparkAI uses Qwen3; prefill an empty thinking section so the
         // small model gives the user a direct answer. Qwen2.5 unchanged.
-        if (SPARK_NAME.equals(model.getName()))
+        if (SPARK_NAME.equals(model.getName()) || QWEN3_NAME.equals(model.getName()))
             prompt.append("<think>\n\n</think>\n\n");
         String lastQuestion = "";
         for (int i = messages.length() - 1; i >= 0; i--) {
@@ -218,6 +218,13 @@ final class DanNativeQwen {
                 .apply();
         if (reply == null || reply.trim().isEmpty())
             throw new IOException("Qwen non ha generato una risposta");
-        return reply.trim();
+        String answer = reply.trim();
+        if (QWEN3_NAME.equals(model.getName())) {
+            int end = answer.indexOf("</think>");
+            if (end >= 0) answer = answer.substring(end + "</think>".length()).trim();
+            if (answer.isEmpty() || answer.contains("<think>"))
+                throw new IOException("Qwen non è arrivato alla risposta finale.");
+        }
+        return answer;
     }
 }
