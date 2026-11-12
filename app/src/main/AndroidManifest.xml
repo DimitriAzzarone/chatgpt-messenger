@@ -21,8 +21,6 @@
         android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/dan_network_security">
 
-        <activity android:name=".DanLocalChatActivity"
-            android:exported="false" />
 
         <activity
             android:name=".MainActivity"

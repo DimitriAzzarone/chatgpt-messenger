@@ -49,6 +49,7 @@ on:
       - dan-v1.142-report-build-fix
       - dan-v1.143-isolated-test
       - dan-v1.144-qwen3-test
+      - dan-v1.146-live
       - dan-v1.145-qwen3-risposta-diretta
       - main
       - luminex-integration-v1.25
@@ -129,19 +130,11 @@ jobs:
         with:
           packages: ''
 
-      - name: Install native Android toolchain
+      - name: Check live response observer
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "ndk;29.0.13113456" "cmake;3.31.6"
-
-      - name: Fetch pinned llama.cpp native source
-        run: |
-          mkdir -p vendor/llama.cpp
-          git -C vendor/llama.cpp init
-          git -C vendor/llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
-          git -C vendor/llama.cpp fetch --depth=1 origin de7fa0a3c6a2e1b4cd9f22eb8d6bf5b12dbdb63b
-          git -C vendor/llama.cpp checkout --detach FETCH_HEAD
-          test "$(git -C vendor/llama.cpp rev-parse HEAD)" = "de7fa0a3c6a2e1b4cd9f22eb8d6bf5b12dbdb63b"
+          python3 tests/extract-voice-scripts.py
+          node --check /tmp/dan146-observer.js
+          node tests/live-observer.test.cjs
 
       - name: Build Dan Luminex AI Integration
         env:

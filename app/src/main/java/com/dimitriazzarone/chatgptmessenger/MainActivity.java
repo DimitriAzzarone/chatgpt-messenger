@@ -58,6 +58,8 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.ScrollView;
+import android.graphics.Typeface;
 
 import androidx.webkit.ProfileStore;
 import androidx.webkit.WebViewCompat;
@@ -292,6 +294,18 @@ public class MainActivity extends Activity {
     };
 
     private TextToSpeech tts;
+    private Button liveButton;
+    private LinearLayout livePanel;
+    private LinearLayout liveMessages;
+    private ScrollView liveScroll;
+    private TextView liveCaption;
+    private boolean liveEnabled;
+    private boolean liveWaiting;
+    private boolean liveSendConfirmed;
+    private boolean foreground;
+    private long liveGeneration;
+    private String livePage;
+
     private boolean ttsReady = false;
     private String lastSpokenText = "";
 
@@ -305,14 +319,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Dan 1.65: apre il motore locale per impostazione predefinita.
-        // ChatGPT viene caricato solo su richiesta esplicita.
-        if (!getIntent().getBooleanExtra("dan_open_web", false)) {
-            startActivity(new Intent(this, DanLocalChatActivity.class));
-            finish();
-            return;
-        }
-
+        // 1.146: la variante web apre direttamente ChatGPT/Work.
         memoryStore = new DanMemoryStore(getApplicationContext());
         historyStore = new DanHistoryStore(getApplicationContext());
 
@@ -321,7 +328,7 @@ public class MainActivity extends Activity {
 
         // v1.23: conserva l'ultimo stato AUTO scelto dall'utente.
         // Al primo avvio resta OFF.
-        handsFreeEnabled = startupPrefs.getBoolean(PREF_HANDS_FREE, false);
+        handsFreeEnabled = false;
 
         recordingSoundsEnabled = startupPrefs.getBoolean(PREF_RECORDING_SOUNDS, true);
 
@@ -348,24 +355,24 @@ public class MainActivity extends Activity {
     private void buildInterface() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(11, 20, 26));
+        root.setBackgroundColor(Color.rgb(3, 13, 26));
 
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
         topBar.setPadding(dp(8), dp(4), dp(8), dp(4));
-        topBar.setBackgroundColor(Color.rgb(32, 44, 51));
+        topBar.setBackgroundColor(Color.rgb(7, 20, 40));
 
         TextView logo = new TextView(this);
-        logo.setText("AI");
+        logo.setText("DAN");
         logo.setTextColor(Color.rgb(6, 44, 37));
         logo.setTextSize(15);
         logo.setGravity(Gravity.CENTER);
-        logo.setBackgroundColor(Color.rgb(0, 168, 132));
+        logo.setBackgroundColor(Color.rgb(0, 200, 255));
 
         TextView title = new TextView(this);
         title.setText("  Dan " + BuildConfig.VERSION_NAME);
-        title.setTextColor(Color.WHITE);
+        title.setTextColor(Color.rgb(0, 200, 255));
         title.setTextSize(17);
 
         voiceButton = makeButton("🔊");
@@ -451,7 +458,7 @@ public class MainActivity extends Activity {
         bottomBar.setOrientation(LinearLayout.HORIZONTAL);
         bottomBar.setGravity(Gravity.CENTER_VERTICAL);
         bottomBar.setPadding(dp(12), dp(6), dp(12), dp(8));
-        bottomBar.setBackgroundColor(Color.rgb(32, 44, 51));
+        bottomBar.setBackgroundColor(Color.rgb(7, 20, 40));
 
         statusText = new TextView(this);
         statusText.setText(handsFreeEnabled
@@ -477,7 +484,7 @@ public class MainActivity extends Activity {
         LinearLayout controlsBar = new LinearLayout(this);
         controlsBar.setOrientation(LinearLayout.HORIZONTAL);
         controlsBar.setPadding(dp(8), dp(2), dp(8), dp(4));
-        controlsBar.setBackgroundColor(Color.rgb(32, 44, 51));
+        controlsBar.setBackgroundColor(Color.rgb(7, 20, 40));
 
         Button memoryButton = makeButton("Memoria");
         memoryButton.setAllCaps(false);
@@ -496,18 +503,16 @@ public class MainActivity extends Activity {
         });
         engineButton.setOnLongClickListener(v -> { showEngineMenu(); return true; });
 
-        Button localDanButton = makeButton("Dan locale");
-        localDanButton.setAllCaps(false);
-        localDanButton.setTextSize(12);
-        localDanButton.setContentDescription("Apri la chat autonoma con motore locale");
-        localDanButton.setOnClickListener(v -> {
-            startActivity(new Intent(this, DanLocalChatActivity.class));
-            finish();
-        });
+        Button liveButton = makeButton("LIVE");
+        liveButton.setAllCaps(false);
+        liveButton.setTextSize(12);
+        liveButton.setContentDescription("Avvia o ferma la conversazione vocale continua");
+        liveButton.setOnClickListener(v -> toggleLiveMode());
+        this.liveButton = liveButton;
 
         controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
-        controlsBar.addView(localDanButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        controlsBar.addView(liveButton, new LinearLayout.LayoutParams(0, dp(42), 1));
 
         root.addView(topBar);
         root.addView(controlsBar);
@@ -579,6 +584,7 @@ public class MainActivity extends Activity {
         privateButton.setOnClickListener(v -> togglePrivateSession());
 
         reload.setOnClickListener(v -> {
+            if (liveEnabled) stopLiveMode("Live fermato · ricaricamento pagina");
             WebView active = luminexVisible
                     ? getActiveLuminexWebView()
                     : webView;
@@ -595,6 +601,7 @@ public class MainActivity extends Activity {
         micButton.setOnTouchListener((v, event) -> {
             switch (event.getAction()) {
                 case MotionEvent.ACTION_DOWN:
+                    if (liveEnabled) stopLiveMode("Microfono manuale");
                     if (recordingLocked) {
                         finishLockedRecording();
                         return true;
@@ -644,6 +651,159 @@ public class MainActivity extends Activity {
 
             return false;
         });
+    }
+
+    private void showLivePanel() {
+        if (livePanel == null) {
+            livePanel = new LinearLayout(this);
+            livePanel.setOrientation(LinearLayout.VERTICAL);
+            livePanel.setPadding(dp(16), dp(12), dp(16), dp(12));
+            livePanel.setBackgroundColor(Color.rgb(3, 13, 26));
+            TextView heading = new TextView(this);
+            heading.setText("DAN · LIVE");
+            heading.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            heading.setTextColor(Color.rgb(0, 200, 255));
+            heading.setTextSize(22);
+            livePanel.addView(heading);
+            liveScroll = new ScrollView(this);
+            liveMessages = new LinearLayout(this);
+            liveMessages.setOrientation(LinearLayout.VERTICAL);
+            liveScroll.addView(liveMessages);
+            livePanel.addView(liveScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+            Button orb = makeButton("DAN\nTOCCA PER FERMARE");
+            orb.setTextSize(16);
+            orb.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            orb.setTextColor(Color.rgb(0, 200, 255));
+            GradientDrawable ring = new GradientDrawable();
+            ring.setShape(GradientDrawable.OVAL);
+            ring.setColor(Color.rgb(7, 20, 40));
+            ring.setStroke(dp(3), Color.rgb(0, 200, 255));
+            orb.setBackground(ring);
+            LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(166), dp(166));
+            orbLp.gravity = Gravity.CENTER_HORIZONTAL;
+            orbLp.setMargins(0, dp(8), 0, dp(8));
+            livePanel.addView(orb, orbLp);
+            orb.setOnClickListener(v -> stopLiveMode("Live fermato"));
+            liveCaption = new TextView(this);
+            liveCaption.setTextColor(Color.rgb(224, 244, 255));
+            liveCaption.setGravity(Gravity.CENTER);
+            livePanel.addView(liveCaption);
+            webContainer.addView(livePanel, new FrameLayout.LayoutParams(-1, -1));
+        }
+        livePanel.setVisibility(View.VISIBLE);
+        livePanel.bringToFront();
+        liveCaption.setText("Parla normalmente · pausa per inviare");
+    }
+
+    private void appendLiveMessage(String who, String text) {
+        if (liveMessages == null) return;
+        TextView message = new TextView(this);
+        message.setText(who + " · " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                .format(new Date()) + "\n" + text);
+        message.setTextColor(Color.rgb(224, 244, 255));
+        message.setTextSize(16);
+        message.setPadding(dp(12), dp(10), dp(12), dp(10));
+        GradientDrawable bubble = new GradientDrawable();
+        bubble.setColor(Color.rgb(7, 20, 40));
+        bubble.setCornerRadius(dp(12));
+        bubble.setStroke(dp(1), Color.argb(80, 0, 200, 255));
+        message.setBackground(bubble);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(10);
+        liveMessages.addView(message, lp);
+        // Full history remains in the original authenticated chat.
+        if (liveMessages.getChildCount() > 60) liveMessages.removeViewAt(0);
+        liveScroll.post(() -> liveScroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    private void toggleLiveMode() {
+        if (liveEnabled) { stopLiveMode("Live fermato"); return; }
+        if (webView == null || !sameVoicePage(webView.getUrl(), webView.getUrl()) || luminexVisible) {
+            statusText.setText("Apri una chat ChatGPT prima di avviare LIVE");
+            return;
+        }
+        if (!ttsReady || !recordingSoundsEnabled) {
+            statusText.setText("Attiva l'audio e attendi che la voce sia pronta prima di LIVE");
+            return;
+        }
+        if (speechRecognizer == null) {
+            createSpeechRecognizer();
+            if (speechRecognizer == null) return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingLivePermission = true;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO);
+            return;
+        }
+        handsFreeEnabled = false;
+        if (recognizerSessionActive) { try { speechRecognizer.cancel(); } catch (Exception ignored) {} }
+        recognizerSessionActive = false;
+        listening = false;
+        manualCapture = false;
+        headsetRecording = false;
+        liveEnabled = true;
+        liveWaiting = false;
+        liveSendConfirmed = false;
+        liveGeneration++;
+        livePage = webView.getUrl();
+        liveButton.setText("FERMA LIVE");
+        showLivePanel();
+        statusText.setText("LIVE · preparo l'ascolto…");
+        scheduleLiveListen(450L);
+    }
+
+    private boolean pendingLivePermission;
+
+    private void stopLiveMode(String reason) {
+        liveEnabled = false;
+        liveWaiting = false;
+        liveSendConfirmed = false;
+        pendingLivePermission = false;
+        liveGeneration++;
+        // Also invalidate a voice draft whose insertion/send callback is pending.
+        voiceSendGeneration++;
+        if (speechRecognizer != null) { try { speechRecognizer.cancel(); } catch (Exception ignored) {} }
+        recognizerSessionActive = false;
+        listening = false;
+        if (tts != null) { try { tts.stop(); } catch (Exception ignored) {} }
+        ttsSpeaking = false;
+        if (liveButton != null) liveButton.setText("LIVE");
+        if (livePanel != null) livePanel.setVisibility(View.GONE);
+        if (webView != null) webView.evaluateJavascript("window.__danLivePending=null;", null);
+        if (statusText != null) statusText.setText(reason);
+        if (micButton != null) applyMicStyle(false);
+    }
+
+    private void scheduleLiveListen(long delay) {
+        final long generation = liveGeneration;
+        statusText.postDelayed(() -> {
+            if (!liveEnabled || generation != liveGeneration || !foreground || liveWaiting
+                    || ttsSpeaking || recognizerSessionActive || manualCapture || headsetRecording) return;
+            if (webView == null || !sameVoicePage(livePage, webView.getUrl()) || luminexVisible) {
+                stopLiveMode("Chat cambiata · riavvia LIVE nella chat desiderata");
+                return;
+            }
+            statusText.setText("LIVE · ti ascolto…");
+            if (liveCaption != null) liveCaption.setText("TI ASCOLTO · pausa per inviare");
+            startListening();
+        }, delay);
+    }
+
+    private void sendLiveTurn(String text) {
+        if (!liveEnabled || liveWaiting || ttsSpeaking) return;
+        if (text.trim().isEmpty()) { scheduleLiveListen(500L); return; }
+        liveWaiting = true;
+        liveSendConfirmed = false;
+        appendLiveMessage("TU", text);
+        liveCaption.setText("ATTENDO LA RISPOSTA");
+        statusText.setText("LIVE · trascrizione pronta, invio…");
+        final long generation = liveGeneration;
+        // Every dictated utterance goes to the current chat; no wake word is required.
+        injectTextAndSend(text);
+        statusText.postDelayed(() -> {
+            if (liveEnabled && liveWaiting && generation == liveGeneration)
+                stopLiveMode("Risposta non rilevata · controlla la chat prima di riprovare");
+        }, 180000L);
     }
 
     private WebView getActiveLuminexWebView() {
@@ -1315,6 +1475,7 @@ public class MainActivity extends Activity {
 
 
     private void toggleRecordingSounds() {
+        if (liveEnabled) stopLiveMode("Live fermato · audio modificato");
         recordingSoundsEnabled = !recordingSoundsEnabled;
 
         if (!recordingSoundsEnabled && tts != null) {
@@ -1375,6 +1536,7 @@ public class MainActivity extends Activity {
     }
 
     private void stopAllSpeech() {
+        if (liveEnabled) stopLiveMode("Live fermato");
         if (tts != null) {
             try { tts.stop(); } catch (Exception ignored) {}
         }
@@ -1561,6 +1723,7 @@ public class MainActivity extends Activity {
     }
 
     private void recoverMicrophoneAccess() {
+        if (liveEnabled) stopLiveMode("Live fermato · microfono manuale");
         handsFreeEnabled = false;
         handsFreeDictating = false;
         handsFreeBuffer.setLength(0);
@@ -1714,7 +1877,7 @@ public class MainActivity extends Activity {
         bg.setShape(GradientDrawable.OVAL);
         bg.setColor(active
                 ? Color.rgb(239, 83, 80)
-                : Color.rgb(0, 168, 132));
+                : Color.rgb(0, 200, 255));
         micButton.setBackground(bg);
     }
 
@@ -1744,8 +1907,8 @@ public class MainActivity extends Activity {
             tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                 @Override
                 public void onStart(String utteranceId) {
-                    ttsSpeaking = true;
                     runOnUiThread(() -> {
+                        ttsSpeaking = true;
                         if (speechRecognizer != null && recognizerSessionActive) {
                             try { speechRecognizer.cancel(); } catch (Exception ignored) {}
                         }
@@ -1762,8 +1925,13 @@ public class MainActivity extends Activity {
                         return;
                     }
 
-                    ttsSpeaking = false;
                     runOnUiThread(() -> {
+                        ttsSpeaking = false;
+                        if (liveEnabled) {
+                            recognizerSessionActive = false;
+                            listening = false;
+                            scheduleLiveListen(650L);
+                        }
                         playReadingFinishedSound();
                         statusText.setText(handsFreeEnabled
                                 ? "🟢 In attesa — dì Jasper per iniziare"
@@ -1778,8 +1946,12 @@ public class MainActivity extends Activity {
 
                 @Override
                 public void onError(String utteranceId) {
-                    ttsSpeaking = false;
                     runOnUiThread(() -> {
+                        ttsSpeaking = false;
+                        if (liveEnabled) {
+                            stopLiveMode("Voce non disponibile · risposta visibile nella chat");
+                            return;
+                        }
                         statusText.setText("Errore nella sintesi vocale");
                         scheduleHandsFreeRestart(500L);
                     });
@@ -1891,6 +2063,7 @@ public class MainActivity extends Activity {
     }
 
     private void showVoiceChooser() {
+        if (liveEnabled) stopLiveMode("Live fermato · scelta voce");
         if (!ttsReady || tts == null) {
             Toast.makeText(this,
                     "La sintesi vocale non è ancora pronta",
@@ -2135,7 +2308,7 @@ public class MainActivity extends Activity {
                             + i
                             + (last ? "_last" : "");
 
-            tts.speak(
+            int queued = tts.speak(
                     chunks.get(i),
                     i == 0
                             ? TextToSpeech.QUEUE_FLUSH
@@ -2143,6 +2316,10 @@ public class MainActivity extends Activity {
                     null,
                     utteranceId
             );
+            if (queued == TextToSpeech.ERROR) {
+                if (liveEnabled) stopLiveMode("Lettura non riuscita · risposta visibile nella chat");
+                return;
+            }
         }
     }
 
@@ -2206,6 +2383,7 @@ public class MainActivity extends Activity {
     }
 
     private void toggleHeadsetRecording() {
+        if (liveEnabled) stopLiveMode("Live fermato · comando cuffia");
         if (speechRecognizer == null) {
             Toast.makeText(this,
                     "Riconoscimento vocale non disponibile",
@@ -2358,6 +2536,8 @@ public class MainActivity extends Activity {
                 } else if (manualCapture) {
                     playRecordingStartSound();
                     statusText.setText("🎙 Ti ascolto… rilascia per inviare");
+                } else if (liveEnabled) {
+                    statusText.setText("LIVE · ti ascolto…");
                 } else if (handsFreeDictating) {
                     statusText.setText("🔴 Dettatura attiva — dì Jasper per inviare");
                 } else {
@@ -2368,7 +2548,9 @@ public class MainActivity extends Activity {
             @Override
             public void onBeginningOfSpeech() {
                 if (speechRecognizer != owner) return;
-                if (manualCapture) {
+                if (liveEnabled) {
+                    statusText.setText("LIVE · parla normalmente…");
+                } else if (manualCapture) {
                     statusText.setText("🎙 Parla…");
                 } else if (handsFreeDictating) {
                     statusText.setText("🔴 Ti ascolto… dì Jasper quando hai finito");
@@ -2398,6 +2580,15 @@ public class MainActivity extends Activity {
                 recognizerSessionActive = false;
                 manualStopPending = false;
                 applyMicStyle(false);
+
+                if (liveEnabled) {
+                    if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        scheduleLiveListen(650L);
+                    } else {
+                        stopLiveMode("Riconoscimento interrotto · verifica rete e permesso microfono");
+                    }
+                    return;
+                }
 
                 if (wasManual) {
                     manualCapture = false;
@@ -2448,6 +2639,14 @@ public class MainActivity extends Activity {
                 applyMicStyle(false);
 
                 String text = chooseBestRecognition(results);
+                if (liveEnabled) {
+                    // Never auto-send a recovered partial transcription.
+                    ArrayList<String> finals = results == null ? null :
+                            results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    text = finals == null || finals.isEmpty() || finals.get(0) == null ? "" : finals.get(0).trim();
+                    sendLiveTurn(text);
+                    return;
+                }
 
                 if (manualCapture) {
                     manualCapture = false;
@@ -2483,6 +2682,9 @@ public class MainActivity extends Activity {
                 if (partials == null || partials.isEmpty()) return;
 
                 String candidate = partials.get(0) == null ? "" : partials.get(0).trim();
+                if (liveEnabled && liveCaption != null && !candidate.isEmpty()) {
+                    liveCaption.setText(candidate);
+                }
                 if (!candidate.isEmpty() && candidate.length() >= lastPartialText.length()) {
                     lastPartialText = candidate;
                 }
@@ -2646,11 +2848,14 @@ public class MainActivity extends Activity {
         try {
             recognizerSessionActive = true;
             Intent request = new Intent(speechIntent);
-            if (manualCapture) {
+            if (manualCapture || liveEnabled) {
                 // Long-listening timeout hints are unsuitable for push-to-talk.
                 request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS);
                 request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS);
                 request.removeExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS);
+            }
+            if (liveEnabled) {
+                request.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L);
             }
             final SpeechRecognizer startedRecognizer = speechRecognizer;
             if (manualCapture) statusText.postDelayed(() -> {
@@ -2658,10 +2863,20 @@ public class MainActivity extends Activity {
                     recoverStalledDictation(startedRecognizer, "Il servizio vocale non ha avviato l'ascolto");
             }, 8000L);
             speechRecognizer.startListening(request);
+            if (liveEnabled) {
+                final long generation = liveGeneration;
+                statusText.postDelayed(() -> {
+                    if (liveEnabled && generation == liveGeneration && speechRecognizer == startedRecognizer
+                            && recognizerSessionActive && !liveWaiting)
+                        stopLiveMode("Il microfono non ha concluso · riavvia LIVE");
+                }, 65000L);
+            }
         } catch (Exception e) {
             recognizerSessionActive = false;
             listening = false;
-            if (manualCapture) {
+            if (liveEnabled) {
+                stopLiveMode("Impossibile avviare il microfono");
+            } else if (manualCapture) {
                 statusText.setText("Impossibile avviare il microfono");
             } else {
                 scheduleHandsFreeRestart(800L);
@@ -2722,6 +2937,15 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
         if (requestCode == REQ_AUDIO) {
+            if (pendingLivePermission) {
+                pendingLivePermission = false;
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    toggleLiveMode();
+                } else {
+                    stopLiveMode("Permesso microfono negato");
+                }
+                return;
+            }
             if (grantResults.length > 0
                     && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 if (pressToTalkRequested || manualCapture) {
@@ -3424,6 +3648,7 @@ public class MainActivity extends Activity {
     }
 
     private void setLuminexVisible(boolean visible) {
+        if (visible && liveEnabled) stopLiveMode("Live fermato · Luminex aperto");
         luminexVisible = visible;
         updateLuminexAddress();
 
@@ -4367,7 +4592,7 @@ public class MainActivity extends Activity {
 
     private void createWebView() {
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.rgb(11, 20, 26));
+        webView.setBackgroundColor(Color.rgb(3, 13, 26));
         webView.addJavascriptInterface(new NativeBridge(), "AndroidRadio");
         installDanDocumentStartBranding();
 
@@ -4650,8 +4875,7 @@ public class MainActivity extends Activity {
                 "Grok · da collegare",
                 "Gemini · da collegare",
                 "Monica · da collegare",
-                "Qwen sul dispositivo · da preparare",
-                "Spark sul dispositivo · da verificare"
+                "Altri servizi · da collegare"
         };
         new AlertDialog.Builder(this)
                 .setTitle("Motore di Dan")
@@ -5047,7 +5271,23 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void assistantReadyForPage(String url, String text) {
             runOnUiThread(() -> {
-                if (webView != null && sameVoicePage(url, webView.getUrl())) speakAssistantText(text);
+                if (webView == null || !sameVoicePage(url, webView.getUrl())) return;
+                if (liveEnabled) {
+                    if (!liveWaiting || !liveSendConfirmed || text == null || text.trim().isEmpty()) return;
+                    liveWaiting = false;
+                    liveSendConfirmed = false;
+                    livePage = url;
+                    appendLiveMessage("DAN", text);
+                    if (liveCaption != null) liveCaption.setText("DAN STA PARLANDO");
+                    if (!ttsReady || !recordingSoundsEnabled || tts == null) {
+                        stopLiveMode("Voce non disponibile · risposta visibile nella chat");
+                        return;
+                    }
+                    // Identical replies to separate turns must still be read.
+                    lastSpokenText = "";
+                    ttsSpeaking = true;
+                }
+                speakAssistantText(text);
             });
         }
 
@@ -5156,7 +5396,7 @@ public class MainActivity extends Activity {
     }
 
     private String danPageScript() {
-        return "function danRoots(){const roots=[],seen=new Set();function visit(root){if(!root||seen.has(root))return;seen.add(root);roots.push(root);for(const e of root.querySelectorAll('*')){if(e.shadowRoot&&danVisible(e))visit(e.shadowRoot);if(e.tagName==='IFRAME'&&danVisible(e)){try{visit(e.contentDocument);}catch(ignore){}}}}visit(document);return roots;}\nfunction danVisible(e){if(!e||e.closest('[hidden],[inert],[aria-hidden=true]'))return false;for(let n=e;n&&n.nodeType===1;n=n.parentElement){const c=n.ownerDocument.defaultView.getComputedStyle(n);if(c.display==='none'||c.visibility==='hidden')return false;}return e.getClientRects().length>0;}\nfunction danEditor(){const strong=[],other=[];for(const root of danRoots())for(const e of root.querySelectorAll('#prompt-textarea,textarea,[contenteditable=true],[role=textbox]')){if(!danVisible(e)||e.disabled||e.readOnly||e.getAttribute('contenteditable')==='false'||e.closest('nav,aside,[role=dialog]'))continue;if(!(e.isContentEditable||e.tagName==='TEXTAREA'||e.tagName==='INPUT'))continue;const hint=((e.id||'')+' '+(e.getAttribute('data-testid')||'')+' '+(e.getAttribute('aria-label')||'')+' '+(e.getAttribute('placeholder')||'')+' '+(e.getAttribute('data-placeholder')||'')).toLowerCase();const list=/prompt|composer|message|messaggio|chiedi|ask|reply|rispondi/.test(hint)?strong:other;if(!list.includes(e))list.push(e);}const a=strong.length?strong:other;return a.length===1?a[0]:null;}\nfunction danSend(e){if(!e)return null;const root=e.getRootNode();const form=e.closest('form');const scope=form||root;const buttons=Array.from(scope.querySelectorAll('button,[role=button]')).filter(danVisible);const exact=buttons.filter(b=>/^(send-button|composer-submit-button)$/.test(b.getAttribute('data-testid')||''));if(exact.length===1)return exact[0];const a=buttons.filter(b=>{const t=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')).trim().toLowerCase();return /send|invia|submit|inviare/.test(t)&&!/voice|vocale|stop|interrompi/.test(t);});return a.length===1?a[0]:null;}\nfunction danAnswer(){const roots=danRoots(),answers=[];for(const root of roots){const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant],[data-testid=assistant-message]')).filter(danVisible);for(const e of turns){const blocks=Array.from(e.querySelectorAll('.markdown,.prose,[data-testid=response-content],[data-testid=message-content]')).filter(danVisible);const leaves=blocks.filter(x=>!blocks.some(y=>x!==y&&x.contains(y)));const text=(leaves.length?leaves:[e]).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join('\\n').trim();if(text)answers.push(text);}}if(answers.length)return answers[answers.length-1].slice(0,12000);for(const root of roots){const buttons=Array.from(root.querySelectorAll('button')).filter(danVisible);for(let i=buttons.length-1;i>=0;i--){const b=buttons[i];const label=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')+' '+(b.getAttribute('title')||'')).toLowerCase();if(!/read aloud|leggi|good-response|bad-response/.test(label))continue;let e=b.parentElement;for(let j=0;e&&j<6;j++,e=e.parentElement){if(e.tagName==='MAIN'||e.tagName==='BODY'||e.getAttribute('role')==='main')break;if(e.querySelector('[data-message-author-role=user]'))break;const blocks=Array.from(e.querySelectorAll('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6')).filter(danVisible);const text=blocks.map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join(' ').trim();if(text.length>=2&&text.length<=12000)return text;}}}return '';}\n";
+        return "function danRoots(){const roots=[],seen=new Set();function visit(root){if(!root||seen.has(root))return;seen.add(root);roots.push(root);for(const e of root.querySelectorAll('*')){if(e.shadowRoot&&danVisible(e))visit(e.shadowRoot);if(e.tagName==='IFRAME'&&danVisible(e)){try{visit(e.contentDocument);}catch(ignore){}}}}visit(document);return roots;}\nfunction danVisible(e){if(!e||e.closest('[hidden],[inert],[aria-hidden=true]'))return false;for(let n=e;n&&n.nodeType===1;n=n.parentElement){const c=n.ownerDocument.defaultView.getComputedStyle(n);if(c.display==='none'||c.visibility==='hidden')return false;}return e.getClientRects().length>0;}\nfunction danEditor(){const strong=[],other=[];for(const root of danRoots())for(const e of root.querySelectorAll('#prompt-textarea,textarea,[contenteditable=true],[role=textbox]')){if(!danVisible(e)||e.disabled||e.readOnly||e.getAttribute('contenteditable')==='false'||e.closest('nav,aside,[role=dialog]'))continue;if(!(e.isContentEditable||e.tagName==='TEXTAREA'||e.tagName==='INPUT'))continue;const hint=((e.id||'')+' '+(e.getAttribute('data-testid')||'')+' '+(e.getAttribute('aria-label')||'')+' '+(e.getAttribute('placeholder')||'')+' '+(e.getAttribute('data-placeholder')||'')).toLowerCase();const list=/prompt|composer|message|messaggio|chiedi|ask|reply|rispondi/.test(hint)?strong:other;if(!list.includes(e))list.push(e);}const a=strong.length?strong:other;return a.length===1?a[0]:null;}\nfunction danSend(e){if(!e)return null;const root=e.getRootNode();const form=e.closest('form');const scope=form||root;const buttons=Array.from(scope.querySelectorAll('button,[role=button]')).filter(danVisible);const exact=buttons.filter(b=>/^(send-button|composer-submit-button)$/.test(b.getAttribute('data-testid')||''));if(exact.length===1)return exact[0];const a=buttons.filter(b=>{const t=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('title')||'')+' '+(b.getAttribute('data-testid')||'')).trim().toLowerCase();return /send|invia|submit|inviare/.test(t)&&!/voice|vocale|stop|interrompi/.test(t);});return a.length===1?a[0]:null;}\nfunction danAnswer(){const roots=danRoots(),answers=[];for(const root of roots){const turns=Array.from(root.querySelectorAll('[data-message-author-role=assistant],[data-testid=assistant],[data-testid=assistant-message]')).filter(danVisible);for(const e of turns){const blocks=Array.from(e.querySelectorAll('.markdown,.prose,[data-testid=response-content],[data-testid=message-content]')).filter(danVisible);const leaves=blocks.filter(x=>!blocks.some(y=>x!==y&&x.contains(y)));const text=(leaves.length?leaves:[e]).map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join('\\n').trim();answers.push(text);}}if(answers.length)return answers[answers.length-1].slice(0,12000);for(const root of roots){const buttons=Array.from(root.querySelectorAll('button')).filter(danVisible);for(let i=buttons.length-1;i>=0;i--){const b=buttons[i];const label=((b.getAttribute('aria-label')||'')+' '+(b.getAttribute('data-testid')||'')+' '+(b.getAttribute('title')||'')).toLowerCase();if(!/read aloud|leggi|good-response|bad-response/.test(label))continue;let e=b.parentElement;for(let j=0;e&&j<6;j++,e=e.parentElement){if(e.tagName==='MAIN'||e.tagName==='BODY'||e.getAttribute('role')==='main')break;if(e.querySelector('[data-message-author-role=user]'))break;const blocks=Array.from(e.querySelectorAll('p,li,pre,blockquote,h1,h2,h3,h4,h5,h6')).filter(danVisible);const text=blocks.map(x=>(x.innerText||x.textContent||'').trim()).filter(Boolean).join(' ').trim();if(text.length>=2&&text.length<=12000)return text;}}}return '';}\n";
     }
 
     private boolean sameVoicePage(String first, String second) {
@@ -5262,12 +5502,15 @@ public class MainActivity extends Activity {
                 "const b=danSend(e);" +
                 "if(!b)return 'NO_SEND';" +
                 "if(b.disabled || b.getAttribute('aria-disabled')==='true')return 'DISABLED';" +
-                "try{b.click();return 'CLICKED';}catch(err){return 'CLICK_ERROR';}" +
+                "try{window.__danLivePending={users:document.querySelectorAll('[data-message-author-role=user]').length,answers:document.querySelectorAll('[data-message-author-role=assistant]').length};b.click();return 'CLICKED';}catch(err){return 'CLICK_ERROR';}" +
                 "})()";
         webView.evaluateJavascript(checkAndSend, value -> runOnUiThread(() -> {
             if (requestId != voiceSendGeneration) return;
             if ("\"CLICKED\"".equals(value)) {
-                statusText.setText("Invio premuto; verifica la risposta nella chat");
+                if (liveEnabled && liveWaiting) {
+                    liveSendConfirmed = true;
+                    statusText.setText("LIVE · attendo la risposta…");
+                } else statusText.setText("Invio premuto; verifica la risposta nella chat");
             } else if (("\"DISABLED\"".equals(value) || "\"NO_SEND\"".equals(value))
                     && attempt < 5) {
                 statusText.postDelayed(() -> trySendVoiceDraft(originalSpeech, requestId, voicePage, attempt + 1), 550L);
@@ -5279,6 +5522,7 @@ public class MainActivity extends Activity {
     }
 
     private void showUnsentVoiceDraft(String text, String reason) {
+        if (liveEnabled) stopLiveMode("Invio non riuscito · testo conservato");
         if (isFinishing()) return;
         EditText draft = new EditText(this);
         draft.setText(text);
@@ -5299,6 +5543,19 @@ public class MainActivity extends Activity {
                 })
                 .setNegativeButton("Chiudi", null)
                 .show();
+    }
+
+    private void injectDanHudTheme() {
+        if (webView == null || !sameVoicePage(webView.getUrl(), webView.getUrl())) return;
+        String css = "html,body{color-scheme:dark!important;background:#030d1a!important;color:#e0f4ff!important;}"
+                + "main,[data-testid=conversation-turns]{background:#030d1a!important;}"
+                + "nav,aside,form,[data-testid=composer-background]{background:#071428!important;}"
+                + "#prompt-textarea,textarea,[contenteditable=true]{color:#e0f4ff!important;}"
+                + "[data-message-author-role=user]{background:rgba(0,150,200,.18)!important;border-radius:12px;}"
+                + "[data-message-author-role=assistant]{color:#e0f4ff!important;}";
+        webView.evaluateJavascript("(()=>{let s=document.getElementById('dan146-hud');"
+                + "if(!s){s=document.createElement('style');s.id='dan146-hud';document.head.appendChild(s);}"
+                + "s.textContent=" + JSONObject.quote(css) + ";})()", null);
     }
 
     private void injectDanBranding() {
@@ -5396,6 +5653,10 @@ public class MainActivity extends Activity {
         }
 
         if (!newKey.equals(activeDanChatKey)) {
+            if (liveEnabled && livePage != null && Uri.parse(livePage).getPath() != null
+                    && Uri.parse(livePage).getPath().contains("/c/")) {
+                stopLiveMode("Chat cambiata · riavvia LIVE nella chat desiderata");
+            }
             activeDanChatKey = newKey;
             lastSpokenText = "";
 
@@ -5485,6 +5746,7 @@ public class MainActivity extends Activity {
     private void injectPageBehaviors() {
         injectDanChatWatcher();
         injectDanBranding();
+        injectDanHudTheme();
         // Riordino automatico sospeso per verificare la lista delle chat.
         injectEnterToSend();
         injectManualLuminexContext();
@@ -5894,10 +6156,14 @@ public class MainActivity extends Activity {
                 + " function latestResponse(){return danAnswer();}"
 
                 + "function check(){"
-                + "  if(page!==location.href){page=location.href;candidate='';candidateSince=0;lastHandled=latestResponse();return;}"
+                + "  if(page!==location.href){page=location.href;candidate='';candidateSince=0;if(!window.__danLivePending){lastHandled=document.querySelectorAll('[data-message-author-role=user]').length+':'+latestResponse();return;}}"
                 + "  const roots=danRoots();if(roots.some(r=>r.querySelector('[data-testid=stop-button],[data-is-streaming=true]'))){candidate='';return;}"
+                + "  const pending=window.__danLivePending;"
+                + "  const users=document.querySelectorAll('[data-message-author-role=user]').length;"
+                + "  const answers=document.querySelectorAll('[data-message-author-role=assistant]').length;"
+                + "  if(pending&&(users<=pending.users||answers<=pending.answers)){candidate='';return;}"
                 + "  const text=latestResponse();"
-                + "  if(!text||text===lastHandled)return;"
+                + "  const turnKey=users+':'+text; if(!text||turnKey===lastHandled)return;"
                 + "  if(text!==candidate){"
                 + "   candidate=text;"
                 + "   candidateSince=Date.now();"
@@ -5906,7 +6172,7 @@ public class MainActivity extends Activity {
                 + "  }"
                 + "  if(Date.now()-candidateSince<1400){schedule(500);return;}"
 
-                + "  lastHandled=text;"
+                + "  lastHandled=turnKey; window.__danLivePending=null;"
 
                 + "  try{"
                 + "   if(window.AndroidRadio&&window.AndroidRadio.assistantReadyForPage){"
@@ -5928,7 +6194,7 @@ public class MainActivity extends Activity {
                 + "  characterData:true"
                 + " });"
 
-                + " lastHandled=latestResponse();"
+                + " lastHandled=document.querySelectorAll('[data-message-author-role=user]').length+':'+latestResponse();"
                 + " setInterval(check,2000);"
                 + "})();";
 
@@ -5937,6 +6203,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (liveEnabled) { stopLiveMode("Live fermato"); return; }
         if (luminexVisible) {
             WebView activeLuminex = getActiveLuminexWebView();
             if (activeLuminex != null && activeLuminex.canGoBack()) {
@@ -6089,6 +6356,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        foreground = true;
         if (driveSync != null && driveSync.configured()) syncDrive(false, false);
         syncPersonalFolder(false);
         startLuminexPolling();
@@ -6130,6 +6398,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onPause() {
+        foreground = false;
+        if (liveEnabled) stopLiveMode("Live fermato · app in background");
         stopChatLiveRefresh();
 
         // DAN 1.94: Luminex deve continuare a ricevere comandi anche quando

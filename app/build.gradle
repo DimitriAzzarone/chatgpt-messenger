@@ -3,7 +3,6 @@ plugins {
 }
 
 android {
-    ndkVersion "29.0.13113456"
     namespace "com.dimitriazzarone.chatgptmessenger"
     compileSdk 35
 
@@ -11,30 +10,14 @@ android {
         applicationId "com.dimitriazzarone.danluminexai"
         minSdk 24
         targetSdk 35
-        ndk {
-            abiFilters 'arm64-v8a'
-        }
-        externalNativeBuild {
-            cmake {
-                arguments '-DGGML_NATIVE=OFF', '-DGGML_OPENMP=OFF',
-                          '-DGGML_CPU_ALL_VARIANTS=OFF', '-DGGML_BACKEND_DL=OFF',
-                          '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF'
-            }
-        }
-        versionCode 145
-        versionName "1.145"
+        versionCode 146
+        versionName "1.146"
         // DAN 1.108: ripristino del comportamento della 1.106.
-        resValue "string", "dan_launcher_label", "Dan 1.145"
+        resValue "string", "dan_launcher_label", "Dan 1.146"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
 
-    externalNativeBuild {
-        cmake {
-            path file('src/main/cpp/CMakeLists.txt')
-            version '3.31.6'
-        }
-    }
     buildFeatures {
         buildConfig = true
     }
