@@ -300,6 +300,7 @@ public class MainActivity extends Activity {
     private ScrollView liveScroll;
     private TextView liveCaption;
     private boolean liveEnabled;
+    private boolean suppressAutoRead;
     private boolean liveWaiting;
     private boolean liveSendConfirmed;
     private boolean foreground;
@@ -743,6 +744,7 @@ public class MainActivity extends Activity {
         listening = false;
         manualCapture = false;
         headsetRecording = false;
+        suppressAutoRead = false;
         liveEnabled = true;
         liveWaiting = false;
         liveSendConfirmed = false;
@@ -758,6 +760,7 @@ public class MainActivity extends Activity {
 
     private void stopLiveMode(String reason) {
         liveEnabled = false;
+        suppressAutoRead = true;
         liveWaiting = false;
         liveSendConfirmed = false;
         pendingLivePermission = false;
@@ -5275,7 +5278,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void assistantReadyForPage(String url, String text) {
             runOnUiThread(() -> {
-                if (webView == null || !sameVoicePage(url, webView.getUrl())) return;
+                if (webView == null || !sameVoicePage(url, webView.getUrl()) || suppressAutoRead) return;
                 if (liveEnabled) {
                     if (!liveWaiting || !liveSendConfirmed || text == null || text.trim().isEmpty()) return;
                     liveWaiting = false;
@@ -5415,6 +5418,7 @@ public class MainActivity extends Activity {
 
     private void injectTextAndSend(String text) {
         if (webView == null) return;
+        suppressAutoRead = false;
 
         String textToSend = text;
 
