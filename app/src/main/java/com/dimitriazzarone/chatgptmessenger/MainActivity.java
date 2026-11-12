@@ -304,6 +304,8 @@ public class MainActivity extends Activity {
     private boolean liveSendConfirmed;
     private boolean foreground;
     private long liveGeneration;
+    private long liveTurnGeneration;
+    private long liveListenGeneration;
     private String livePage;
 
     private boolean ttsReady = false;
@@ -798,10 +800,11 @@ public class MainActivity extends Activity {
         liveCaption.setText("ATTENDO LA RISPOSTA");
         statusText.setText("LIVE · trascrizione pronta, invio…");
         final long generation = liveGeneration;
+        final long turn = ++liveTurnGeneration;
         // Every dictated utterance goes to the current chat; no wake word is required.
         injectTextAndSend(text);
         statusText.postDelayed(() -> {
-            if (liveEnabled && liveWaiting && generation == liveGeneration)
+            if (liveEnabled && liveWaiting && generation == liveGeneration && turn == liveTurnGeneration)
                 stopLiveMode("Risposta non rilevata · controlla la chat prima di riprovare");
         }, 180000L);
     }
@@ -2858,6 +2861,7 @@ public class MainActivity extends Activity {
                 request.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1600L);
             }
             final SpeechRecognizer startedRecognizer = speechRecognizer;
+            final long capture = ++liveListenGeneration;
             if (manualCapture) statusText.postDelayed(() -> {
                 if (speechRecognizer == startedRecognizer && !listening)
                     recoverStalledDictation(startedRecognizer, "Il servizio vocale non ha avviato l'ascolto");
@@ -2866,8 +2870,8 @@ public class MainActivity extends Activity {
             if (liveEnabled) {
                 final long generation = liveGeneration;
                 statusText.postDelayed(() -> {
-                    if (liveEnabled && generation == liveGeneration && speechRecognizer == startedRecognizer
-                            && recognizerSessionActive && !liveWaiting)
+                    if (liveEnabled && generation == liveGeneration && capture == liveListenGeneration
+                            && speechRecognizer == startedRecognizer && recognizerSessionActive && !liveWaiting)
                         stopLiveMode("Il microfono non ha concluso · riavvia LIVE");
                 }, 65000L);
             }
