@@ -12,8 +12,8 @@
 
     <!-- DAN 1.93 build-ready -->
     <application
-        android:icon="@drawable/ic_dan_launcher"
-        android:roundIcon="@drawable/ic_dan_launcher"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="true"
         android:label="@string/dan_launcher_label"
         android:supportsRtl="true"

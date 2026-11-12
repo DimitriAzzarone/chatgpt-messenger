@@ -58,7 +58,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
-import android.widget.ScrollView;
+import android.widget.ImageView;
 import android.graphics.Typeface;
 
 import androidx.webkit.ProfileStore;
@@ -294,10 +294,6 @@ public class MainActivity extends Activity {
     };
 
     private TextToSpeech tts;
-    private Button liveButton;
-    private LinearLayout livePanel;
-    private LinearLayout liveMessages;
-    private ScrollView liveScroll;
     private TextView liveCaption;
     private boolean liveEnabled;
     private boolean suppressAutoRead;
@@ -351,7 +347,7 @@ public class MainActivity extends Activity {
             statusText.postDelayed(this::recoverHandsFreeMicrophone, 500L);
         } else {
             autoButton.setText("MIC");
-            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+            statusText.setText("Tocca il microfono per avviare LIVE");
         }
     }
 
@@ -366,17 +362,23 @@ public class MainActivity extends Activity {
         topBar.setPadding(dp(8), dp(4), dp(8), dp(4));
         topBar.setBackgroundColor(Color.rgb(7, 20, 40));
 
-        TextView logo = new TextView(this);
-        logo.setText("DAN");
-        logo.setTextColor(Color.rgb(6, 44, 37));
-        logo.setTextSize(15);
-        logo.setGravity(Gravity.CENTER);
-        logo.setBackgroundColor(Color.rgb(0, 200, 255));
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.mipmap.ic_launcher);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setContentDescription("Dan · cerchi luminosi azzurri");
 
         TextView title = new TextView(this);
         title.setText("  Dan " + BuildConfig.VERSION_NAME);
         title.setTextColor(Color.rgb(0, 200, 255));
         title.setTextSize(17);
+        try {
+            title.setTypeface(Typeface.createFromAsset(getAssets(), "fonts/Orbitron.ttf"));
+        } catch (RuntimeException unsupportedFont) {
+            title.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        }
+        title.setShadowLayer(dp(8), 0, 0, Color.argb(120, 0, 200, 255));
+        getWindow().setStatusBarColor(Color.rgb(3, 13, 26));
+        getWindow().setNavigationBarColor(Color.rgb(3, 13, 26));
 
         voiceButton = makeButton("🔊");
         voiceButton.setTextSize(18);
@@ -466,14 +468,19 @@ public class MainActivity extends Activity {
         statusText = new TextView(this);
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "⚪ Audio libero — microfono/cuffie solo quando li usi");
+                : "Tocca il microfono per avviare LIVE");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
+        statusText.setMaxLines(3);
+        statusText.setText("Tocca il microfono per avviare LIVE");
+        liveCaption = statusText;
         statusText.setGravity(Gravity.CENTER_VERTICAL);
 
         micButton = new Button(this);
         micButton.setText("🎙");
         micButton.setTextSize(25);
+        micButton.setPadding(0, 0, 0, 0);
+        micButton.setContentDescription("Avvia LIVE mantenendo visibile la chat");
         micButton.setTextColor(Color.WHITE);
         micButton.setGravity(Gravity.CENTER);
         applyMicStyle(false);
@@ -506,16 +513,8 @@ public class MainActivity extends Activity {
         });
         engineButton.setOnLongClickListener(v -> { showEngineMenu(); return true; });
 
-        Button liveButton = makeButton("LIVE");
-        liveButton.setAllCaps(false);
-        liveButton.setTextSize(12);
-        liveButton.setContentDescription("Avvia o ferma la conversazione vocale continua");
-        liveButton.setOnClickListener(v -> toggleLiveMode());
-        this.liveButton = liveButton;
-
         controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
-        controlsBar.addView(liveButton, new LinearLayout.LayoutParams(0, dp(42), 1));
 
         root.addView(topBar);
         root.addView(controlsBar);
@@ -601,122 +600,7 @@ public class MainActivity extends Activity {
         playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
 
-        micButton.setOnTouchListener((v, event) -> {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    if (liveEnabled) stopLiveMode("Microfono manuale");
-                    if (recordingLocked) {
-                        finishLockedRecording();
-                        return true;
-                    }
-
-                    touchStartY = event.getRawY();
-                    manualStopPending = false;
-                    lastPartialText = "";
-                    if (speechRecognizer != null) {
-                        // Abandon the previous recognizer completely: a late
-                        // ERROR_CLIENT from that session must not clear this one.
-                        try { speechRecognizer.cancel(); } catch (Exception ignored) {}
-                        try { speechRecognizer.destroy(); } catch (Exception ignored) {}
-                        speechRecognizer = null;
-                        recognizerSessionActive = false;
-                        listening = false;
-                        createSpeechRecognizer();
-                    }
-                    pressToTalkRequested = true;
-                    manualCapture = true;
-                    startPressToTalk();
-                    return true;
-
-                case MotionEvent.ACTION_MOVE:
-                    if (listening && !recordingLocked) {
-                        float movedUp = touchStartY - event.getRawY();
-
-                        if (movedUp >= dp(80)) {
-                            recordingLocked = true;
-                            pressToTalkRequested = false;
-                            micButton.setText("■");
-                            applyMicStyle(true);
-                            statusText.setText("🔒 Registrazione bloccata — tocca ■ per inviare");
-                        }
-                    }
-                    return true;
-
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    pressToTalkRequested = false;
-
-                    if (!recordingLocked) {
-                        stopPressToTalk();
-                    }
-                    return true;
-            }
-
-            return false;
-        });
-    }
-
-    private void showLivePanel() {
-        if (livePanel == null) {
-            livePanel = new LinearLayout(this);
-            livePanel.setOrientation(LinearLayout.VERTICAL);
-            livePanel.setPadding(dp(16), dp(12), dp(16), dp(12));
-            livePanel.setBackgroundColor(Color.rgb(3, 13, 26));
-            TextView heading = new TextView(this);
-            heading.setText("DAN · LIVE");
-            heading.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-            heading.setTextColor(Color.rgb(0, 200, 255));
-            heading.setTextSize(22);
-            livePanel.addView(heading);
-            liveScroll = new ScrollView(this);
-            liveMessages = new LinearLayout(this);
-            liveMessages.setOrientation(LinearLayout.VERTICAL);
-            liveScroll.addView(liveMessages);
-            livePanel.addView(liveScroll, new LinearLayout.LayoutParams(-1, 0, 1));
-            Button orb = makeButton("DAN\nTOCCA PER FERMARE");
-            orb.setTextSize(16);
-            orb.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-            orb.setTextColor(Color.rgb(0, 200, 255));
-            GradientDrawable ring = new GradientDrawable();
-            ring.setShape(GradientDrawable.OVAL);
-            ring.setColor(Color.rgb(7, 20, 40));
-            ring.setStroke(dp(3), Color.rgb(0, 200, 255));
-            orb.setBackground(ring);
-            LinearLayout.LayoutParams orbLp = new LinearLayout.LayoutParams(dp(166), dp(166));
-            orbLp.gravity = Gravity.CENTER_HORIZONTAL;
-            orbLp.setMargins(0, dp(8), 0, dp(8));
-            livePanel.addView(orb, orbLp);
-            orb.setOnClickListener(v -> stopLiveMode("Live fermato"));
-            liveCaption = new TextView(this);
-            liveCaption.setTextColor(Color.rgb(224, 244, 255));
-            liveCaption.setGravity(Gravity.CENTER);
-            livePanel.addView(liveCaption);
-            webContainer.addView(livePanel, new FrameLayout.LayoutParams(-1, -1));
-        }
-        livePanel.setVisibility(View.VISIBLE);
-        livePanel.bringToFront();
-        liveCaption.setText("Parla normalmente · pausa per inviare");
-    }
-
-    private void appendLiveMessage(String who, String text) {
-        if (liveMessages == null) return;
-        TextView message = new TextView(this);
-        message.setText(who + " · " + new SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-                .format(new Date()) + "\n" + text);
-        message.setTextColor(Color.rgb(224, 244, 255));
-        message.setTextSize(16);
-        message.setPadding(dp(12), dp(10), dp(12), dp(10));
-        GradientDrawable bubble = new GradientDrawable();
-        bubble.setColor(Color.rgb(7, 20, 40));
-        bubble.setCornerRadius(dp(12));
-        bubble.setStroke(dp(1), Color.argb(80, 0, 200, 255));
-        message.setBackground(bubble);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-        lp.bottomMargin = dp(10);
-        liveMessages.addView(message, lp);
-        // Full history remains in the original authenticated chat.
-        if (liveMessages.getChildCount() > 60) liveMessages.removeViewAt(0);
-        liveScroll.post(() -> liveScroll.fullScroll(View.FOCUS_DOWN));
+        micButton.setOnClickListener(v -> toggleLiveMode());
     }
 
     private void toggleLiveMode() {
@@ -750,8 +634,9 @@ public class MainActivity extends Activity {
         liveSendConfirmed = false;
         liveGeneration++;
         livePage = webView.getUrl();
-        liveButton.setText("FERMA LIVE");
-        showLivePanel();
+        micButton.setActivated(true);
+        micButton.setContentDescription("Ferma LIVE · chat sempre visibile");
+        applyMicStyle(true);
         statusText.setText("LIVE · preparo l'ascolto…");
         scheduleLiveListen(450L);
     }
@@ -772,8 +657,10 @@ public class MainActivity extends Activity {
         listening = false;
         if (tts != null) { try { tts.stop(); } catch (Exception ignored) {} }
         ttsSpeaking = false;
-        if (liveButton != null) liveButton.setText("LIVE");
-        if (livePanel != null) livePanel.setVisibility(View.GONE);
+        if (micButton != null) {
+            micButton.setActivated(false);
+            micButton.setContentDescription("Avvia LIVE mantenendo visibile la chat");
+        }
         if (webView != null) webView.evaluateJavascript("window.__danLivePending=null;", null);
         if (statusText != null) statusText.setText(reason);
         if (micButton != null) applyMicStyle(false);
@@ -799,7 +686,6 @@ public class MainActivity extends Activity {
         if (text.trim().isEmpty()) { scheduleLiveListen(500L); return; }
         liveWaiting = true;
         liveSendConfirmed = false;
-        appendLiveMessage("TU", text);
         liveCaption.setText("ATTENDO LA RISPOSTA");
         statusText.setText("LIVE · trascrizione pronta, invio…");
         final long generation = liveGeneration;
@@ -1879,20 +1765,19 @@ public class MainActivity extends Activity {
     }
 
     private void applyMicStyle(boolean active) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(active
-                ? Color.rgb(239, 83, 80)
-                : Color.rgb(0, 200, 255));
-        micButton.setBackground(bg);
+        micButton.setBackground(new DanHudMicDrawable(active || liveEnabled));
     }
 
     private Button makeButton(String text) {
         Button button = new Button(this);
         button.setText(text);
-        button.setTextColor(Color.WHITE);
+        button.setTextColor(Color.rgb(0, 200, 255));
         button.setTextSize(21);
-        button.setBackgroundColor(Color.TRANSPARENT);
+        GradientDrawable panel = new GradientDrawable();
+        panel.setColor(Color.rgb(7, 20, 40));
+        panel.setCornerRadius(dp(20));
+        panel.setStroke(dp(1), Color.argb(46, 0, 200, 255));
+        button.setBackground(panel);
         return button;
     }
 
@@ -1941,7 +1826,7 @@ public class MainActivity extends Activity {
                         playReadingFinishedSound();
                         statusText.setText(handsFreeEnabled
                                 ? "🟢 In attesa — dì Jasper per iniziare"
-                                : "⚪ Auto OFF — usa il microfono manuale");
+                                : "Tocca il microfono per avviare LIVE");
                         if (handsFreeEnabled) {
                             recognizerSessionActive = false;
                             listening = false;
@@ -2413,7 +2298,7 @@ public class MainActivity extends Activity {
                 manualCapture = false;
                 statusText.setText(handsFreeEnabled
                         ? "🟢 In attesa — dì Jasper per iniziare"
-                        : "⚪ Auto OFF — usa il microfono manuale");
+                        : "Tocca il microfono per avviare LIVE");
                 scheduleHandsFreeRestart(400L);
             }
             return;
@@ -2702,7 +2587,7 @@ public class MainActivity extends Activity {
 
     private void startHandsFreeMode() {
         if (!handsFreeEnabled) {
-            statusText.setText("⚪ Auto OFF — usa il microfono manuale");
+            statusText.setText("Tocca il microfono per avviare LIVE");
             return;
         }
 
@@ -5284,7 +5169,6 @@ public class MainActivity extends Activity {
                     liveWaiting = false;
                     liveSendConfirmed = false;
                     livePage = url;
-                    appendLiveMessage("DAN", text);
                     if (liveCaption != null) liveCaption.setText("DAN STA PARLANDO");
                     if (!ttsReady || !recordingSoundsEnabled || tts == null) {
                         stopLiveMode("Voce non disponibile · risposta visibile nella chat");
@@ -5555,12 +5439,17 @@ public class MainActivity extends Activity {
 
     private void injectDanHudTheme() {
         if (webView == null || !sameVoicePage(webView.getUrl(), webView.getUrl())) return;
-        String css = "html,body{color-scheme:dark!important;background:#030d1a!important;color:#e0f4ff!important;}"
-                + "main,[data-testid=conversation-turns]{background:#030d1a!important;}"
-                + "nav,aside,form,[data-testid=composer-background]{background:#071428!important;}"
-                + "#prompt-textarea,textarea,[contenteditable=true]{color:#e0f4ff!important;}"
-                + "[data-message-author-role=user]{background:rgba(0,150,200,.18)!important;border-radius:12px;}"
-                + "[data-message-author-role=assistant]{color:#e0f4ff!important;}";
+        String css;
+        try (InputStream input = getAssets().open("dan-hud.css")) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = input.read(buffer)) != -1) bytes.write(buffer, 0, read);
+            css = bytes.toString("UTF-8");
+        } catch (Exception e) {
+            android.util.Log.w("DanHud", "Tema non disponibile", e);
+            return;
+        }
         webView.evaluateJavascript("(()=>{let s=document.getElementById('dan146-hud');"
                 + "if(!s){s=document.createElement('style');s.id='dan146-hud';document.head.appendChild(s);}"
                 + "s.textContent=" + JSONObject.quote(css) + ";})()", null);
@@ -6397,7 +6286,7 @@ public class MainActivity extends Activity {
 
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "⚪ Audio libero — microfono/cuffie solo quando li usi");
+                : "Tocca il microfono per avviare LIVE");
 
         if (handsFreeEnabled && !manualCapture && !headsetRecording && !ttsSpeaking) {
             scheduleHandsFreeRestart(250L);
