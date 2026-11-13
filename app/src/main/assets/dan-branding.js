@@ -14,7 +14,7 @@
   while ((text = walker.nextNode())) {
    if (text.nodeValue.trim() !== 'ChatGPT') continue;
    const element = text.parentElement;
-   if (!element || element.closest('#dan-hewa-sidebar-cover, main, article, [data-message-author-role], textarea, [contenteditable="true"]')) continue;
+   if (!element || element.closest('#dan-hewa-sidebar-cover, article, [data-message-author-role], textarea, [contenteditable="true"]')) continue;
    const link = element.closest('a');
    if (link && /\/(c|g|project)\//.test(link.getAttribute('href') || '')) continue;
    const range = document.createRange(); range.selectNodeContents(text);
