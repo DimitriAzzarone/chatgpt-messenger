@@ -2,7 +2,7 @@
  if (location.origin !== 'https://chatgpt.com') return;
  if (window.__danHewaBranding) { window.__danHewaBranding(); return; }
  const apply = () => {
-  for (const sidebar of document.querySelectorAll('#sidebar, [data-testid="sidebar"], nav[aria-label="Chat history"]')) {
+  for (const sidebar of document.querySelectorAll('#sidebar, #stage-sidebar, #stage-slideover-sidebar, [data-testid="sidebar"], aside, nav')) {
    for (const node of sidebar.querySelectorAll('a[href="/"], a[href="https://chatgpt.com/"], button')) {
     if (node.textContent.trim() !== 'ChatGPT') continue;
     const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
