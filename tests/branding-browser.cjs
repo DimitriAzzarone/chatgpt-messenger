@@ -16,6 +16,18 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='none');await page.waitForTimeout(250);assert.equal(await cover.isVisible(),false);
  await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='block');await cover.waitFor({state:'visible'});
  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(250);assert.equal(await cover.isVisible(),true);
+ // Attribute-only updates preserve typed content and work even without a visible sidebar.
+ await page.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<textarea id="plain" placeholder="Chiedi a ChatGPT">Messaggio Chiedi a ChatGPT</textarea><div id="prompt-textarea" contenteditable="true"><p data-placeholder="Chiedi a ChatGPT"><br></p></div><input id="search" placeholder="Cerca ChatGPT">');});
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#plain').getAttribute('placeholder'),'Chiedi a Dan');
+ assert.equal(await page.locator('#plain').inputValue(),'Messaggio Chiedi a ChatGPT');
+ assert.equal(await page.locator('#prompt-textarea p').getAttribute('data-placeholder'),'Chiedi a Dan');
+ assert.equal(await page.locator('#search').getAttribute('placeholder'),'Cerca ChatGPT');
+ await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='none');
+ await page.locator('#prompt-textarea').evaluate(e=>e.innerHTML='<p data-placeholder="Chiedi a ChatGPT">Testo Chiedi a ChatGPT</p>');
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#prompt-textarea p').getAttribute('data-placeholder'),'Chiedi a Dan');
+ assert.equal(await page.locator('#prompt-textarea').innerText(),'Testo Chiedi a ChatGPT');
  await page.screenshot({path:'/workspace/dan-artifacts/hewa-sidebar-cover.png'});
  await browser.close();console.log('Unknown sidebar markup, cover position, SPA rerender, hidden drawer, phone resize and preserved conversation text: passed');
 })();

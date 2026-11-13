@@ -28,8 +28,20 @@
   }
   return null;
  };
+ const brandComposer = () => {
+  const original = /^(?:Chiedi\s+a\s+ChatGPT|Ask\s+ChatGPT)$/i;
+  for (const editor of document.querySelectorAll('textarea, #prompt-textarea, [contenteditable="true"][role="textbox"]')) {
+   for (const node of [editor, ...editor.querySelectorAll('[data-placeholder], [placeholder]')]) {
+    for (const attr of ['placeholder', 'data-placeholder', 'aria-placeholder', 'aria-label']) {
+     const value = node.getAttribute(attr);
+     if (value && original.test(value.trim())) node.setAttribute(attr, 'Chiedi a Dan');
+    }
+   }
+  }
+ };
  const apply = () => {
   if (!document.body) return;
+  brandComposer();
   if (!overlay.isConnected) document.body.appendChild(overlay);
   const title = findTitle();
   if (!title) { overlay.style.display = 'none'; current = null; return; }
@@ -51,7 +63,7 @@
  };
  new MutationObserver(records => {
   if (records.some(r => r.target !== overlay && !overlay.contains(r.target))) schedule();
- }).observe(document.documentElement, {childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','style','hidden','aria-expanded']});
+ }).observe(document.documentElement, {childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['class','style','hidden','aria-expanded','placeholder','data-placeholder','aria-placeholder','aria-label']});
  addEventListener('resize', schedule);
  addEventListener('scroll', schedule, true);
  // Layout movement need not mutate the label itself (drawer animations, zoom).
