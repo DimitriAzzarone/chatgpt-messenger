@@ -1,2 +1,21 @@
 const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:assert/strict');
-(async()=>{const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});const page=await browser.newPage();await page.route('https://chatgpt.com/**',r=>r.fulfill({contentType:'text/html',body:'<aside id="stage-sidebar"><a href="/"><span>ChatGPT</span><svg></svg></a><a href="/c/1">ChatGPT</a></aside><main>ChatGPT</main>'}));await page.goto('https://chatgpt.com/');await page.addScriptTag({content:fs.readFileSync('app/src/main/assets/dan-branding.js','utf8')});assert.equal(await page.locator('a[href="/"]').innerText(),'Hewa');assert.equal(await page.locator('a[href="/c/1"]').innerText(),'ChatGPT');assert.equal(await page.locator('main').innerText(),'ChatGPT');await page.locator('aside').evaluate(e=>e.innerHTML='<button><span>ChatGPT</span></button>');await page.waitForTimeout(250);assert.equal(await page.locator('aside button').innerText(),'Hewa');await browser.close();console.log('Sidebar branding and SPA rerender passed; conversation text preserved');})();
+(async()=>{
+ const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox']});
+ const page=await browser.newPage({viewport:{width:1280,height:800}});
+ await page.route('https://chatgpt.com/**',r=>r.fulfill({contentType:'text/html',body:`<style>body{margin:0;background:#030d1a;color:white;font:14px Arial}#unknown-sidebar-header{position:absolute;left:10px;top:14px} main{position:absolute;left:350px;top:250px} #chat{position:absolute;left:10px;top:210px}</style><div id="unknown-sidebar-header" role="button"><div><span id="title">ChatGPT</span><span>⌄</span></div></div><a id="chat" href="/c/1">ChatGPT</a><main>ChatGPT</main>`}));
+ await page.goto('https://chatgpt.com/');
+ await page.addScriptTag({content:fs.readFileSync('app/src/main/assets/dan-branding.js','utf8')});
+ const cover=page.locator('#dan-hewa-sidebar-cover');
+ await cover.waitFor({state:'visible'});assert.equal(await cover.innerText(),'Hewa');
+ let rect=await cover.boundingBox();assert(rect.x<=10&&rect.y<=14);
+ assert.equal(await page.locator('#title').innerText(),'ChatGPT');
+ assert.equal(await page.locator('#chat').innerText(),'ChatGPT');assert.equal(await page.locator('main').innerText(),'ChatGPT');
+ assert.equal(await cover.evaluate(e=>getComputedStyle(e).pointerEvents),'none');
+ await page.locator('#unknown-sidebar-header').evaluate(e=>{e.style.top='35px';e.innerHTML='<div id="title">ChatGPT</div>'});
+ await page.waitForTimeout(250);rect=await cover.boundingBox();assert(rect.y>=34&&rect.y<=36);
+ await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='none');await page.waitForTimeout(250);assert.equal(await cover.isVisible(),false);
+ await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='block');await cover.waitFor({state:'visible'});
+ await page.setViewportSize({width:390,height:844});await page.waitForTimeout(250);assert.equal(await cover.isVisible(),true);
+ await page.screenshot({path:'/workspace/dan-artifacts/hewa-sidebar-cover.png'});
+ await browser.close();console.log('Unknown sidebar markup, cover position, SPA rerender, hidden drawer, phone resize and preserved conversation text: passed');
+})();
