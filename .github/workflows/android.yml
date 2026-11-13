@@ -1,10 +1,11 @@
-name: Build Dan APK
+name: Build Dan Diari APK
 run-name: Dan ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
   push:
     branches:
+      - dan-diari-special
       - dan-v1.97-chat-live-refresh
       - dan-v1.98-disable-live-refresh
       - dan-v1.99-memory-ranking
@@ -130,13 +131,8 @@ jobs:
         with:
           packages: ''
 
-      - name: Check live response observer
-        run: |
-          python3 tests/extract-voice-scripts.py
-          node --check /tmp/dan146-observer.js
-          node tests/live-observer.test.cjs
-          node --check app/src/main/assets/dan-web-voice.js
-          node tests/web-voice.test.cjs
+      - name: Check diary extraction
+        run: node tests/diary-export.test.cjs
 
       - name: Build Dan Luminex AI Integration
         env:

@@ -7,13 +7,13 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId "com.dimitriazzarone.danluminexai"
+        applicationId "com.dimitriazzarone.danhewa.diari"
         minSdk 24
         targetSdk 35
-        versionCode 151
-        versionName "1.146.5"
+        versionCode 1
+        versionName "1.0"
         // DAN 1.108: ripristino del comportamento della 1.106.
-        resValue "string", "dan_launcher_label", "Dan Hewa"
+        resValue "string", "dan_launcher_label", "Dan Hewa Diari"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
