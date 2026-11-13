@@ -374,7 +374,7 @@ public class MainActivity extends Activity {
         logo.setContentDescription("Dan · cerchi luminosi azzurri");
 
         TextView title = new TextView(this);
-        title.setText("  Dan " + BuildConfig.VERSION_NAME);
+        title.setText("  Dan Hewa " + BuildConfig.VERSION_NAME);
         title.setTextColor(Color.rgb(0, 200, 255));
         title.setTextSize(17);
         try {
@@ -429,7 +429,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText("  Dan " + BuildConfig.VERSION_NAME);
+            title.setText("  Dan Hewa " + BuildConfig.VERSION_NAME);
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);
@@ -528,13 +528,6 @@ public class MainActivity extends Activity {
         controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
 
-        TextView edition = new TextView(this);
-        edition.setText("平和  HEIWA EDITION · DAN");
-        edition.setTextColor(Color.rgb(0, 200, 255));
-        edition.setTextSize(16);
-        edition.setPadding(dp(12), dp(7), dp(12), dp(7));
-        edition.setBackgroundColor(Color.rgb(3, 13, 26));
-        root.addView(edition);
         root.addView(topBar);
         root.addView(controlsBar);
         luminexAddressBar = new LinearLayout(this);
@@ -5523,7 +5516,8 @@ public class MainActivity extends Activity {
 
     private void injectDanBranding() {
         if (webView == null || !trustedVoiceOrigin(webView.getUrl())) return;
-        // Keep account/model/service labels intact. Branding is in the native Heiwa header.
+        // Brand only the sidebar home control; preserve conversation and account content.
+        webView.evaluateJavascript(voiceAsset("dan-branding.js"), null);
         webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), null);
     }
 
