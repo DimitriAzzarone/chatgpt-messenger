@@ -527,6 +527,13 @@ public class MainActivity extends Activity {
 
         controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        Button copyChatButton = makeButton("Copia chat");
+        copyChatButton.setAllCaps(false);
+        copyChatButton.setTextSize(12);
+        copyChatButton.setContentDescription("Copia i messaggi e le risposte della chat aperta negli appunti");
+        copyChatButton.setOnClickListener(v -> copyCurrentChat());
+        controlsBar.addView(copyChatButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+
 
         root.addView(topBar);
         root.addView(controlsBar);
@@ -5514,6 +5521,71 @@ public class MainActivity extends Activity {
                 + "s.textContent=" + JSONObject.quote(css) + ";})()", null);
     }
 
+    private final Handler copyChatHandler = new Handler(Looper.getMainLooper());
+    private int copyChatToken = 0;
+    private boolean copyingChat = false;
+
+    private boolean sameCopyChat(WebView source, String url, int token) {
+        return !isFinishing() && !isDestroyed() && token == copyChatToken
+                && source == webView && trustedVoiceOrigin(source.getUrl())
+                && url.equals(source.getUrl());
+    }
+
+    private void copyCurrentChat() {
+        if (copyingChat) { Toast.makeText(this, "Lettura della chat in corso…", Toast.LENGTH_SHORT).show(); return; }
+        final WebView source = webView;
+        final String url = source == null ? null : source.getUrl();
+        if (url == null || !trustedVoiceOrigin(url)) {
+            Toast.makeText(this, "Apri prima la chat da copiare su ChatGPT.", Toast.LENGTH_LONG).show(); return;
+        }
+        copyingChat = true;
+        final int token = ++copyChatToken;
+        Toast.makeText(this, "Lettura della chat completa…", Toast.LENGTH_SHORT).show();
+        source.evaluateJavascript(voiceAsset("diary-export.js") + ";window.__diaryStart();", null);
+        pollCopyChat(source, url, token, 0);
+    }
+
+    private void pollCopyChat(WebView source, String url, int token, int ticks) {
+        copyChatHandler.postDelayed(() -> {
+            if (!sameCopyChat(source, url, token)) { copyingChat = false; return; }
+            if (ticks > 65) { copyingChat = false; Toast.makeText(this, "Lettura scaduta: riprova.", Toast.LENGTH_LONG).show(); return; }
+            source.evaluateJavascript("JSON.stringify(window.__diaryResult||{pending:true})", raw -> {
+                if (!sameCopyChat(source, url, token)) { copyingChat = false; return; }
+                try {
+                    Object decoded = new org.json.JSONTokener(raw).nextValue();
+                    JSONObject result = new JSONObject((String) decoded);
+                    if (result.optBoolean("pending")) { pollCopyChat(source, url, token, ticks + 1); return; }
+                    copyingChat = false;
+                    if (result.has("error")) { Toast.makeText(this, result.getString("error"), Toast.LENGTH_LONG).show(); return; }
+                    final String text = result.getString("text");
+                    final String title = result.optString("title", "Chat Dan Hewa");
+                    final int count = result.optInt("count");
+                    if (text.getBytes(StandardCharsets.UTF_8).length > 650000) {
+                        new AlertDialog.Builder(this).setTitle("Chat troppo grande per gli appunti")
+                            .setMessage("Per evitare il limite degli appunti Android, usa l’esportazione Word di Dan Hewa Diari oppure copia la chat in parti.")
+                            .setPositiveButton("OK", null).show(); return;
+                    }
+                    Runnable copy = () -> {
+                        if (!sameCopyChat(source, url, token)) { Toast.makeText(this, "Chat cambiata: ripeti la copia.", Toast.LENGTH_LONG).show(); return; }
+                        try {
+                            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                            clipboard.setPrimaryClip(ClipData.newPlainText(title, text));
+                            Toast.makeText(this, count + " messaggi copiati. Ora puoi incollarli nella nuova chat.", Toast.LENGTH_LONG).show();
+                        } catch (Exception e) { Toast.makeText(this, "Copia non riuscita: il testo potrebbe superare il limite degli appunti.", Toast.LENGTH_LONG).show(); }
+                    };
+                    if (!result.optBoolean("complete")) {
+                        new AlertDialog.Builder(this).setTitle("Disponibile solo un estratto")
+                            .setMessage(result.optString("warning") + "\n\n" + count + " messaggi caricati.")
+                            .setNegativeButton("Annulla", null).setPositiveButton("Copia estratto", (d, w) -> copy.run()).show();
+                    } else copy.run();
+                } catch (Exception e) {
+                    copyingChat = false;
+                    Toast.makeText(this, "Non riesco a leggere la chat. Attendi il caricamento e riprova.", Toast.LENGTH_LONG).show();
+                }
+            });
+        }, 500);
+    }
+
     private void injectDanBranding() {
         if (webView == null || !trustedVoiceOrigin(webView.getUrl())) return;
         // Brand only the sidebar home control; preserve conversation and account content.
@@ -6357,6 +6429,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        copyChatToken++;
+        copyChatHandler.removeCallbacksAndMessages(null);
         if (webVoiceRequested) stopWebVoice("LIVE chiuso");
         for (Map.Entry<String, ChatPrivateState> entry
                 : privateChats.entrySet()) {
