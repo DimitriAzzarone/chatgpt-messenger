@@ -47,6 +47,8 @@ import android.webkit.JavascriptInterface;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.PermissionRequest;
+import androidx.webkit.WebSettingsCompat;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -296,6 +298,10 @@ public class MainActivity extends Activity {
     private TextToSpeech tts;
     private TextView liveCaption;
     private boolean liveEnabled;
+    private boolean webVoiceRequested, webVoiceActive, pendingWebVoicePermission;
+    private long webVoiceGeneration;
+    private String webVoicePage;
+    private Button webVoiceClose;
     private boolean suppressAutoRead;
     private boolean liveWaiting;
     private boolean liveSendConfirmed;
@@ -490,6 +496,12 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams micParams = new LinearLayout.LayoutParams(dp(58), dp(58));
         micParams.setMargins(dp(8), 0, 0, 0);
         bottomBar.addView(micButton, micParams);
+        webVoiceClose = makeButton("✕");
+        webVoiceClose.setTextSize(23);
+        webVoiceClose.setContentDescription("Chiudi LIVE e libera il microfono");
+        webVoiceClose.setVisibility(View.GONE);
+        webVoiceClose.setOnClickListener(v -> stopWebVoice("LIVE chiuso"));
+        bottomBar.addView(webVoiceClose, new LinearLayout.LayoutParams(dp(52), dp(58)));
 
         LinearLayout controlsBar = new LinearLayout(this);
         controlsBar.setOrientation(LinearLayout.HORIZONTAL);
@@ -516,6 +528,13 @@ public class MainActivity extends Activity {
         controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
 
+        TextView edition = new TextView(this);
+        edition.setText("平和  HEIWA EDITION · DAN");
+        edition.setTextColor(Color.rgb(0, 200, 255));
+        edition.setTextSize(16);
+        edition.setPadding(dp(12), dp(7), dp(12), dp(7));
+        edition.setBackgroundColor(Color.rgb(3, 13, 26));
+        root.addView(edition);
         root.addView(topBar);
         root.addView(controlsBar);
         luminexAddressBar = new LinearLayout(this);
@@ -600,7 +619,71 @@ public class MainActivity extends Activity {
         playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
 
-        micButton.setOnClickListener(v -> toggleLiveMode());
+        micButton.setOnClickListener(v -> toggleWebVoice());
+    }
+
+    private String voiceAsset(String name) {
+        try (InputStream input = getAssets().open(name); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096]; int n;
+            while ((n = input.read(buffer)) != -1) out.write(buffer, 0, n);
+            return out.toString("UTF-8");
+        } catch (Exception e) { return ""; }
+    }
+
+    private boolean trustedVoiceOrigin(String url) {
+        if (url == null) return false;
+        try {
+            Uri u = Uri.parse(url);
+            return "https".equals(u.getScheme()) && "chatgpt.com".equals(u.getHost())
+                    && (u.getPort() == -1 || u.getPort() == 443);
+        } catch (Exception e) { return false; }
+    }
+
+    private void toggleWebVoice() {
+        if (webVoiceRequested) { stopWebVoice("LIVE chiuso"); return; }
+        if (webView == null || !trustedVoiceOrigin(webView.getUrl()) || luminexVisible) {
+            statusText.setText("Apri ChatGPT nella chat desiderata prima di LIVE"); return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingWebVoicePermission = true;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO); return;
+        }
+        if (liveEnabled) stopLiveMode("Passaggio alla voce continua");
+        handsFreeEnabled = false;
+        if (speechRecognizer != null) { try { speechRecognizer.cancel(); } catch (Exception ignored) {} }
+        recognizerSessionActive = false; listening = false; manualCapture = false;
+        headsetRecording = false; manualStopPending = false;
+        if (tts != null) { try { tts.stop(); } catch (Exception ignored) {} }
+        ttsSpeaking = false; suppressAutoRead = true;
+        webVoiceRequested = true; webVoiceActive = false; webVoicePage = webView.getUrl();
+        final long generation = ++webVoiceGeneration;
+        webVoiceClose.setVisibility(View.VISIBLE);
+        micButton.setContentDescription("LIVE aperto · chiudi con X");
+        applyMicStyle(true);
+        statusText.setText("LIVE · avvio della modalità vocale ChatGPT…");
+        webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), result -> {
+            if (!webVoiceRequested || generation != webVoiceGeneration || webView == null) return;
+            webView.evaluateJavascript("window.__danWebVoice ? window.__danWebVoice.start("
+                    + JSONObject.quote(Long.toString(generation)) + ") : 'unsupported'", null);
+        });
+        statusText.postDelayed(() -> {
+            if (webVoiceRequested && generation == webVoiceGeneration && !webVoiceActive)
+                stopWebVoice("Voce continua non avviata · verifica la disponibilità nella tua sessione web");
+        }, 30000L);
+    }
+
+    private void stopWebVoice(String reason) {
+        boolean requested = webVoiceRequested;
+        webVoiceRequested = false; webVoiceActive = false; pendingWebVoicePermission = false;
+        webVoiceGeneration++;
+        if (requested && webView != null) {
+            try { if (trustedVoiceOrigin(webView.getUrl()))
+                webView.evaluateJavascript("window.__danWebVoice && window.__danWebVoice.stop()", null);
+            } catch (Exception ignored) {}
+        }
+        if (webVoiceClose != null) webVoiceClose.setVisibility(View.GONE);
+        if (micButton != null) { micButton.setContentDescription("Avvia LIVE vocale"); applyMicStyle(false); }
+        if (statusText != null) statusText.setText(reason);
     }
 
     private void toggleLiveMode() {
@@ -1043,6 +1126,8 @@ public class MainActivity extends Activity {
 
         tab.setBackgroundColor(Color.WHITE);
         WebSettings settings = tab.getSettings();
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING))
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false);
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
@@ -1367,6 +1452,7 @@ public class MainActivity extends Activity {
 
 
     private void toggleRecordingSounds() {
+        if (webVoiceRequested) stopWebVoice("LIVE chiuso · audio modificato");
         if (liveEnabled) stopLiveMode("Live fermato · audio modificato");
         recordingSoundsEnabled = !recordingSoundsEnabled;
 
@@ -1428,6 +1514,7 @@ public class MainActivity extends Activity {
     }
 
     private void stopAllSpeech() {
+        if (webVoiceRequested) stopWebVoice("LIVE chiuso");
         if (liveEnabled) stopLiveMode("Live fermato");
         if (tts != null) {
             try { tts.stop(); } catch (Exception ignored) {}
@@ -1765,7 +1852,7 @@ public class MainActivity extends Activity {
     }
 
     private void applyMicStyle(boolean active) {
-        micButton.setBackground(new DanHudMicDrawable(active || liveEnabled));
+        micButton.setBackground(new DanHudMicDrawable(active || liveEnabled || webVoiceRequested));
     }
 
     private Button makeButton(String text) {
@@ -1954,6 +2041,7 @@ public class MainActivity extends Activity {
     }
 
     private void showVoiceChooser() {
+        if (webVoiceRequested) stopWebVoice("LIVE chiuso · scelta voce locale");
         if (liveEnabled) stopLiveMode("Live fermato · scelta voce");
         if (!ttsReady || tts == null) {
             Toast.makeText(this,
@@ -2090,6 +2178,7 @@ public class MainActivity extends Activity {
     }
 
     private void speakAssistantText(String text) {
+        if (webVoiceRequested) return; // The official voice session supplies its own audio.
         if (text == null) return;
 
         String cleaned = cleanSpeechLabels(text);
@@ -2380,7 +2469,7 @@ public class MainActivity extends Activity {
             Toast.makeText(this,
                     "Riconoscimento vocale Android non disponibile",
                     Toast.LENGTH_LONG).show();
-            micButton.setEnabled(false);
+            // LIVE uses the website microphone, independently of Android SpeechRecognizer.
             return;
         }
 
@@ -2712,6 +2801,7 @@ public class MainActivity extends Activity {
     }
 
     private void startPressToTalk() {
+        if (webVoiceRequested) stopWebVoice("LIVE chiuso · dettatura manuale");
         if (speechRecognizer == null) return;
 
         if (tts != null) {
@@ -2829,6 +2919,13 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
         if (requestCode == REQ_AUDIO) {
+            if (pendingWebVoicePermission) {
+                pendingWebVoicePermission = false;
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+                    statusText.postDelayed(() -> { if (foreground) toggleWebVoice(); }, 350L);
+                else stopWebVoice("Permesso microfono negato");
+                return;
+            }
             if (pendingLivePermission) {
                 pendingLivePermission = false;
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
@@ -3540,6 +3637,7 @@ public class MainActivity extends Activity {
     }
 
     private void setLuminexVisible(boolean visible) {
+        if (visible && webVoiceRequested) stopWebVoice("LIVE chiuso · Luminex aperto");
         if (visible && liveEnabled) stopLiveMode("Live fermato · Luminex aperto");
         luminexVisible = visible;
         updateLuminexAddress();
@@ -4408,78 +4506,11 @@ public class MainActivity extends Activity {
     }
 
     private void installDanDocumentStartBranding() {
-        if (webView == null) return;
-
-        if (!WebViewFeature.isFeatureSupported(
-                WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            return;
-        }
-
-        String script =
-                "(function(){" +
-                " if(window.__danEarlyBrandingInstalled)return;" +
-                " window.__danEarlyBrandingInstalled=true;" +
-
-                " function applyDanBranding(){" +
-                "  try{" +
-                "   const nodes=Array.from(document.querySelectorAll('body *'));" +
-                "   for(const n of nodes){" +
-                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT'){" +
-                "     n.style.display='none';" +
-                "    }" +
-                "   }" +
-
-                "   for(const n of nodes){" +
-                "    const t=(n.textContent||'').trim().replace(/\\s+/g,' ');" +
-                "    if(t.startsWith('ChatGPT può commettere errori') ||" +
-                "       t.startsWith('ChatGPT can make mistakes')){" +
-                "     const childMatch=Array.from(n.children||[]).some(c=>{" +
-                "      const ct=(c.textContent||'').trim().replace(/\\s+/g,' ');" +
-                "      return ct.startsWith('ChatGPT può commettere errori') ||" +
-                "             ct.startsWith('ChatGPT can make mistakes');" +
-                "     });" +
-                "     if(!childMatch)n.style.display='none';" +
-                "    }" +
-                "   }" +
-
-                "   const fields=Array.from(document.querySelectorAll(" +
-                "    'textarea,input,[contenteditable=true]'+" +
-                "   ));" +
-                "   for(const f of fields){" +
-                "    for(const a of ['placeholder','data-placeholder','aria-label']){" +
-                "     const v=f.getAttribute(a);" +
-                "     if(v && v.toLowerCase().includes('chatgpt')){" +
-                "          const low=v.toLowerCase();"+
-                "          const danText=low.includes('rispondi')?'Rispondi a Dan':'Chiedi a Dan';"+
-                "          f.setAttribute(a,danText);"+
-                "     }" +
-                "    }" +
-                "   }" +
-                "  }catch(e){}" +
-                " }" +
-
-                " const observer=new MutationObserver(function(){" +
-                "  applyDanBranding();" +
-                " });" +
-
-                " observer.observe(document,{" +
-                "  childList:true," +
-                "  subtree:true," +
-                "  characterData:true," +
-                "  attributes:true" +
-                " });" +
-
-                " applyDanBranding();" +
-                "})();";
-
+        if (webView == null || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
         try {
-            WebViewCompat.addDocumentStartJavaScript(
-                    webView,
-                    script,
-                    Collections.singleton("https://chatgpt.com")
-            );
-        } catch (Exception ignored) {
-        }
+            WebViewCompat.addDocumentStartJavaScript(webView, voiceAsset("dan-web-voice.js"),
+                    Collections.singleton("https://chatgpt.com"));
+        } catch (Exception ignored) {}
     }
 
     private void createWebView() {
@@ -4493,6 +4524,10 @@ public class MainActivity extends Activity {
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
         WebSettings settings = webView.getSettings();
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING))
+            WebSettingsCompat.setAlgorithmicDarkeningAllowed(settings, false);
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK))
+            WebSettingsCompat.setForceDark(settings, WebSettingsCompat.FORCE_DARK_OFF);
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setDatabaseEnabled(true);
@@ -4525,6 +4560,19 @@ public class MainActivity extends Activity {
         configureDownloads(webView);
 
         webView.setWebChromeClient(new WebChromeClient() {
+            @Override public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> {
+                    boolean allowed = foreground && webVoiceRequested && webView != null
+                            && trustedVoiceOrigin(webView.getUrl())
+                            && trustedVoiceOrigin(request.getOrigin().toString())
+                            && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+                    boolean audioOnly = request.getResources().length == 1
+                            && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(request.getResources()[0]);
+                    if (allowed && audioOnly) request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                    else request.deny();
+                });
+            }
+
             @Override
             public boolean onCreateWindow(
                     WebView view,
@@ -4700,6 +4748,7 @@ public class MainActivity extends Activity {
                     String url,
                     android.graphics.Bitmap favicon
             ) {
+                if (webVoiceRequested) stopWebVoice("LIVE chiuso · pagina cambiata");
                 lastUrl = url;
                 memoryPageUrl = url;
                 updateActiveDanChat(url);
@@ -5116,6 +5165,23 @@ public class MainActivity extends Activity {
     }
 
     private class NativeBridge {
+        @JavascriptInterface public void webVoiceState(String url, String token, String state) {
+            runOnUiThread(() -> {
+                if (!webVoiceRequested || !Long.toString(webVoiceGeneration).equals(token)
+                        || webView == null || !trustedVoiceOrigin(url) || !sameVoicePage(url, webView.getUrl())) return;
+                if (!foreground) { stopWebVoice("LIVE chiuso · app in background"); return; }
+                if ("active".equals(state)) {
+                    webVoiceActive = true;
+                    statusText.setText("LIVE · microfono aperto · parla liberamente · X per chiudere");
+                } else if ("closed".equals(state)) stopWebVoice("LIVE chiuso");
+                else if ("capture-error".equals(state)) stopWebVoice("Microfono web non disponibile · controlla il permesso e riprova");
+                else if ("unsupported".equals(state) || "unavailable".equals(state))
+                    stopWebVoice("Modalità vocale non disponibile qui · verifica la tua sessione ChatGPT");
+                else if ("opened".equals(state) && !webVoiceActive)
+                    statusText.setText("LIVE · modalità vocale aperta, attendo il microfono…");
+            });
+        }
+
         @JavascriptInterface
         public void rememberMemoryPending(String id, String text) {
             if (!isDanChatGptPage()) return;
@@ -5163,7 +5229,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void assistantReadyForPage(String url, String text) {
             runOnUiThread(() -> {
-                if (webView == null || !sameVoicePage(url, webView.getUrl()) || suppressAutoRead) return;
+                if (webView == null || webVoiceRequested || !sameVoicePage(url, webView.getUrl()) || suppressAutoRead) return;
                 if (liveEnabled) {
                     if (!liveWaiting || !liveSendConfirmed || text == null || text.trim().isEmpty()) return;
                     liveWaiting = false;
@@ -5184,7 +5250,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void nativeReadStarted() {
-            runOnUiThread(() -> statusText.setText("🔊 Voce ChatGPT…"));
+            runOnUiThread(() -> { if (!webVoiceRequested) statusText.setText("🔊 Voce ChatGPT…"); });
         }
 
         @JavascriptInterface
@@ -5456,70 +5522,9 @@ public class MainActivity extends Activity {
     }
 
     private void injectDanBranding() {
-        if (webView == null) return;
-
-        String script =
-                "(function(){" +
-                " if(window.__danHideChatGPTInstalled)return;" +
-                " window.__danHideChatGPTInstalled=true;" +
-
-                " function hideOnlyChatGPT(){" +
-                "  try{" +
-                "   const nodes=Array.from(document.querySelectorAll('body *'));" +
-                "   for(const n of nodes){" +
-                "    if(n.children.length===0 && (n.textContent||'').trim()==='ChatGPT'){" +
-                "     n.style.display='none';" +
-                "    }" +
-                "   }" +
-
-                "   const disclaimerNodes=Array.from(document.querySelectorAll('body *'));" +
-                "   for(const n of disclaimerNodes){" +
-                "    const t=(n.textContent||'').trim().replace(/\\s+/g,' ');" +
-                "    const match=t.startsWith('ChatGPT può commettere errori') ||" +
-                "      t.startsWith('ChatGPT can make mistakes');" +
-                "    if(match){" +
-                "     const childMatch=Array.from(n.children||[]).some(c=>{" +
-                "      const ct=(c.textContent||'').trim().replace(/\\s+/g,' ');" +
-                "      return ct.startsWith('ChatGPT può commettere errori') ||" +
-                "        ct.startsWith('ChatGPT can make mistakes');" +
-                "     });" +
-                "     if(!childMatch)n.style.display='none';" +
-                "    }" +
-                "   }" +
-
-                "   const fields=Array.from(document.querySelectorAll(" +
-                "    'textarea,input,[contenteditable=true]'" +
-                "   ));" +
-
-                "   for(const f of fields){" +
-                "    const attrs=['placeholder','data-placeholder','aria-label'];" +
-                "    for(const a of attrs){" +
-                "     const v=f.getAttribute(a);" +
-                "     if(v && v.toLowerCase().includes('chatgpt')){" +
-                "      f.setAttribute(a,'Chiedi a Dan');" +
-                "     }" +
-                "    }" +
-                "   }" +
-                "  }catch(e){}" +
-                " }" +
-
-                " hideOnlyChatGPT();" +
-                "    setInterval(hideOnlyChatGPT,1500);" +
-
-                " const observer=new MutationObserver(function(){" +
-                "  hideOnlyChatGPT();" +
-                " });" +
-
-                " observer.observe(document.body,{" +
-                "  childList:true," +
-                "  subtree:true," +
-                "  characterData:true," +
-                "  attributes:true," +
-                "  attributeFilter:['placeholder','data-placeholder','aria-label']" +
-                " });" +
-                "})();";
-
-        webView.evaluateJavascript(script, null);
+        if (webView == null || !trustedVoiceOrigin(webView.getUrl())) return;
+        // Keep account/model/service labels intact. Branding is in the native Heiwa header.
+        webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), null);
     }
 
     private void updateActiveDanChat(String url) {
@@ -5553,6 +5558,11 @@ public class MainActivity extends Activity {
             if (liveEnabled && livePage != null && Uri.parse(livePage).getPath() != null
                     && Uri.parse(livePage).getPath().contains("/c/")) {
                 stopLiveMode("Chat cambiata · riavvia LIVE nella chat desiderata");
+            }
+            if (webVoiceRequested) {
+                if (webVoicePage != null && Uri.parse(webVoicePage).getPath() != null
+                        && Uri.parse(webVoicePage).getPath().contains("/c/")) stopWebVoice("LIVE chiuso · chat cambiata");
+                else webVoicePage = url; // The first utterance may create a conversation from the home page.
             }
             activeDanChatKey = newKey;
             lastSpokenText = "";
@@ -6100,6 +6110,7 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
+        if (webVoiceRequested) { stopWebVoice("LIVE chiuso"); return; }
         if (liveEnabled) { stopLiveMode("Live fermato"); return; }
         if (luminexVisible) {
             WebView activeLuminex = getActiveLuminexWebView();
@@ -6296,6 +6307,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         foreground = false;
+        if (webVoiceRequested) stopWebVoice("LIVE chiuso · app in background");
         if (liveEnabled) stopLiveMode("Live fermato · app in background");
         stopChatLiveRefresh();
 
@@ -6351,6 +6363,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (webVoiceRequested) stopWebVoice("LIVE chiuso");
         for (Map.Entry<String, ChatPrivateState> entry
                 : privateChats.entrySet()) {
 

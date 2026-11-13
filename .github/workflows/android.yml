@@ -135,6 +135,8 @@ jobs:
           python3 tests/extract-voice-scripts.py
           node --check /tmp/dan146-observer.js
           node tests/live-observer.test.cjs
+          node --check app/src/main/assets/dan-web-voice.js
+          node tests/web-voice.test.cjs
 
       - name: Build Dan Luminex AI Integration
         env:

@@ -50,3 +50,12 @@ form {border:1px solid rgba(0,200,255,.35)!important;border-radius:18px!importan
 [data-message-author-role=assistant] :is(h1,h2,h3) {color:#00c8ff!important;}
 main :is(h1,h2,h3) {font-family:DanOrbitron,monospace;}
 ::selection {background:rgba(0,200,255,.35);color:#e0f4ff;}
+
+/* Explicit text colours: independent of Android/tablet algorithmic darkening. */
+:root{--text-primary:#e0f4ff!important;--text-secondary:#b8d7ea!important;--text-tertiary:#9ebed2!important;--text-inverted:#030d1a!important;--bg-primary:#030d1a!important;--bg-secondary:#071428!important;--text-placeholder:#9ebed2!important;}
+body,main,[role=main],[role=dialog],[role=menu],[role=listbox]{color:#e0f4ff!important;background-color:#030d1a!important;}
+main :is(p,span,div,li,blockquote,td,th,label,button,strong,em,small):not(pre *,code *,svg *){color:inherit!important;}
+[role=dialog] :is(p,span,div,label,button),[role=menuitem],[role=option]{color:#e0f4ff!important;}
+input,textarea,select,[contenteditable=true]{color:#e0f4ff!important;-webkit-text-fill-color:#e0f4ff!important;background-color:#071428!important;caret-color:#00c8ff!important;}
+input::placeholder,textarea::placeholder{color:#9ebed2!important;opacity:1!important;}
+main a{color:#00c8ff!important;} main :is(h1,h2,h3,h4){color:#00c8ff!important;}
