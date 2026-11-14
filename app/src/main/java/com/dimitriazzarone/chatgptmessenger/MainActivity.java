@@ -299,6 +299,7 @@ public class MainActivity extends Activity {
     private TextView liveCaption;
     private boolean liveEnabled;
     private boolean webVoiceRequested, webVoiceActive, pendingWebVoicePermission;
+    private long lastWebVoiceTouch = 0L;
     private long webVoiceGeneration;
     private String webVoicePage;
     private Button webVoiceClose;
@@ -586,21 +587,9 @@ public class MainActivity extends Activity {
         reload.setTextSize(18);
         reload.setVisibility(View.VISIBLE);
 
-        autoButton.setOnClickListener(v -> {
-            // Ripristino completo: evita il pulsante MIC bloccato.
-            recognizerSessionActive = false;
-            listening = false;
-            manualCapture = false;
-            pressToTalkRequested = false;
-            recordingLocked = false;
-
-            micButton.setEnabled(true);
-            autoButton.setEnabled(true);
-            micButton.setText("🎙");
-            applyMicStyle(false);
-
-            recoverMicrophoneAccess();
-        });
+        autoButton.setContentDescription("Avvia o ferma LIVE vocale");
+        autoButton.setOnClickListener(v -> toggleWebVoice());
+        autoButton.setOnLongClickListener(v -> { recoverMicrophoneAccess(); return true; });
         luminexButton.setOnClickListener(v -> toggleLuminexView());
         privateButton.setOnClickListener(v -> togglePrivateSession());
 
@@ -4516,6 +4505,14 @@ public class MainActivity extends Activity {
     private void createWebView() {
         webView = new WebView(this);
         webView.setBackgroundColor(Color.rgb(3, 13, 26));
+        webView.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) lastWebVoiceTouch = android.os.SystemClock.uptimeMillis();
+            return false;
+        });
+        webView.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) lastWebVoiceTouch = android.os.SystemClock.uptimeMillis();
+            return false;
+        });
         webView.addJavascriptInterface(new NativeBridge(), "AndroidRadio");
         installDanDocumentStartBranding();
 
@@ -4566,9 +4563,8 @@ public class MainActivity extends Activity {
                             && trustedVoiceOrigin(webView.getUrl())
                             && trustedVoiceOrigin(request.getOrigin().toString())
                             && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-                    boolean audioOnly = request.getResources().length == 1
-                            && PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(request.getResources()[0]);
-                    if (allowed && audioOnly) request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                    boolean asksAudio = java.util.Arrays.asList(request.getResources()).contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
+                    if (allowed && asksAudio) request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
                     else request.deny();
                 });
             }
@@ -5165,6 +5161,16 @@ public class MainActivity extends Activity {
     }
 
     private class NativeBridge {
+        @JavascriptInterface public void startWebVoiceFromPage(String url) {
+            runOnUiThread(() -> {
+                long elapsed = android.os.SystemClock.uptimeMillis() - lastWebVoiceTouch;
+                if (!foreground || luminexVisible || webView == null || !trustedVoiceOrigin(url)
+                        || !sameVoicePage(url, webView.getUrl()) || lastWebVoiceTouch == 0L || elapsed > 2000L) return;
+                lastWebVoiceTouch = 0L;
+                if (!webVoiceRequested) toggleWebVoice();
+            });
+        }
+
         @JavascriptInterface public void webVoiceState(String url, String token, String state) {
             runOnUiThread(() -> {
                 if (!webVoiceRequested || !Long.toString(webVoiceGeneration).equals(token)
@@ -5174,6 +5180,9 @@ public class MainActivity extends Activity {
                     webVoiceActive = true;
                     statusText.setText("LIVE · microfono aperto · parla liberamente · X per chiudere");
                 } else if ("closed".equals(state)) stopWebVoice("LIVE chiuso");
+                else if ("capture-denied".equals(state)) stopWebVoice("Microfono negato · controlla Permessi → Microfono nelle impostazioni Android");
+                else if ("capture-busy".equals(state)) stopWebVoice("Microfono non accessibile · controlla privacy Android e altre app");
+                else if ("capture-missing".equals(state)) stopWebVoice("Nessun microfono disponibile sul dispositivo");
                 else if ("capture-error".equals(state)) stopWebVoice("Microfono web non disponibile · controlla il permesso e riprova");
                 else if ("unsupported".equals(state) || "unavailable".equals(state))
                     stopWebVoice("Modalità vocale non disponibile qui · verifica la tua sessione ChatGPT");

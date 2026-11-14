@@ -7,12 +7,12 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await page.addScriptTag({content:fs.readFileSync('app/src/main/assets/dan-branding.js','utf8')});
  const cover=page.locator('#dan-hewa-sidebar-cover');
  await cover.waitFor({state:'visible'});assert.equal(await cover.innerText(),'Hewa');
- let rect=await cover.boundingBox();assert(rect.x<=10&&rect.y<=14);
+ let rect=await cover.boundingBox();assert(rect.x<=10&&rect.y<=14);assert(await cover.evaluate(e=>parseFloat(getComputedStyle(e).fontSize))>=24);
  assert.equal(await page.locator('#title').innerText(),'ChatGPT');
  assert.equal(await page.locator('#chat').innerText(),'ChatGPT');assert.equal(await page.locator('main').innerText(),'ChatGPT');
  assert.equal(await cover.evaluate(e=>getComputedStyle(e).pointerEvents),'none');
  await page.locator('#unknown-sidebar-header').evaluate(e=>{e.style.top='35px';e.innerHTML='<div id="title">ChatGPT</div>'});
- await page.waitForTimeout(250);rect=await cover.boundingBox();assert(rect.y>=34&&rect.y<=36);
+ await page.waitForTimeout(250);rect=await cover.boundingBox();assert(rect.y>=20&&rect.y<=35);
  await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='none');await page.waitForTimeout(250);assert.equal(await cover.isVisible(),false);
  await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='block');await cover.waitFor({state:'visible'});
  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(250);assert.equal(await cover.isVisible(),true);

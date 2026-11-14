@@ -7,9 +7,10 @@
  const label=b=>(b.getAttribute('aria-label')||b.getAttribute('title')||b.textContent||'').trim().toLowerCase().replace(/\s+/g,' ');
  const visible=b=>b && !b.disabled && b.getAttribute('aria-disabled')!=='true' && b.getClientRects().length>0 && getComputedStyle(b).visibility!=='hidden' && getComputedStyle(b).display!=='none';
  const startLabels=new Set(['start voice mode','use voice mode','voice mode','start voice chat','use voice','enter voice mode','avvia modalità vocale','modalità vocale','usa la voce','avvia chat vocale','avvia conversazione vocale']);
+ const isStart=b=>startLabels.has(label(b)) || (!/dictat|dettat|read aloud|leggi ad alta/.test(label(b)) && (/^(?:start|use|enter|open|enable) (?:the )?voice(?: mode| chat| conversation)?$/.test(label(b)) || /^(?:avvia|inizia|apri|attiva|usa) (?:la |una )?(?:modalit[aà] vocale|chat vocale|conversazione vocale|voce)$/.test(label(b)) || ['composer-speech-button','voice-mode-button','composer-voice-button'].includes(b.getAttribute('data-testid'))));
  const endLabels=new Set(['end voice chat','end voice mode','exit voice mode','close voice mode','close voice chat','end conversation','termina chat vocale','termina conversazione vocale','esci dalla modalità vocale','chiudi modalità vocale','termina conversazione']);
  function button(kind) {
-  return Array.from(document.querySelectorAll('button')).find(b=>visible(b) && (kind==='start' ? startLabels.has(label(b)) || (!/dictat|dettat/.test(label(b)) && ['composer-speech-button','voice-mode-button'].includes(b.getAttribute('data-testid'))) : endLabels.has(label(b)) || ['voice-close-button','close-voice-button','end-voice-button'].includes(b.getAttribute('data-testid'))));
+  return Array.from(document.querySelectorAll('button,[role=button]')).find(b=>visible(b) && (kind==='start' ? isStart(b) : endLabels.has(label(b)) || ['voice-close-button','close-voice-button','end-voice-button'].includes(b.getAttribute('data-testid'))));
  }
  function notify(state) {try {window.AndroidRadio?.webVoiceState(location.href,token,state);}catch(_){} }
  function release() {
@@ -24,6 +25,15 @@
   if(wasWanted)document.querySelectorAll('audio').forEach(a=>{try{a.pause();}catch(_){}});
   if(report)notify('closed');
  }
+ // Real taps on the website's voice control go through Android permission flow.
+ // Programmatic clicks from start() pass through normally, without recursion.
+ document.addEventListener('click',event=>{
+  if(!event.isTrusted || wanted)return;
+  const target=event.target?.closest?.('button,[role=button]');
+  if(!target || !visible(target) || !isStart(target) || !window.AndroidRadio?.startWebVoiceFromPage)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  window.AndroidRadio.startWebVoiceFromPage(location.href);
+ },true);
  const media=navigator.mediaDevices;
  if(media?.getUserMedia) {
   const original=media.getUserMedia.bind(media);
@@ -33,7 +43,7 @@
    if(constraints?.audio && !wanted)throw new DOMException('Avvia LIVE per usare il microfono','NotAllowedError');
    const capture=wanted?token:null;
    let stream;
-   try {stream=await original(constraints);}catch(e){if(capture && wanted && capture===token) {notify('capture-error');stop(false);}throw e;}
+   try {stream=await original(constraints);}catch(e){if(capture && wanted && capture===token) {notify(e.name==='NotAllowedError'?'capture-denied':e.name==='NotFoundError'?'capture-missing':e.name==='NotReadableError'?'capture-busy':'capture-error');stop(false);}throw e;}
    if(capture) {
     if(!wanted || token!==capture){stream.getTracks().forEach(t=>t.stop());throw new DOMException('Sessione vocale chiusa','AbortError');}
     if(stream.getAudioTracks().some(t=>t.readyState==='live')) {

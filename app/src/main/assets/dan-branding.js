@@ -47,12 +47,16 @@
   if (!title) { overlay.style.display = 'none'; current = null; return; }
   current = title.element;
   const {rect,style} = title;
-  overlay.style.setProperty('left', `${rect.left - 1}px`, 'important');
-  overlay.style.setProperty('top', `${rect.top - 1}px`, 'important');
-  overlay.style.setProperty('width', `${rect.width + 3}px`, 'important');
-  overlay.style.setProperty('height', `${rect.height + 2}px`, 'important');
-  overlay.style.setProperty('font', style.font, 'important');
-  overlay.style.setProperty('line-height', `${rect.height}px`, 'important');
+  const fontSize = Math.max(24, Math.min(28, parseFloat(style.fontSize) * 1.6 || 26));
+  const lineHeight = Math.ceil(fontSize * 1.25);
+  overlay.style.setProperty('left', `${Math.max(0, rect.left - 1)}px`, 'important');
+  overlay.style.setProperty('top', `${Math.max(0, rect.top + rect.height / 2 - lineHeight / 2)}px`, 'important');
+  overlay.style.setProperty('width', `${Math.max(rect.width + 3, fontSize * 3.15)}px`, 'important');
+  overlay.style.setProperty('height', `${lineHeight}px`, 'important');
+  overlay.style.setProperty('font-family', style.fontFamily, 'important');
+  overlay.style.setProperty('font-size', `${fontSize}px`, 'important');
+  overlay.style.setProperty('font-weight', '700', 'important');
+  overlay.style.setProperty('line-height', `${lineHeight}px`, 'important');
   overlay.style.setProperty('text-align', 'left', 'important');
   overlay.style.setProperty('display', 'block', 'important');
  };
