@@ -488,7 +488,7 @@ public class MainActivity extends Activity {
         micButton.setText("🎙");
         micButton.setTextSize(25);
         micButton.setPadding(0, 0, 0, 0);
-        micButton.setContentDescription("Tieni premuto per dettare, rilascia per inviare");
+        micButton.setContentDescription("Tocca per dettare, tocca di nuovo per terminare");
         micButton.setTextColor(Color.WHITE);
         micButton.setGravity(Gravity.CENTER);
         applyMicStyle(false);
@@ -613,59 +613,48 @@ public class MainActivity extends Activity {
         playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
 
-        micButton.setOnTouchListener((v, event) -> {
-            switch (event.getAction()) {
-                case MotionEvent.ACTION_DOWN:
-                    if (liveEnabled) { stopLiveMode("LIVE chiuso"); return true; }
-                    if (recordingLocked) {
-                        finishLockedRecording();
-                        return true;
-                    }
+        micButton.setOnClickListener(v -> toggleManualDictation());
+    }
 
-                    touchStartY = event.getRawY();
-                    manualStopPending = false;
-                    lastPartialText = "";
-                    if (speechRecognizer != null) {
-                        // Abandon the previous recognizer completely: a late
-                        // ERROR_CLIENT from that session must not clear this one.
-                        try { speechRecognizer.cancel(); } catch (Exception ignored) {}
-                        try { speechRecognizer.destroy(); } catch (Exception ignored) {}
-                        speechRecognizer = null;
-                        recognizerSessionActive = false;
-                        listening = false;
-                        createSpeechRecognizer();
-                    }
-                    pressToTalkRequested = true;
-                    manualCapture = true;
-                    startPressToTalk();
-                    return true;
+    private boolean pendingManualPermission;
 
-                case MotionEvent.ACTION_MOVE:
-                    if (listening && !recordingLocked) {
-                        float movedUp = touchStartY - event.getRawY();
-
-                        if (movedUp >= dp(80)) {
-                            recordingLocked = true;
-                            pressToTalkRequested = false;
-                            micButton.setText("■");
-                            applyMicStyle(true);
-                            statusText.setText("🔒 Registrazione bloccata — tocca ■ per inviare");
-                        }
-                    }
-                    return true;
-
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    pressToTalkRequested = false;
-
-                    if (!recordingLocked) {
-                        stopPressToTalk();
-                    }
-                    return true;
-            }
-
-            return false;
-        });
+    private void toggleManualDictation() {
+        if (liveEnabled) { stopLiveMode("LIVE chiuso"); return; }
+        if (webVoiceRequested) { stopWebVoice("LIVE chiuso"); return; }
+        if (manualCapture) {
+            if (!recordingLocked) return; // Wait for the current transcription.
+            recordingLocked = false;
+            pressToTalkRequested = false;
+            stopPressToTalk();
+            return;
+        }
+        if (pendingManualPermission) return;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            pendingManualPermission = true;
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO);
+            return;
+        }
+        handsFreeEnabled = false;
+        SpeechRecognizer previous = speechRecognizer;
+        speechRecognizer = null;
+        if (previous != null) {
+            try { previous.cancel(); } catch (Exception ignored) {}
+            try { previous.destroy(); } catch (Exception ignored) {}
+        }
+        recognizerSessionActive = false;
+        listening = false;
+        manualStopPending = false;
+        lastPartialText = "";
+        createSpeechRecognizer();
+        if (speechRecognizer == null) return;
+        manualCapture = true;
+        recordingLocked = true;
+        headsetRecording = false;
+        pressToTalkRequested = true;
+        micButton.setText("■");
+        micButton.setContentDescription("Termina la dettatura");
+        statusText.setText("Preparo il microfono… attendi Ti ascolto");
+        startPressToTalk();
     }
 
 
@@ -823,7 +812,7 @@ public class MainActivity extends Activity {
         pressToTalkRequested = false;
         if (micButton != null) {
             micButton.setActivated(false);
-            micButton.setContentDescription("Tieni premuto per dettare, rilascia per inviare");
+            micButton.setContentDescription("Tocca per dettare, tocca di nuovo per terminare");
         }
         if (webView != null) webView.evaluateJavascript("window.__danLivePending=null;", null);
         if (statusText != null) statusText.setText(reason);
@@ -2609,7 +2598,7 @@ public class MainActivity extends Activity {
                     }, 400L);
                 } else if (manualCapture) {
                     playRecordingStartSound();
-                    statusText.setText("🎙 Ti ascolto… rilascia per inviare");
+                    statusText.setText("🎙 Ti ascolto… tocca di nuovo per terminare");
                 } else if (liveEnabled) {
                     statusText.setText("LIVE · ti ascolto…");
                 } else if (handsFreeDictating) {
@@ -2675,7 +2664,7 @@ public class MainActivity extends Activity {
                     } else if (error == SpeechRecognizer.ERROR_NO_MATCH
                             || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
                         playRecognitionErrorSound();
-                        statusText.setText("Nessuna frase riconosciuta (codice " + error + ").");
+                        statusText.setText("Nessuna frase riconosciuta: attendi Ti ascolto prima di parlare (codice " + error + ").");
                     } else if (error == SpeechRecognizer.ERROR_CLIENT) {
                         statusText.setText("Errore tecnico del riconoscitore (codice " + error + ").");
                     } else {
@@ -3016,6 +3005,13 @@ public class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
         if (requestCode == REQ_AUDIO) {
+            if (pendingManualPermission) {
+                pendingManualPermission = false;
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
+                    statusText.postDelayed(() -> { if (foreground) toggleManualDictation(); }, 350L);
+                else statusText.setText("Permesso microfono negato");
+                return;
+            }
             if (pendingWebVoicePermission) {
                 pendingWebVoicePermission = false;
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED)
