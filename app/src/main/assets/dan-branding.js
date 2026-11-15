@@ -12,7 +12,7 @@
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let text;
   while ((text = walker.nextNode())) {
-   if (text.nodeValue.trim() !== 'ChatGPT') continue;
+   if (!['ChatGPT', 'Dan Hewa', 'Hewa'].includes(text.nodeValue.trim())) continue;
    const element = text.parentElement;
    if (!element || element.closest('#dan-hewa-sidebar-cover, article, [data-message-author-role], textarea, [contenteditable="true"]')) continue;
    const link = element.closest('a');
@@ -24,7 +24,7 @@
    if (style.visibility === 'hidden' || style.display === 'none' || Number(style.opacity) === 0) continue;
    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
    if (!hit || !(element.contains(hit) || hit.contains(element))) continue;
-   return {element,rect,style};
+   return {element,rect,style,label:text.nodeValue.trim()};
   }
   return null;
  };
@@ -47,11 +47,12 @@
   if (!title) { overlay.style.display = 'none'; current = null; return; }
   current = title.element;
   const {rect,style} = title;
-  const fontSize = Math.max(24, Math.min(28, parseFloat(style.fontSize) * 1.6 || 26));
+  overlay.textContent = title.label === 'ChatGPT' ? 'Hewa' : title.label;
+  const fontSize = Math.max(32, Math.min(36, parseFloat(style.fontSize) * 1.8 || 34));
   const lineHeight = Math.ceil(fontSize * 1.25);
   overlay.style.setProperty('left', `${Math.max(0, rect.left - 1)}px`, 'important');
   overlay.style.setProperty('top', `${Math.max(0, rect.top + rect.height / 2 - lineHeight / 2)}px`, 'important');
-  overlay.style.setProperty('width', `${Math.max(rect.width + 3, fontSize * 3.15)}px`, 'important');
+  overlay.style.setProperty('width', `${Math.max(rect.width + 3, fontSize * (title.label === 'Dan Hewa' ? 5.4 : 3.15))}px`, 'important');
   overlay.style.setProperty('height', `${lineHeight}px`, 'important');
   overlay.style.setProperty('font-family', style.fontFamily, 'important');
   overlay.style.setProperty('font-size', `${fontSize}px`, 'important');

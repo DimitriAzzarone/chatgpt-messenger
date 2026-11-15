@@ -355,7 +355,7 @@ public class MainActivity extends Activity {
             statusText.postDelayed(this::recoverHandsFreeMicrophone, 500L);
         } else {
             autoButton.setText("LIVE");
-            statusText.setText("LIVE: conversazione automatica · microfono: dettatura");
+            statusText.setText("LIVE · tocca per iniziare o fermare");
         }
     }
 
@@ -376,9 +376,9 @@ public class MainActivity extends Activity {
         logo.setContentDescription("Dan · cerchi luminosi azzurri");
 
         TextView title = new TextView(this);
-        title.setText("  Dan Hewa " + BuildConfig.VERSION_NAME);
+        title.setText("Hewa");
         title.setTextColor(Color.rgb(0, 200, 255));
-        title.setTextSize(17);
+        title.setTextSize(24);
         try {
             title.setTypeface(Typeface.createFromAsset(getAssets(), "fonts/Orbitron.ttf"));
         } catch (RuntimeException unsupportedFont) {
@@ -431,7 +431,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText("  Dan Hewa " + BuildConfig.VERSION_NAME);
+            title.setText("Hewa");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);
@@ -476,11 +476,11 @@ public class MainActivity extends Activity {
         statusText = new TextView(this);
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "LIVE: conversazione automatica · microfono: dettatura");
+                : "LIVE · tocca per iniziare o fermare");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
         statusText.setMaxLines(3);
-        statusText.setText("LIVE: conversazione automatica · microfono: dettatura");
+        statusText.setText("LIVE · tocca per iniziare o fermare");
         liveCaption = statusText;
         statusText.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -693,7 +693,7 @@ public class MainActivity extends Activity {
     private void beginWebVoice(String pageToken) {
         if (webVoiceRequested) { stopWebVoice("LIVE chiuso"); return; }
         if (webView == null || !trustedVoiceOrigin(webView.getUrl()) || luminexVisible) {
-            statusText.setText("Apri ChatGPT nella chat desiderata prima di LIVE"); return;
+            statusText.setText("Apri la chat desiderata prima di LIVE"); return;
         }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingWebVoicePermission = true;
@@ -715,7 +715,7 @@ public class MainActivity extends Activity {
         webVoiceClose.setVisibility(View.VISIBLE);
         autoButton.setActivated(true);
         applyMicStyle(true);
-        statusText.setText("LIVE · avvio della modalità vocale ChatGPT…");
+        statusText.setText("LIVE · avvio…");
         if (pageToken == null) webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), result -> {
             if (!webVoiceRequested || generation != webVoiceGeneration || webView == null) return;
             webView.evaluateJavascript("window.__danWebVoice ? window.__danWebVoice.start("
@@ -745,7 +745,7 @@ public class MainActivity extends Activity {
     private void toggleLiveMode() {
         if (liveEnabled || pendingLivePermission) { stopLiveMode("LIVE chiuso"); return; }
         if (webView == null || !sameVoicePage(webView.getUrl(), webView.getUrl()) || luminexVisible) {
-            statusText.setText("Apri una chat ChatGPT prima di avviare LIVE");
+            statusText.setText("Apri una chat prima di avviare LIVE");
             return;
         }
         if (webVoiceRequested) stopWebVoice("Passaggio alla conversazione automatica");
@@ -2002,7 +2002,7 @@ public class MainActivity extends Activity {
                         playReadingFinishedSound();
                         statusText.setText(handsFreeEnabled
                                 ? "🟢 In attesa — dì Jasper per iniziare"
-                                : "LIVE: conversazione automatica · microfono: dettatura");
+                                : "LIVE · tocca per iniziare o fermare");
                         if (handsFreeEnabled) {
                             recognizerSessionActive = false;
                             listening = false;
@@ -2481,7 +2481,7 @@ public class MainActivity extends Activity {
                 manualCapture = false;
                 statusText.setText(handsFreeEnabled
                         ? "🟢 In attesa — dì Jasper per iniziare"
-                        : "LIVE: conversazione automatica · microfono: dettatura");
+                        : "LIVE · tocca per iniziare o fermare");
                 scheduleHandsFreeRestart(400L);
             }
             return;
@@ -2770,7 +2770,7 @@ public class MainActivity extends Activity {
 
     private void startHandsFreeMode() {
         if (!handsFreeEnabled) {
-            statusText.setText("LIVE: conversazione automatica · microfono: dettatura");
+            statusText.setText("LIVE · tocca per iniziare o fermare");
             return;
         }
 
@@ -5294,7 +5294,7 @@ public class MainActivity extends Activity {
                 else if ("capture-missing".equals(state)) stopWebVoice("Nessun microfono disponibile sul dispositivo");
                 else if ("capture-error".equals(state)) stopWebVoice("Microfono web non disponibile · controlla il permesso e riprova");
                 else if ("unsupported".equals(state) || "unavailable".equals(state))
-                    stopWebVoice("Modalità vocale non disponibile qui · verifica la tua sessione ChatGPT");
+                    stopWebVoice("LIVE non disponibile in questa pagina");
                 else if ("opened".equals(state) && !webVoiceActive)
                     statusText.setText("LIVE · modalità vocale aperta, attendo il microfono…");
             });
@@ -6481,7 +6481,7 @@ public class MainActivity extends Activity {
 
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "LIVE: conversazione automatica · microfono: dettatura");
+                : "LIVE · tocca per iniziare o fermare");
 
         if (handsFreeEnabled && !manualCapture && !headsetRecording && !ttsSpeaking) {
             scheduleHandsFreeRestart(250L);
