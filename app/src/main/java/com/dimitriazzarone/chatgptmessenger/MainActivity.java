@@ -302,6 +302,7 @@ public class MainActivity extends Activity {
     private long lastWebVoiceTouch = 0L;
     private long webVoiceGeneration;
     private String webVoicePage;
+    private String webVoiceToken = "";
     private Button webVoiceClose;
     private boolean suppressAutoRead;
     private boolean liveWaiting;
@@ -349,12 +350,12 @@ public class MainActivity extends Activity {
         webView.loadUrl(HOME);
 
         if (handsFreeEnabled) {
-            autoButton.setText("MIC");
+            autoButton.setText("LIVE");
             statusText.setText("🟢 Auto ON — preparo il microfono…");
             statusText.postDelayed(this::recoverHandsFreeMicrophone, 500L);
         } else {
-            autoButton.setText("MIC");
-            statusText.setText("Tocca il microfono per avviare LIVE");
+            autoButton.setText("LIVE");
+            statusText.setText("LIVE: voce ChatGPT · tieni premuto il microfono per dettare");
         }
     }
 
@@ -475,11 +476,11 @@ public class MainActivity extends Activity {
         statusText = new TextView(this);
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "Tocca il microfono per avviare LIVE");
+                : "LIVE: voce ChatGPT · tieni premuto il microfono per dettare");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
         statusText.setMaxLines(3);
-        statusText.setText("Tocca il microfono per avviare LIVE");
+        statusText.setText("LIVE: voce ChatGPT · tieni premuto il microfono per dettare");
         liveCaption = statusText;
         statusText.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -487,7 +488,7 @@ public class MainActivity extends Activity {
         micButton.setText("🎙");
         micButton.setTextSize(25);
         micButton.setPadding(0, 0, 0, 0);
-        micButton.setContentDescription("Avvia LIVE mantenendo visibile la chat");
+        micButton.setContentDescription("Tieni premuto per dettare, rilascia per inviare");
         micButton.setTextColor(Color.WHITE);
         micButton.setGravity(Gravity.CENTER);
         applyMicStyle(false);
@@ -587,7 +588,8 @@ public class MainActivity extends Activity {
         reload.setTextSize(18);
         reload.setVisibility(View.VISIBLE);
 
-        autoButton.setContentDescription("Avvia o ferma LIVE vocale");
+        autoButton.setText("LIVE");
+        autoButton.setContentDescription("Avvia o ferma la voce ufficiale di ChatGPT");
         autoButton.setOnClickListener(v -> toggleWebVoice());
         autoButton.setOnLongClickListener(v -> { recoverMicrophoneAccess(); return true; });
         luminexButton.setOnClickListener(v -> toggleLuminexView());
@@ -608,8 +610,60 @@ public class MainActivity extends Activity {
         playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
 
-        micButton.setOnClickListener(v -> toggleWebVoice());
+        micButton.setOnTouchListener((v, event) -> {
+            switch (event.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    if (recordingLocked) {
+                        finishLockedRecording();
+                        return true;
+                    }
+
+                    touchStartY = event.getRawY();
+                    manualStopPending = false;
+                    lastPartialText = "";
+                    if (speechRecognizer != null) {
+                        // Abandon the previous recognizer completely: a late
+                        // ERROR_CLIENT from that session must not clear this one.
+                        try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+                        try { speechRecognizer.destroy(); } catch (Exception ignored) {}
+                        speechRecognizer = null;
+                        recognizerSessionActive = false;
+                        listening = false;
+                        createSpeechRecognizer();
+                    }
+                    pressToTalkRequested = true;
+                    manualCapture = true;
+                    startPressToTalk();
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+                    if (listening && !recordingLocked) {
+                        float movedUp = touchStartY - event.getRawY();
+
+                        if (movedUp >= dp(80)) {
+                            recordingLocked = true;
+                            pressToTalkRequested = false;
+                            micButton.setText("■");
+                            applyMicStyle(true);
+                            statusText.setText("🔒 Registrazione bloccata — tocca ■ per inviare");
+                        }
+                    }
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    pressToTalkRequested = false;
+
+                    if (!recordingLocked) {
+                        stopPressToTalk();
+                    }
+                    return true;
+            }
+
+            return false;
+        });
     }
+
 
     private String voiceAsset(String name) {
         try (InputStream input = getAssets().open(name); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
@@ -629,6 +683,10 @@ public class MainActivity extends Activity {
     }
 
     private void toggleWebVoice() {
+        beginWebVoice(null);
+    }
+
+    private void beginWebVoice(String pageToken) {
         if (webVoiceRequested) { stopWebVoice("LIVE chiuso"); return; }
         if (webView == null || !trustedVoiceOrigin(webView.getUrl()) || luminexVisible) {
             statusText.setText("Apri ChatGPT nella chat desiderata prima di LIVE"); return;
@@ -639,21 +697,25 @@ public class MainActivity extends Activity {
         }
         if (liveEnabled) stopLiveMode("Passaggio alla voce continua");
         handsFreeEnabled = false;
-        if (speechRecognizer != null) { try { speechRecognizer.cancel(); } catch (Exception ignored) {} }
+        if (speechRecognizer != null) {
+            try { speechRecognizer.cancel(); speechRecognizer.destroy(); } catch (Exception ignored) {}
+            speechRecognizer = null;
+        }
         recognizerSessionActive = false; listening = false; manualCapture = false;
         headsetRecording = false; manualStopPending = false;
         if (tts != null) { try { tts.stop(); } catch (Exception ignored) {} }
         ttsSpeaking = false; suppressAutoRead = true;
         webVoiceRequested = true; webVoiceActive = false; webVoicePage = webView.getUrl();
         final long generation = ++webVoiceGeneration;
+        webVoiceToken = pageToken == null ? Long.toString(generation) : pageToken;
         webVoiceClose.setVisibility(View.VISIBLE);
-        micButton.setContentDescription("LIVE aperto · chiudi con X");
+        autoButton.setActivated(true);
         applyMicStyle(true);
         statusText.setText("LIVE · avvio della modalità vocale ChatGPT…");
-        webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), result -> {
+        if (pageToken == null) webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), result -> {
             if (!webVoiceRequested || generation != webVoiceGeneration || webView == null) return;
             webView.evaluateJavascript("window.__danWebVoice ? window.__danWebVoice.start("
-                    + JSONObject.quote(Long.toString(generation)) + ") : 'unsupported'", null);
+                    + JSONObject.quote(webVoiceToken) + ") : 'unsupported'", null);
         });
         statusText.postDelayed(() -> {
             if (webVoiceRequested && generation == webVoiceGeneration && !webVoiceActive)
@@ -671,7 +733,8 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         if (webVoiceClose != null) webVoiceClose.setVisibility(View.GONE);
-        if (micButton != null) { micButton.setContentDescription("Avvia LIVE vocale"); applyMicStyle(false); }
+        if (autoButton != null) autoButton.setActivated(false);
+        if (micButton != null) applyMicStyle(false);
         if (statusText != null) statusText.setText(reason);
     }
 
@@ -731,7 +794,7 @@ public class MainActivity extends Activity {
         ttsSpeaking = false;
         if (micButton != null) {
             micButton.setActivated(false);
-            micButton.setContentDescription("Avvia LIVE mantenendo visibile la chat");
+            micButton.setContentDescription("Tieni premuto per dettare, rilascia per inviare");
         }
         if (webView != null) webView.evaluateJavascript("window.__danLivePending=null;", null);
         if (statusText != null) statusText.setText(reason);
@@ -1717,7 +1780,7 @@ public class MainActivity extends Activity {
                             PlaybackState.PLAYBACK_POSITION_UNKNOWN, 1.0f).build());
             headsetMediaSession.setActive(true);
         }
-        autoButton.setText("MIC");
+        autoButton.setText("LIVE");
         statusText.setText("Cuffie riattivate");
     }
 
@@ -1902,7 +1965,7 @@ public class MainActivity extends Activity {
                         playReadingFinishedSound();
                         statusText.setText(handsFreeEnabled
                                 ? "🟢 In attesa — dì Jasper per iniziare"
-                                : "Tocca il microfono per avviare LIVE");
+                                : "LIVE: voce ChatGPT · tieni premuto il microfono per dettare");
                         if (handsFreeEnabled) {
                             recognizerSessionActive = false;
                             listening = false;
@@ -2376,7 +2439,7 @@ public class MainActivity extends Activity {
                 manualCapture = false;
                 statusText.setText(handsFreeEnabled
                         ? "🟢 In attesa — dì Jasper per iniziare"
-                        : "Tocca il microfono per avviare LIVE");
+                        : "LIVE: voce ChatGPT · tieni premuto il microfono per dettare");
                 scheduleHandsFreeRestart(400L);
             }
             return;
@@ -2665,7 +2728,7 @@ public class MainActivity extends Activity {
 
     private void startHandsFreeMode() {
         if (!handsFreeEnabled) {
-            statusText.setText("Tocca il microfono per avviare LIVE");
+            statusText.setText("LIVE: voce ChatGPT · tieni premuto il microfono per dettare");
             return;
         }
 
@@ -2790,7 +2853,10 @@ public class MainActivity extends Activity {
     }
 
     private void startPressToTalk() {
+        if (liveEnabled) stopLiveMode("Conversazione fermata · dettatura manuale");
+        if (speechRecognizer == null) createSpeechRecognizer();
         if (webVoiceRequested) stopWebVoice("LIVE chiuso · dettatura manuale");
+        suppressAutoRead = false;
         if (speechRecognizer == null) return;
 
         if (tts != null) {
@@ -5161,19 +5227,20 @@ public class MainActivity extends Activity {
     }
 
     private class NativeBridge {
-        @JavascriptInterface public void startWebVoiceFromPage(String url) {
+        @JavascriptInterface public void startWebVoiceFromPage(String url, String token) {
             runOnUiThread(() -> {
                 long elapsed = android.os.SystemClock.uptimeMillis() - lastWebVoiceTouch;
                 if (!foreground || luminexVisible || webView == null || !trustedVoiceOrigin(url)
                         || !sameVoicePage(url, webView.getUrl()) || lastWebVoiceTouch == 0L || elapsed > 2000L) return;
                 lastWebVoiceTouch = 0L;
-                if (!webVoiceRequested) toggleWebVoice();
+                if (token == null || !token.matches("page-[0-9]+")) return;
+                if (!webVoiceRequested) beginWebVoice(token);
             });
         }
 
         @JavascriptInterface public void webVoiceState(String url, String token, String state) {
             runOnUiThread(() -> {
-                if (!webVoiceRequested || !Long.toString(webVoiceGeneration).equals(token)
+                if (!webVoiceRequested || !webVoiceToken.equals(token)
                         || webView == null || !trustedVoiceOrigin(url) || !sameVoicePage(url, webView.getUrl())) return;
                 if (!foreground) { stopWebVoice("LIVE chiuso · app in background"); return; }
                 if ("active".equals(state)) {
@@ -6372,7 +6439,7 @@ public class MainActivity extends Activity {
 
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "Tocca il microfono per avviare LIVE");
+                : "LIVE: voce ChatGPT · tieni premuto il microfono per dettare");
 
         if (handsFreeEnabled && !manualCapture && !headsetRecording && !ttsSpeaking) {
             scheduleHandsFreeRestart(250L);

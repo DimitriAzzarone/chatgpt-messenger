@@ -30,12 +30,18 @@ function setup({origin='https://chatgpt.com',deferred=false,startLabel='Start Vo
  for(const name of ['Avvia la modalità vocale','Apri modalità vocale','Open voice mode','Start voice']) {a=setup({startLabel:name});assert.equal(a.c.__danWebVoice.start('labels'),'connecting');a.c.__danWebVoice.stop();}
  a=setup({startLabel:'Dictate'});assert.equal(a.c.__danWebVoice.start('no-dictation'),'unavailable');
  for(const [failure,state] of [['NotAllowedError','capture-denied'],['NotFoundError','capture-missing'],['NotReadableError','capture-busy']]){a=setup({failure});a.c.__danWebVoice.start('failure');await assert.rejects(a.c.navigator.mediaDevices.getUserMedia({audio:true}));assert(a.states.some(s=>s.state===state));assert.equal(a.c.__danWebVoice.isActive(),false);}
- a=setup();let intents=0,prevented=0;a.c.AndroidRadio.startWebVoiceFromPage=()=>intents++;
+ a=setup();let intents=0,prevented=0,pageToken;
+ a.c.AndroidRadio.startWebVoiceFromPage=(url,token)=>{intents++;pageToken=token;};
  const target={disabled:false,getAttribute:k=>k==='aria-label'?'Avvia la modalità vocale':null,getClientRects:()=>[{}]};
- const click={isTrusted:true,target:{closest:()=>target},preventDefault:()=>prevented++,stopImmediatePropagation:()=>{}};
- a.listeners.click(click);assert.equal(intents,1);assert.equal(prevented,1);
- a.listeners.click({...click,isTrusted:false});assert.equal(intents,1);
- a.c.__danWebVoice.start('native');a.listeners.click(click);assert.equal(intents,1); // No interception or recursive launch once native flow is armed.
+ const click={isTrusted:true,target:{closest:()=>target},preventDefault:()=>prevented++,stopImmediatePropagation:()=>{throw Error('Trusted click must reach ChatGPT');}};
+ a.listeners.click({...click,isTrusted:false});assert.equal(intents,0);
+ a.listeners.click(click);assert.equal(intents,1);assert.equal(prevented,0);
+ assert.match(pageToken,/^page-[0-9]+$/);
+ await a.c.navigator.mediaDevices.getUserMedia({audio:true});
+ assert(a.states.some(s=>s.state==='active' && s.token===pageToken));
+ a.listeners.click(click);assert.equal(intents,1); // Already armed: no recursive launch.
+ a.c.__danWebVoice.stop();assert.equal(a.stats.stops,1);
+ await assert.rejects(a.c.navigator.mediaDevices.getUserMedia({audio:true}),e=>e.name==='NotAllowedError');
  const css=fs.readFileSync('app/src/main/assets/dan-hud.css','utf8');assert.ok(css.includes('--text-primary:#e0f4ff!important'));assert.ok(css.includes('-webkit-text-fill-color:#e0f4ff!important'));
  console.log('Web voice: origin, capture confirmation, X cleanup, peer closure, late permission race, background and track-end checks passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.148-voice-repair
       - dan-v1.97-chat-live-refresh
       - dan-v1.98-disable-live-refresh
       - dan-v1.99-memory-ranking

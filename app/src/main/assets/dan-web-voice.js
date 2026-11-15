@@ -31,8 +31,11 @@
   if(!event.isTrusted || wanted)return;
   const target=event.target?.closest?.('button,[role=button]');
   if(!target || !visible(target) || !isStart(target) || !window.AndroidRadio?.startWebVoiceFromPage)return;
-  event.preventDefault();event.stopImmediatePropagation();
-  window.AndroidRadio.startWebVoiceFromPage(location.href);
+  // Preserve the trusted click: replacing it with evaluateJavascript().click()
+  // loses browser user activation required by voice playback on some WebViews.
+  token='page-'+Date.now();wanted=true;active=false;sawEnd=false;missingSince=0;
+  window.AndroidRadio.startWebVoiceFromPage(location.href,token);
+  watch();
  },true);
  const media=navigator.mediaDevices;
  if(media?.getUserMedia) {
@@ -58,15 +61,7 @@
   const Original=window.RTCPeerConnection;
   window.RTCPeerConnection=class extends Original {constructor(...args){super(...args);if(wanted)peers.add(this);}};
  }
- window.__danWebVoice={
-  start(nextToken) {
-   if(wanted)stop(false);
-   token=String(nextToken);
-   if(!media?.getUserMedia){notify('unsupported');return 'unsupported';}
-   const start=button('start');
-   if(!start){notify('unavailable');return 'unavailable';}
-   wanted=true;active=false;sawEnd=false;missingSince=0;notify('connecting');
-   try {start.click();}catch(_){stop(false);notify('unavailable');return 'unavailable';}
+ function watch() {
    const poll=()=>{
     if(!wanted)return;
     // The official close button confirms that the account's voice UI opened.
@@ -76,6 +71,17 @@
     timer=setTimeout(poll,600);
    };
    timer=setTimeout(poll,600);
+ }
+ window.__danWebVoice={
+  start(nextToken) {
+   if(wanted)stop(false);
+   token=String(nextToken);
+   if(!media?.getUserMedia){notify('unsupported');return 'unsupported';}
+   const start=button('start');
+   if(!start){notify('unavailable');return 'unavailable';}
+   wanted=true;active=false;sawEnd=false;missingSince=0;notify('connecting');
+   try {start.click();}catch(_){stop(false);notify('unavailable');return 'unavailable';}
+   watch();
    return 'connecting';
   },
   stop:()=>stop(),
