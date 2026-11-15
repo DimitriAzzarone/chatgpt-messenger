@@ -377,6 +377,7 @@ public class MainActivity extends Activity {
 
         TextView title = new TextView(this);
         title.setText("Hewa");
+        title.setContentDescription("Hewa " + BuildConfig.VERSION_NAME);
         title.setTextColor(Color.rgb(0, 200, 255));
         title.setTextSize(24);
         try {
@@ -4663,12 +4664,36 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override public void onPermissionRequest(PermissionRequest request) {
                 runOnUiThread(() -> {
-                    boolean allowed = foreground && webVoiceRequested && webView != null
+                    long sinceTouch = android.os.SystemClock.uptimeMillis() - lastWebVoiceTouch;
+                    boolean explicitPageTap = lastWebVoiceTouch != 0L && sinceTouch >= 0L && sinceTouch <= 5000L;
+                    boolean allowed = foreground && (webVoiceRequested || explicitPageTap) && webView != null
                             && trustedVoiceOrigin(webView.getUrl())
                             && trustedVoiceOrigin(request.getOrigin().toString())
                             && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
                     boolean asksAudio = java.util.Arrays.asList(request.getResources()).contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
-                    if (allowed && asksAudio) request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                    if (allowed && asksAudio) {
+                        if (!webVoiceRequested) {
+                            if (liveEnabled) stopLiveMode("LIVE chiuso · dettatura della pagina");
+                            SpeechRecognizer previous = speechRecognizer;
+                            speechRecognizer = null;
+                            if (previous != null) {
+                                try { previous.cancel(); } catch (Exception ignored) {}
+                                try { previous.destroy(); } catch (Exception ignored) {}
+                            }
+                            handsFreeEnabled = false;
+                            recognizerSessionActive = false;
+                            listening = false;
+                            manualCapture = false;
+                            recordingLocked = false;
+                            headsetRecording = false;
+                            pressToTalkRequested = false;
+                            manualStopPending = false;
+                            if (tts != null) tts.stop();
+                            ttsSpeaking = false;
+                            applyMicStyle(false);
+                        }
+                        request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                    }
                     else request.deny();
                 });
             }

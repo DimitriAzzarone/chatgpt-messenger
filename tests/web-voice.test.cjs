@@ -42,6 +42,20 @@ function setup({origin='https://chatgpt.com',deferred=false,startLabel='Start Vo
  a.listeners.click(click);assert.equal(intents,1); // Already armed: no recursive launch.
  a.c.__danWebVoice.stop();assert.equal(a.stats.stops,1);
  await assert.rejects(a.c.navigator.mediaDevices.getUserMedia({audio:true}),e=>e.name==='NotAllowedError');
+ // The page's dictation microphone is independent of LIVE and requires a real tap.
+ a=setup();const dictate={disabled:false,getAttribute:k=>k==='aria-label'?'Dictate':null,getClientRects:()=>[{}]};
+ const dictationClick={isTrusted:true,target:{closest:()=>dictate}};
+ a.listeners.click({...dictationClick,isTrusted:false});
+ await assert.rejects(a.c.navigator.mediaDevices.getUserMedia({audio:true}),e=>e.name==='NotAllowedError');
+ a.listeners.click(dictationClick);
+ await a.c.navigator.mediaDevices.getUserMedia({audio:true});
+ assert.equal(a.c.__danWebVoice.isActive(),false);
+ await assert.rejects(a.c.navigator.mediaDevices.getUserMedia({audio:true}),e=>e.name==='NotAllowedError');
+ a.c.__danWebVoice.stop();assert.equal(a.stats.stops,1);
+ a=setup({deferred:true});a.listeners.click(dictationClick);
+ const pageCapture=a.c.navigator.mediaDevices.getUserMedia({audio:true});
+ a.c.__danWebVoice.stop();a.resolve(a.stream);
+ await assert.rejects(pageCapture,e=>e.name==='AbortError');assert.equal(a.track.readyState,'ended');
  const css=fs.readFileSync('app/src/main/assets/dan-hud.css','utf8');assert.ok(css.includes('--text-primary:#e0f4ff!important'));assert.ok(css.includes('-webkit-text-fill-color:#e0f4ff!important'));
  console.log('Web voice: origin, capture confirmation, X cleanup, peer closure, late permission race, background and track-end checks passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

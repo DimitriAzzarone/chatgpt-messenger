@@ -3,6 +3,7 @@
  'use strict';
  if (location.origin !== 'https://chatgpt.com' || window.__danWebVoice) return;
  let wanted=false, active=false, sawEnd=false, missingSince=0, token='', timer=null;
+ let dictationUntil=0, streamGeneration=0;
  const streams=new Set(), peers=new Set();
  const label=b=>(b.getAttribute('aria-label')||b.getAttribute('title')||b.textContent||'').trim().toLowerCase().replace(/\s+/g,' ');
  const visible=b=>b && !b.disabled && b.getAttribute('aria-disabled')!=='true' && b.getClientRects().length>0 && getComputedStyle(b).visibility!=='hidden' && getComputedStyle(b).display!=='none';
@@ -20,6 +21,7 @@
  }
  function stop(report=true) {
   const wasWanted=wanted;wanted=false;active=false;
+  dictationUntil=0;streamGeneration++;
   if(wasWanted) {try{button('end')?.click();}catch(_){} }
   release();
   if(wasWanted)document.querySelectorAll('audio').forEach(a=>{try{a.pause();}catch(_){}});
@@ -28,8 +30,12 @@
  // Real taps on the website's voice control go through Android permission flow.
  // Programmatic clicks from start() pass through normally, without recursion.
  document.addEventListener('click',event=>{
-  if(!event.isTrusted || wanted)return;
+  if(!event.isTrusted)return;
   const target=event.target?.closest?.('button,[role=button]');
+  if(target && visible(target) && /^(?:dictate|start dictation|dettatura|detta|avvia dettatura|dettare)$/i.test(label(target))) {
+   dictationUntil=Date.now()+5000;return;
+  }
+  if(wanted)return;
   if(!target || !visible(target) || !isStart(target) || !window.AndroidRadio?.startWebVoiceFromPage)return;
   // Preserve the trusted click: replacing it with evaluateJavascript().click()
   // loses browser user activation required by voice playback on some WebViews.
@@ -43,10 +49,17 @@
   media.getUserMedia=async constraints=>{
    // WebView may cache a previously granted origin permission. Gate every new
    // audio stream too, so the website cannot reacquire the microphone after X.
-   if(constraints?.audio && !wanted)throw new DOMException('Avvia LIVE per usare il microfono','NotAllowedError');
+   const pageDictation=!!constraints?.audio && !wanted && Date.now()<=dictationUntil;
+   if(constraints?.audio && !wanted && !pageDictation)throw new DOMException('Tocca il microfono per dettare o avvia LIVE','NotAllowedError');
+   if(pageDictation)dictationUntil=0;
    const capture=wanted?token:null;
+   const generation=streamGeneration;
    let stream;
    try {stream=await original(constraints);}catch(e){if(capture && wanted && capture===token) {notify(e.name==='NotAllowedError'?'capture-denied':e.name==='NotFoundError'?'capture-missing':e.name==='NotReadableError'?'capture-busy':'capture-error');stop(false);}throw e;}
+   if(pageDictation) {
+    if(generation!==streamGeneration){stream.getTracks().forEach(t=>t.stop());throw new DOMException('Dettatura chiusa','AbortError');}
+    streams.add(stream);
+   }
    if(capture) {
     if(!wanted || token!==capture){stream.getTracks().forEach(t=>t.stop());throw new DOMException('Sessione vocale chiusa','AbortError');}
     if(stream.getAudioTracks().some(t=>t.readyState==='live')) {
