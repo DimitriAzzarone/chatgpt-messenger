@@ -28,6 +28,21 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await page.waitForTimeout(250);
  assert.equal(await page.locator('#prompt-textarea p').getAttribute('data-placeholder'),'Chiedi a Dan');
  assert.equal(await page.locator('#prompt-textarea').innerText(),'Testo Chiedi a ChatGPT');
+ await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend',`<aside id="account-sidebar"><button data-testid="accounts-profile-button"><span id="avatar">DA</span><div><span id="account-name">Dimitri Azzarone</span><span id="plan">Plus</span></div></button><a href="/c/example"><span id="conversation-name">Dimitri</span></a></aside><textarea id="alternate-prompt" placeholder="Chiedi ChatGPT"></textarea><footer id="notice">ChatGPT può commettere errori. Verifica le informazioni importanti.</footer><article><p id="message-name">Dimitri Azzarone</p><p id="message-notice">ChatGPT può commettere errori.</p></article>`));
+ await page.waitForTimeout(250);
+ for (const id of ['account-name','plan']) assert.equal(await page.locator('#'+id).evaluate(e=>getComputedStyle(e).visibility),'hidden');
+ assert.equal(await page.locator('#avatar').isVisible(),true);
+ assert.equal(await page.locator('#conversation-name').isVisible(),true);
+ assert.equal(await page.locator('#message-name').isVisible(),true);
+ assert.equal(await page.locator('#alternate-prompt').getAttribute('placeholder'),'Chiedi a Dan');
+ assert.equal(await page.locator('#notice').innerText(),'Dan può commettere errori. Verifica le informazioni importanti.');
+ assert.equal(await page.locator('#message-notice').innerText(),'ChatGPT può commettere errori.');
+ // React may re-create the account labels and the composer hint after navigation.
+ await page.locator('#account-name').evaluate(e=>e.outerHTML='<span id="account-name">Dimitri Azzarone</span>');
+ await page.locator('#alternate-prompt').evaluate(e=>e.setAttribute('placeholder','Chiedi ChatGPT'));
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#account-name').evaluate(e=>getComputedStyle(e).visibility),'hidden');
+ assert.equal(await page.locator('#alternate-prompt').getAttribute('placeholder'),'Chiedi a Dan');
  await page.screenshot({path:'/workspace/dan-artifacts/hewa-sidebar-cover.png'});
  await browser.close();console.log('Unknown sidebar markup, cover position, SPA rerender, hidden drawer, phone resize and preserved conversation text: passed');
 })();

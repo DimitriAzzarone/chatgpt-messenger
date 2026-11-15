@@ -376,10 +376,12 @@ public class MainActivity extends Activity {
         logo.setContentDescription("Dan · cerchi luminosi azzurri");
 
         TextView title = new TextView(this);
-        title.setText("Hewa");
-        title.setContentDescription("Hewa " + BuildConfig.VERSION_NAME);
+        title.setText("Dan");
+        title.setContentDescription("Dan " + BuildConfig.VERSION_NAME);
         title.setTextColor(Color.rgb(0, 200, 255));
-        title.setTextSize(24);
+        title.setTextSize(17);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         try {
             title.setTypeface(Typeface.createFromAsset(getAssets(), "fonts/Orbitron.ttf"));
         } catch (RuntimeException unsupportedFont) {
@@ -432,7 +434,7 @@ public class MainActivity extends Activity {
 
         if (compactPhone) {
             topBar.setPadding(dp(4), dp(4), dp(4), dp(4));
-            title.setText("Hewa");
+            title.setText("Dan");
             soundButton.setPadding(0, 0, 0, 0);
             speedButton.setPadding(0, 0, 0, 0);
             voiceButton.setPadding(0, 0, 0, 0);

@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.151-branding
       - dan-v1.150-tap-microphone
       - dan-v1.149-continuous-voice
       - dan-v1.148-voice-repair

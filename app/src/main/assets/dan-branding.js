@@ -29,7 +29,7 @@
   return null;
  };
  const brandComposer = () => {
-  const original = /^(?:Chiedi\s+a\s+ChatGPT|Ask\s+ChatGPT)$/i;
+  const original = /^(?:Chiedi\s+(?:a\s+)?ChatGPT|Ask\s+ChatGPT)$/i;
   for (const editor of document.querySelectorAll('textarea, #prompt-textarea, [contenteditable="true"][role="textbox"]')) {
    for (const node of [editor, ...editor.querySelectorAll('[data-placeholder], [placeholder]')]) {
     for (const attr of ['placeholder', 'data-placeholder', 'aria-placeholder', 'aria-label']) {
@@ -39,9 +39,37 @@
    }
   }
  };
+ // Only account labels in sidebar controls; retain avatar and menu access.
+ const hideAccountLabels = () => {
+  const scopes = document.querySelectorAll('[data-testid="accounts-profile-button"], [data-testid="user-menu-button"], [data-testid="profile-button"], aside, nav, [data-testid*="sidebar"], #stage-slideover-sidebar');
+  for (const scope of scopes) {
+   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+   let text;
+   while ((text = walker.nextNode())) {
+    if (!/^(?:Dimitri(?: Azzarone)?|Plus)$/.test(text.nodeValue.trim())) continue;
+    const element = text.parentElement;
+    if (!element || element.closest('article,[data-message-author-role],textarea,[contenteditable="true"],a[href*="/c/"]')) continue;
+    const control = element.closest('button,[role="button"],footer,[data-testid="accounts-profile-button"]');
+    if (!control || element === control || element.textContent.trim() !== text.nodeValue.trim()) continue;
+    if (element.style.getPropertyValue('visibility') !== 'hidden' || element.style.getPropertyPriority('visibility') !== 'important')
+     element.style.setProperty('visibility','hidden','important');
+   }
+  }
+ };
+ const brandDisclaimer = () => {
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let text;
+  while ((text = walker.nextNode())) {
+   if (!/^ChatGPT (?:può commettere errori|can make mistakes)/.test(text.nodeValue.trim())) continue;
+   if (text.parentElement?.closest('article,[data-message-author-role],textarea,[contenteditable="true"]')) continue;
+   text.nodeValue = text.nodeValue.replace('ChatGPT','Dan');
+  }
+ };
  const apply = () => {
   if (!document.body) return;
   brandComposer();
+  hideAccountLabels();
+  brandDisclaimer();
   if (!overlay.isConnected) document.body.appendChild(overlay);
   const title = findTitle();
   if (!title) { overlay.style.display = 'none'; current = null; return; }
