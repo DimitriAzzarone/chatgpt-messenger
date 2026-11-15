@@ -10,10 +10,10 @@ android {
         applicationId "com.dimitriazzarone.danluminexai"
         minSdk 24
         targetSdk 35
-        versionCode 155
-        versionName "1.148"
+        versionCode 156
+        versionName "1.149"
         // DAN 1.108: ripristino del comportamento della 1.106.
-        resValue "string", "dan_launcher_label", "Dan Hewa 148"
+        resValue "string", "dan_launcher_label", "Dan Hewa 149"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
