@@ -60,6 +60,26 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await page.locator('#css-editor').evaluate(e=>e.innerHTML='<p id="pseudo-hint"></p>');
  await page.waitForTimeout(250);
  assert.equal(await page.locator('#pseudo-hint').evaluate(e=>getComputedStyle(e,'::before').content),'"Chiedi a Dan"');
+ // Editable initial boilerplate is cleared once and replaced by a genuine hint.
+ await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend',`<form><textarea id="initial-value">Chiedi a ChatGPT</textarea></form><form><div id="initial-editable" contenteditable="true"><p>Chiedi a ChatGPT</p></div></form><form><textarea id="existing-draft">Vorrei chiedere a ChatGPT una cosa</textarea></form>`));
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#initial-value').inputValue(),'');
+ assert.equal(await page.locator('#initial-value').getAttribute('placeholder'),'Chiedi a Dan');
+ assert.equal(await page.locator('#initial-editable').innerText(),'');
+ assert.equal(await page.locator('#initial-editable').evaluate(e=>getComputedStyle(e,'::before').content),'"Chiedi a Dan"');
+ assert.equal(await page.locator('#existing-draft').inputValue(),'Vorrei chiedere a ChatGPT una cosa');
+ for(const id of ['initial-value','initial-editable']) {
+  await page.locator('#'+id).fill('Chiedi a ChatGPT');
+  await page.waitForTimeout(250);
+  const actual=await page.locator('#'+id).evaluate(e=>'value' in e?e.value:e.textContent);
+  assert.equal(actual,'Chiedi a ChatGPT','typing the same phrase must be preserved');
+ }
+ // A user edit that happens before the observer sees a newly added editor is protected.
+ await page.evaluate(()=>{
+  const form=document.createElement('form');form.innerHTML='<textarea id="fast-user"></textarea>';document.body.appendChild(form);
+  const e=form.firstChild;e.value='Chiedi a ChatGPT';e.dispatchEvent(new InputEvent('input',{bubbles:true,data:e.value}));
+ });
+ await page.waitForTimeout(250);assert.equal(await page.locator('#fast-user').inputValue(),'Chiedi a ChatGPT');
  await page.screenshot({path:'/workspace/dan-artifacts/hewa-sidebar-cover.png'});
  await browser.close();console.log('Unknown sidebar markup, cover position, SPA rerender, hidden drawer, phone resize and preserved conversation text: passed');
 })();

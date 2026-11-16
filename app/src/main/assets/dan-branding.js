@@ -28,13 +28,51 @@
   }
   return null;
  };
+ const settledEditors=new WeakSet();
+ const editorSelector='textarea, #prompt-textarea, [contenteditable]:not([contenteditable="false"]), .ProseMirror';
+ // Mark both real typing and input supplied by dictation before the delayed observer runs.
+ for(const event of ['beforeinput','input','compositionstart'])document.addEventListener(event,e=>{
+  const editor=e.target?.closest?.(editorSelector);if(editor)settledEditors.add(editor);
+ },true);
+ const initialComposerValue = (editor,original) => {
+  if(settledEditors.has(editor))return;
+  if(editor.closest('article,[data-message-author-role],nav,aside'))return;
+  const raw=('value' in editor ? editor.value : editor.textContent)||'';
+  const clean=raw.replace(/[\u200b\u200c\u200d\ufeff]/g,'').trim();
+  if(!clean)return; // Wait for a delayed initial value; input events protect user text.
+  settledEditors.add(editor);
+  const hint=editor.getAttribute('placeholder')||editor.getAttribute('data-placeholder')||'';
+  const composer=editor.matches('#prompt-textarea,[data-testid="prompt-textarea"]')
+   || editor.closest('form,[data-testid*="composer"],[class*="composer"]') || original.test(hint.trim());
+  if(!composer || !original.test(clean))return;
+  // Only the complete initial boilerplate is cleared, never occurrences in a draft.
+  if('value' in editor){
+   const win=editor.ownerDocument.defaultView;
+   const proto=editor.tagName==='TEXTAREA'?win.HTMLTextAreaElement.prototype:win.HTMLInputElement.prototype;
+   Object.getOwnPropertyDescriptor(proto,'value').set.call(editor,'');
+   editor.setAttribute('placeholder','Chiedi a Dan');
+  }else{
+   const walker=document.createTreeWalker(editor,NodeFilter.SHOW_TEXT);let text;
+   while((text=walker.nextNode()))text.nodeValue='';
+   editor.setAttribute('data-dan-initial-hint','');
+   if(getComputedStyle(editor).position==='static')editor.style.position='relative';
+   if(editor.getBoundingClientRect().height<16)editor.style.minHeight='1.5em';
+  }
+  const win=editor.ownerDocument.defaultView;
+  editor.dispatchEvent(new win.InputEvent('input',{bubbles:true,composed:true,inputType:'deleteContentBackward',data:null}));
+  editor.dispatchEvent(new win.Event('change',{bubbles:true}));
+ };
  const brandComposer = () => {
   const original = /^(?:Chiedi\s+(?:a\s+)?ChatGPT|Ask\s+ChatGPT)[.\u2026!?]?$/i;
   let css=document.getElementById('dan-composer-hint-style');
-  if(!css){css=document.createElement('style');css.id='dan-composer-hint-style';css.textContent='[data-dan-hint-before]::before,[data-dan-hint-after]::after{content:"Chiedi a Dan"!important}';document.head.appendChild(css);}
+  if(!css){css=document.createElement('style');css.id='dan-composer-hint-style';css.textContent='[data-dan-hint-before]::before,[data-dan-hint-after]::after{content:"Chiedi a Dan"!important}[data-dan-initial-hint][data-dan-empty]::before{content:"Chiedi a Dan"!important;position:absolute;inset-inline-start:0;top:0;pointer-events:none;color:#9ebed2}';document.head.appendChild(css);}
   for (const editor of document.querySelectorAll('textarea, #prompt-textarea, [contenteditable]:not([contenteditable="false"]), .ProseMirror')) {
-   // Change hints only: never rewrite the editor value or typed text nodes.
+   initialComposerValue(editor,original);
    const empty=!(('value' in editor ? editor.value : editor.textContent)||'').replace(/[\u200b\u200c\u200d\ufeff]/g,'').trim();
+   if(editor.hasAttribute('data-dan-initial-hint')){
+    if(empty&&!editor.hasAttribute('data-dan-empty'))editor.setAttribute('data-dan-empty','');
+    if(!empty&&editor.hasAttribute('data-dan-empty'))editor.removeAttribute('data-dan-empty');
+   }
    for (const node of [editor, ...editor.querySelectorAll('*')]) {
     for (const attr of ['placeholder', 'data-placeholder', 'aria-placeholder', 'aria-label']) {
      const value = node.getAttribute(attr);
