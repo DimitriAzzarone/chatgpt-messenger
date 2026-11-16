@@ -49,6 +49,17 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  for(const id of ['mobile-name','mobile-plan']) assert.equal(await page.locator('#'+id).evaluate(e=>getComputedStyle(e).visibility),'hidden');
  assert.equal(await page.locator('#mobile-avatar').isVisible(),true);
  assert.equal(await page.locator('#mobile-editor p').getAttribute('data-placeholder'),'Chiedi a Dan');
+ // Literal CSS pseudo hints and separate sibling labels need more than attribute rewriting.
+ await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend',`<style>#pseudo-hint:empty:before{content:"Chiedi a ChatGPT"}</style><form><div contenteditable="true" id="css-editor"><p id="pseudo-hint"></p></div></form><form><div id="sibling-editor" contenteditable="true"></div><span id="sibling-hint">Chiedi a ChatGPT</span></form>`));
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#pseudo-hint').evaluate(e=>getComputedStyle(e,'::before').content),'"Chiedi a Dan"');
+ assert.equal(await page.locator('#sibling-hint').innerText(),'Chiedi a Dan');
+ await page.locator('#css-editor').fill('Chiedi a ChatGPT');
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#css-editor').innerText(),'Chiedi a ChatGPT');
+ await page.locator('#css-editor').evaluate(e=>e.innerHTML='<p id="pseudo-hint"></p>');
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#pseudo-hint').evaluate(e=>getComputedStyle(e,'::before').content),'"Chiedi a Dan"');
  await page.screenshot({path:'/workspace/dan-artifacts/hewa-sidebar-cover.png'});
  await browser.close();console.log('Unknown sidebar markup, cover position, SPA rerender, hidden drawer, phone resize and preserved conversation text: passed');
 })();

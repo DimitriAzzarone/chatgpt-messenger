@@ -29,13 +29,32 @@
   return null;
  };
  const brandComposer = () => {
-  const original = /^(?:Chiedi\s+(?:a\s+)?ChatGPT|Ask\s+ChatGPT)$/i;
+  const original = /^(?:Chiedi\s+(?:a\s+)?ChatGPT|Ask\s+ChatGPT)[.\u2026!?]?$/i;
+  let css=document.getElementById('dan-composer-hint-style');
+  if(!css){css=document.createElement('style');css.id='dan-composer-hint-style';css.textContent='[data-dan-hint-before]::before,[data-dan-hint-after]::after{content:"Chiedi a Dan"!important}';document.head.appendChild(css);}
   for (const editor of document.querySelectorAll('textarea, #prompt-textarea, [contenteditable]:not([contenteditable="false"]), .ProseMirror')) {
-   for (const node of [editor, ...editor.querySelectorAll('[data-placeholder], [placeholder]')]) {
+   // Change hints only: never rewrite the editor value or typed text nodes.
+   const empty=!(('value' in editor ? editor.value : editor.textContent)||'').replace(/[\u200b\u200c\u200d\ufeff]/g,'').trim();
+   for (const node of [editor, ...editor.querySelectorAll('*')]) {
     for (const attr of ['placeholder', 'data-placeholder', 'aria-placeholder', 'aria-label']) {
      const value = node.getAttribute(attr);
      if (value && original.test(value.trim())) node.setAttribute(attr, 'Chiedi a Dan');
     }
+    for(const side of ['before','after']) {
+     const attr='data-dan-hint-'+side;
+     if(!empty){if(node.hasAttribute(attr))node.removeAttribute(attr);continue;}
+     const content=getComputedStyle(node,'::'+side).content;
+     if(content && original.test(content.replace(/^["']|["']$/g,'').trim()) && !node.hasAttribute(attr))node.setAttribute(attr,'');
+    }
+   }
+   // Some page versions draw the hint in a sibling label instead of an attribute.
+   const scope=editor.closest('form,[data-testid*="composer"]')||editor.parentElement;
+   if(!scope)continue;
+   const walker=document.createTreeWalker(scope,NodeFilter.SHOW_TEXT);let text;
+   while((text=walker.nextNode())){
+    if(!original.test(text.nodeValue.trim()))continue;
+    if(text.parentElement?.closest('textarea,[contenteditable],article,[data-message-author-role]'))continue;
+    text.nodeValue=text.nodeValue.replace(/ChatGPT/i,'Dan');
    }
   }
  };
