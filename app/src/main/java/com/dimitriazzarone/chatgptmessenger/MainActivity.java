@@ -5863,9 +5863,48 @@ public class MainActivity extends Activity {
         webView.evaluateJavascript(script, null);
     }
 
+
+    // Personalizza soltanto il suggerimento della casella, senza alterare i messaggi.
+    private void injectDanComposerLabel() {
+        if (webView == null || webView.getUrl() == null ||
+                !webView.getUrl().startsWith("https://chatgpt.com/")) return;
+        String script =
+                "(function(){"
+                + "if(window.__danComposerLabel155)return;"
+                + "window.__danComposerLabel155=true;"
+                + "const wanted='Chiedi a DAN';"
+                + "function fix(){"
+                + " const ed=document.querySelector('#prompt-textarea,[data-testid=prompt-textarea]');"
+                + " if(!ed)return;"
+                + " for(const attr of ['placeholder','data-placeholder','aria-placeholder']){"
+                + "  const v=ed.getAttribute(attr);"
+                + "  if(v&&/chiedi a chatgpt/i.test(v))ed.setAttribute(attr,wanted);"
+                + " }"
+                + " const scope=ed.parentElement;"
+                + " if(!scope)return;"
+                + " for(const el of scope.querySelectorAll('[data-placeholder],[aria-placeholder],[placeholder]')){"
+                + "  for(const attr of ['placeholder','data-placeholder','aria-placeholder']){"
+                + "   const v=el.getAttribute(attr);"
+                + "   if(v&&/chiedi a chatgpt/i.test(v))el.setAttribute(attr,wanted);"
+                + "  }"
+                + " }"
+                + " for(const el of scope.querySelectorAll('p,span,div')){"
+                + "  if(el.children.length||el.isContentEditable||el.closest('[contenteditable=true]'))continue;"
+                + "  if((el.textContent||'').trim()==='Chiedi a ChatGPT')el.textContent=wanted;"
+                + " }"
+                + "}"
+                + "let timer;"
+                + "new MutationObserver(function(){clearTimeout(timer);timer=setTimeout(fix,150);})"
+                + ".observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['placeholder','data-placeholder','aria-placeholder']});"
+                + "fix();"
+                + "})();";
+        webView.evaluateJavascript(script, null);
+    }
+
     private void injectPageBehaviors() {
         injectDanChatWatcher();
         injectDanBranding();
+        injectDanComposerLabel();
         injectDanHudTheme();
         // Riordino automatico sospeso per verificare la lista delle chat.
         injectEnterToSend();
