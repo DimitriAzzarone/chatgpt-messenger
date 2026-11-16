@@ -5864,39 +5864,43 @@ public class MainActivity extends Activity {
     }
 
 
-    // Personalizza soltanto il suggerimento della casella, senza alterare i messaggi.
+    // DAN 155.1: osserva anche i nodi di testo ripristinati durante il primo caricamento.
     private void injectDanComposerLabel() {
         if (webView == null || webView.getUrl() == null ||
                 !webView.getUrl().startsWith("https://chatgpt.com/")) return;
         String script =
                 "(function(){"
-                + "if(window.__danComposerLabel155)return;"
-                + "window.__danComposerLabel155=true;"
-                + "const wanted='Chiedi a DAN';"
+                + "if(window.__danComposerLabel1551)return;"
+                + "window.__danComposerLabel1551=true;"
+                + "const original=/chiedi\\s+a\\s+chatgpt/i;"
+                + "const exact=/^\\s*chiedi\\s+a\\s+chatgpt\\s*$/i;"
                 + "function fix(){"
                 + " const ed=document.querySelector('#prompt-textarea,[data-testid=prompt-textarea]');"
                 + " if(!ed)return;"
-                + " for(const attr of ['placeholder','data-placeholder','aria-placeholder']){"
-                + "  const v=ed.getAttribute(attr);"
-                + "  if(v&&/chiedi a chatgpt/i.test(v))ed.setAttribute(attr,wanted);"
-                + " }"
-                + " const scope=ed.parentElement;"
+                + " const scope=ed.closest('form')||ed.parentElement?.parentElement||ed.parentElement;"
                 + " if(!scope)return;"
-                + " for(const el of scope.querySelectorAll('[data-placeholder],[aria-placeholder],[placeholder]')){"
+                + " for(const el of [ed,...scope.querySelectorAll('[placeholder],[data-placeholder],[aria-placeholder]')]){"
                 + "  for(const attr of ['placeholder','data-placeholder','aria-placeholder']){"
                 + "   const v=el.getAttribute(attr);"
-                + "   if(v&&/chiedi a chatgpt/i.test(v))el.setAttribute(attr,wanted);"
+                + "   if(v&&original.test(v))el.setAttribute(attr,v.replace(original,'Chiedi a DAN'));"
                 + "  }"
                 + " }"
-                + " for(const el of scope.querySelectorAll('p,span,div')){"
-                + "  if(el.children.length||el.isContentEditable||el.closest('[contenteditable=true]'))continue;"
-                + "  if((el.textContent||'').trim()==='Chiedi a ChatGPT')el.textContent=wanted;"
+                + " const walker=document.createTreeWalker(scope,NodeFilter.SHOW_TEXT);"
+                + " let node;"
+                + " while((node=walker.nextNode())){"
+                + "  if(!exact.test(node.nodeValue||''))continue;"
+                + "  const p=node.parentElement;"
+                + "  if(!p||p.closest('[contenteditable=true],textarea,[role=textbox]'))continue;"
+                + "  node.nodeValue='Chiedi a DAN';"
                 + " }"
                 + "}"
-                + "let timer;"
-                + "new MutationObserver(function(){clearTimeout(timer);timer=setTimeout(fix,150);})"
-                + ".observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['placeholder','data-placeholder','aria-placeholder']});"
-                + "fix();"
+                + "let busy=false;"
+                + "function refresh(){if(busy)return;busy=true;try{fix();}finally{busy=false;}}"
+                + "new MutationObserver(refresh).observe(document.documentElement,"
+                + "{childList:true,subtree:true,characterData:true,attributes:true,"
+                + "attributeFilter:['placeholder','data-placeholder','aria-placeholder']});"
+                + "refresh();"
+                + "setInterval(refresh,500);"
                 + "})();";
         webView.evaluateJavascript(script, null);
     }
