@@ -355,7 +355,7 @@ public class MainActivity extends Activity {
             statusText.postDelayed(this::recoverHandsFreeMicrophone, 500L);
         } else {
             autoButton.setText("LIVE");
-            statusText.setText("LIVE · tocca per iniziare o fermare");
+            statusText.setText("Tocca il microfono per parlare");
         }
     }
 
@@ -451,7 +451,6 @@ public class MainActivity extends Activity {
         topBar.addView(voiceButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
         topBar.addView(playSpeechButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
         topBar.addView(stopSpeechButton, new LinearLayout.LayoutParams(dp(iconWidth), dp(44)));
-        topBar.addView(autoButton, new LinearLayout.LayoutParams(dp(micWidth), dp(44)));
         topBar.addView(luminexButton, new LinearLayout.LayoutParams(dp(luminexWidth), dp(44)));
 
         topBar.addView(reload, new LinearLayout.LayoutParams(dp(reloadWidth), dp(44)));
@@ -479,11 +478,11 @@ public class MainActivity extends Activity {
         statusText = new TextView(this);
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "LIVE · tocca per iniziare o fermare");
+                : "Tocca il microfono per parlare");
         statusText.setTextColor(Color.LTGRAY);
         statusText.setTextSize(12);
         statusText.setMaxLines(3);
-        statusText.setText("LIVE · tocca per iniziare o fermare");
+        statusText.setText("Tocca il microfono per parlare");
         liveCaption = statusText;
         statusText.setGravity(Gravity.CENTER_VERTICAL);
 
@@ -491,7 +490,7 @@ public class MainActivity extends Activity {
         micButton.setText("🎙");
         micButton.setTextSize(25);
         micButton.setPadding(0, 0, 0, 0);
-        micButton.setContentDescription("Tocca per dettare, tocca di nuovo per terminare");
+        micButton.setContentDescription("Avvia la conversazione; tocca ancora o X per fermare");
         micButton.setTextColor(Color.WHITE);
         micButton.setGravity(Gravity.CENTER);
         applyMicStyle(false);
@@ -522,7 +521,7 @@ public class MainActivity extends Activity {
         memoryButton.setContentDescription("Carica, ripristina o salva la memoria di Dan");
         memoryButton.setOnClickListener(v -> showMemoryMenu());
 
-        Button engineButton = makeButton("Utilizzo Work");
+        Button engineButton = makeButton("Utilizzo");
         engineButton.setAllCaps(false);
         engineButton.setTextSize(12);
         engineButton.setContentDescription("Apri i limiti e l'utilizzo ufficiale di Work e Codex");
@@ -533,14 +532,12 @@ public class MainActivity extends Activity {
         });
         engineButton.setOnLongClickListener(v -> { showEngineMenu(); return true; });
 
-        controlsBar.addView(memoryButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         Button copyChatButton = makeButton("Copia chat");
         copyChatButton.setAllCaps(false);
         copyChatButton.setTextSize(12);
         copyChatButton.setContentDescription("Copia i messaggi e le risposte della chat aperta negli appunti");
         copyChatButton.setOnClickListener(v -> copyCurrentChat());
-        controlsBar.addView(copyChatButton, new LinearLayout.LayoutParams(0, dp(42), 1));
 
 
         root.addView(topBar);
@@ -616,7 +613,7 @@ public class MainActivity extends Activity {
         playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
 
-        micButton.setOnClickListener(v -> toggleManualDictation());
+        micButton.setOnClickListener(v -> toggleLiveMode());
     }
 
     private boolean pendingManualPermission;
@@ -779,7 +776,7 @@ public class MainActivity extends Activity {
         webVoiceClose.setVisibility(View.VISIBLE);
         autoButton.setActivated(true);
         micButton.setActivated(true);
-        micButton.setContentDescription("Ferma LIVE · chat sempre visibile");
+        micButton.setContentDescription("Ferma la conversazione");
         applyMicStyle(true);
         statusText.setText("LIVE · preparo l'ascolto…");
         scheduleLiveListen(450L);
@@ -815,7 +812,7 @@ public class MainActivity extends Activity {
         pressToTalkRequested = false;
         if (micButton != null) {
             micButton.setActivated(false);
-            micButton.setContentDescription("Tocca per dettare, tocca di nuovo per terminare");
+            micButton.setContentDescription("Avvia la conversazione; tocca ancora o X per fermare");
         }
         if (webView != null) webView.evaluateJavascript("window.__danLivePending=null;", null);
         if (statusText != null) statusText.setText(reason);
@@ -1994,7 +1991,7 @@ public class MainActivity extends Activity {
                         playReadingFinishedSound();
                         statusText.setText(handsFreeEnabled
                                 ? "🟢 In attesa — dì Jasper per iniziare"
-                                : "LIVE · tocca per iniziare o fermare");
+                                : "Tocca il microfono per parlare");
                         if (handsFreeEnabled) {
                             recognizerSessionActive = false;
                             listening = false;
@@ -2473,7 +2470,7 @@ public class MainActivity extends Activity {
                 manualCapture = false;
                 statusText.setText(handsFreeEnabled
                         ? "🟢 In attesa — dì Jasper per iniziare"
-                        : "LIVE · tocca per iniziare o fermare");
+                        : "Tocca il microfono per parlare");
                 scheduleHandsFreeRestart(400L);
             }
             return;
@@ -2762,7 +2759,7 @@ public class MainActivity extends Activity {
 
     private void startHandsFreeMode() {
         if (!handsFreeEnabled) {
-            statusText.setText("LIVE · tocca per iniziare o fermare");
+            statusText.setText("Tocca il microfono per parlare");
             return;
         }
 
@@ -5368,6 +5365,15 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void userTurnStartedForPage(String url) {
+            runOnUiThread(() -> {
+                if (webView == null || webVoiceRequested || !sameVoicePage(url, webView.getUrl())) return;
+                // X stops the current turn. A new typed turn restores automatic reading.
+                suppressAutoRead = false;
+            });
+        }
+
+        @JavascriptInterface
         public void assistantReadyForPage(String url, String text) {
             runOnUiThread(() -> {
                 if (webView == null || webVoiceRequested || !sameVoicePage(url, webView.getUrl()) || suppressAutoRead) return;
@@ -6159,6 +6165,7 @@ public class MainActivity extends Activity {
                 + " let candidateSince=0;"
                 + " let lastHandled='';"
                 + " let page=location.href;"
+                + " let seenUsers=document.querySelectorAll('[data-message-author-role=user]').length;"
 
                 + " function txt(e){"
                 + "  if(!e)return '';"
@@ -6270,7 +6277,9 @@ public class MainActivity extends Activity {
                 + " function latestResponse(){return danAnswer();}"
 
                 + "function check(){"
-                + "  if(page!==location.href){page=location.href;candidate='';candidateSince=0;if(!window.__danLivePending){lastHandled=document.querySelectorAll('[data-message-author-role=user]').length+':'+latestResponse();return;}}"
+                + "  if(page!==location.href){page=location.href;candidate='';candidateSince=0;seenUsers=document.querySelectorAll('[data-message-author-role=user]').length;if(!window.__danLivePending){lastHandled=document.querySelectorAll('[data-message-author-role=user]').length+':'+latestResponse();return;}}"
+                + "  const currentUsers=document.querySelectorAll('[data-message-author-role=user]').length;"
+                + "  if(currentUsers>seenUsers){try{window.AndroidRadio?.userTurnStartedForPage(page);}catch(e){}}seenUsers=currentUsers;"
                 + "  const roots=danRoots();if(roots.some(r=>r.querySelector('[data-testid=stop-button],[data-is-streaming=true]'))){candidate='';return;}"
                 + "  const pending=window.__danLivePending;"
                 + "  const users=document.querySelectorAll('[data-message-author-role=user]').length;"
@@ -6504,7 +6513,7 @@ public class MainActivity extends Activity {
 
         statusText.setText(handsFreeEnabled
                 ? "🟢 Jasper ON — dì Jasper per iniziare"
-                : "LIVE · tocca per iniziare o fermare");
+                : "Tocca il microfono per parlare");
 
         if (handsFreeEnabled && !manualCapture && !headsetRecording && !ttsSpeaking) {
             scheduleHandsFreeRestart(250L);

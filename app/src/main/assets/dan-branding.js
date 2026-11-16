@@ -30,7 +30,7 @@
  };
  const brandComposer = () => {
   const original = /^(?:Chiedi\s+(?:a\s+)?ChatGPT|Ask\s+ChatGPT)$/i;
-  for (const editor of document.querySelectorAll('textarea, #prompt-textarea, [contenteditable="true"][role="textbox"]')) {
+  for (const editor of document.querySelectorAll('textarea, #prompt-textarea, [contenteditable]:not([contenteditable="false"]), .ProseMirror')) {
    for (const node of [editor, ...editor.querySelectorAll('[data-placeholder], [placeholder]')]) {
     for (const attr of ['placeholder', 'data-placeholder', 'aria-placeholder', 'aria-label']) {
      const value = node.getAttribute(attr);
@@ -41,19 +41,22 @@
  };
  // Only account labels in sidebar controls; retain avatar and menu access.
  const hideAccountLabels = () => {
-  const scopes = document.querySelectorAll('[data-testid="accounts-profile-button"], [data-testid="user-menu-button"], [data-testid="profile-button"], aside, nav, [data-testid*="sidebar"], #stage-slideover-sidebar');
-  for (const scope of scopes) {
-   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-   let text;
-   while ((text = walker.nextNode())) {
-    if (!/^(?:Dimitri(?: Azzarone)?|Plus)$/.test(text.nodeValue.trim())) continue;
-    const element = text.parentElement;
-    if (!element || element.closest('article,[data-message-author-role],textarea,[contenteditable="true"],a[href*="/c/"]')) continue;
-    const control = element.closest('button,[role="button"],footer,[data-testid="accounts-profile-button"]');
-    if (!control || element === control || element.textContent.trim() !== text.nodeValue.trim()) continue;
-    if (element.style.getPropertyValue('visibility') !== 'hidden' || element.style.getPropertyPriority('visibility') !== 'important')
-     element.style.setProperty('visibility','hidden','important');
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let text;
+  while ((text = walker.nextNode())) {
+   if (!/^(?:Dimitri(?: Azzarone)?|Plus)$/.test(text.nodeValue.trim())) continue;
+   const element = text.parentElement;
+   if (!element || element.closest('article,[data-message-author-role],textarea,[contenteditable],a[href*="/c/"]')) continue;
+   let account = element.closest('[data-testid="accounts-profile-button"],[data-testid="user-menu-button"],[data-testid="profile-button"]');
+   // Current mobile account rows can be plain divs, without nav/aside or test IDs.
+   for (let row=element,depth=0; !account && row && depth<5; row=row.parentElement,depth++) {
+    const label=(row.textContent||'').trim();
+    if (/Dimitri(?: Azzarone)?/.test(label) && /Plus/.test(label) && label.length<100
+        && row.getBoundingClientRect().height<=140) account=row;
    }
+   if (!account || element === account || element.textContent.trim() !== text.nodeValue.trim()) continue;
+   if (element.style.getPropertyValue('visibility') !== 'hidden' || element.style.getPropertyPriority('visibility') !== 'important')
+    element.style.setProperty('visibility','hidden','important');
   }
  };
  const brandDisclaimer = () => {

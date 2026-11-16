@@ -43,6 +43,12 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await page.waitForTimeout(250);
  assert.equal(await page.locator('#account-name').evaluate(e=>getComputedStyle(e).visibility),'hidden');
  assert.equal(await page.locator('#alternate-prompt').getAttribute('placeholder'),'Chiedi a Dan');
+ // Mobile layout without aside/nav/test IDs, and an editor without role=textbox.
+ await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend',`<div id="mobile-account"><div id="mobile-avatar">DA</div><div><span id="mobile-name">Dimitri Azzarone</span><span id="mobile-plan">Plus</span></div></div><div id="mobile-editor" contenteditable="true"><p data-placeholder="Chiedi a ChatGPT"><br></p></div>`));
+ await page.waitForTimeout(250);
+ for(const id of ['mobile-name','mobile-plan']) assert.equal(await page.locator('#'+id).evaluate(e=>getComputedStyle(e).visibility),'hidden');
+ assert.equal(await page.locator('#mobile-avatar').isVisible(),true);
+ assert.equal(await page.locator('#mobile-editor p').getAttribute('data-placeholder'),'Chiedi a Dan');
  await page.screenshot({path:'/workspace/dan-artifacts/hewa-sidebar-cover.png'});
  await browser.close();console.log('Unknown sidebar markup, cover position, SPA rerender, hidden drawer, phone resize and preserved conversation text: passed');
 })();
