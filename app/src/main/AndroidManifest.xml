@@ -22,13 +22,6 @@
         android:networkSecurityConfig="@xml/dan_network_security">
 
 
-        <provider android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.attachments"
-            android:exported="false" android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
-                android:resource="@xml/dan_attachment_paths" />
-        </provider>
-
         <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode"

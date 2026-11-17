@@ -317,7 +317,6 @@ public class MainActivity extends Activity {
     private String lastSpokenText = "";
 
     private ValueCallback<Uri[]> filePathCallback;
-    private final java.util.concurrent.ExecutorService attachmentExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
     private volatile int attachmentGeneration;
 
     private String pendingDownloadName = null;
@@ -381,6 +380,7 @@ public class MainActivity extends Activity {
         TextView title = new TextView(this);
         title.setText("Dan");
         title.setContentDescription("Dan " + BuildConfig.VERSION_NAME);
+        title.setOnLongClickListener(v -> { showAttachmentDiagnostics(); return true; });
         title.setTextColor(Color.rgb(0, 200, 255));
         title.setTextSize(17);
         title.setSingleLine(true);
@@ -4811,17 +4811,20 @@ public class MainActivity extends Activity {
                 }
 
                 attachmentGeneration++;
+                recordAttachmentPhase("Selettore documenti aperto", true);
                 MainActivity.this.filePathCallback = filePathCallback;
 
                 try {
                     // Respect the file types and multiple-selection mode requested by ChatGPT.
-                    Intent intent = fileChooserParams != null
-                            ? fileChooserParams.createIntent()
-                            : new Intent(Intent.ACTION_GET_CONTENT);
-                    if (intent == null) intent = new Intent(Intent.ACTION_GET_CONTENT);
-                    intent.setAction(Intent.ACTION_OPEN_DOCUMENT);
+                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    Intent requested = fileChooserParams == null ? null : fileChooserParams.createIntent();
+                    if (requested != null) {
+                        if (requested.getType() != null) intent.setType(requested.getType());
+                        String[] types = requested.getStringArrayExtra(Intent.EXTRA_MIME_TYPES);
+                        if (types != null) intent.putExtra(Intent.EXTRA_MIME_TYPES, types);
+                    }
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
-                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
                     if (intent.getType() == null || intent.getType().trim().isEmpty()) {
                         intent.setType("*/*");
                     }
@@ -4839,6 +4842,7 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
                     filePathCallback.onReceiveValue(null);
+                    recordAttachmentPhase("Errore apertura selettore: " + e.getClass().getSimpleName(), false);
                     android.util.Log.e("DanFileUpload", "File picker failed", e);
                     Toast.makeText(MainActivity.this,
                             "Impossibile aprire il selettore file", Toast.LENGTH_LONG).show();
@@ -4882,6 +4886,12 @@ public class MainActivity extends Activity {
                     WebView view,
                     RenderProcessGoneDetail detail
             ) {
+                attachmentGeneration++;
+                recordAttachmentPhase("WebView terminato: " + (detail.didCrash() ? "crash" : "processo chiuso da Android"), false);
+                if (filePathCallback != null) {
+                    ValueCallback<Uri[]> pending = filePathCallback;filePathCallback=null;
+                    try { pending.onReceiveValue(null); } catch (RuntimeException ignored) {}
+                }
                 String restoreUrl = lastUrl;
 
                 webContainer.removeView(webView);
@@ -5276,88 +5286,90 @@ public class MainActivity extends Activity {
             if (results == null || results.length == 0) {
                 ValueCallback<Uri[]> callback = filePathCallback;
                 filePathCallback = null;
+                recordAttachmentPhase("Selezione annullata o senza documento", false);
+                statusText.setText("Nessun documento selezionato");
                 callback.onReceiveValue(null);
-            } else prepareAttachmentFiles(results);
+            } else deliverSystemDocuments(results, data);
 
         }
     }
 
-    private void prepareAttachmentFiles(Uri[] selected) {
-        final ValueCallback<Uri[]> callback = filePathCallback;
-        final int generation = attachmentGeneration;
-        statusText.setText("Preparo " + selected.length + " allegati…");
-        attachmentExecutor.execute(() -> {
-            java.util.ArrayList<File> copied = new java.util.ArrayList<>();
-            try {
-                File root = new File(getCacheDir(), "attachments");
-                if (!root.isDirectory() && !root.mkdirs()) throw new java.io.IOException("Cartella temporanea non disponibile");
-                // Expire only old temporary copies, never the user's source documents.
-                File[] old = root.listFiles();
-                if (old != null) for (File dir : old) {
-                    if (dir.isDirectory() && System.currentTimeMillis() - dir.lastModified() > 86400000L) {
-                        File[] files = dir.listFiles();
-                        if (files != null) for (File file : files) file.delete();
-                        dir.delete();
-                    }
-                }
-                Uri[] ready = new Uri[selected.length];
-                for (int i=0; i<selected.length; i++) {
-                    if (generation != attachmentGeneration || Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Selezione annullata");
-                    Uri source = selected[i];
-                    if (source == null || !("content".equals(source.getScheme()) || "file".equals(source.getScheme())))
-                        throw new java.io.IOException("Documento selezionato non valido");
-                    String name = "allegato";
-                    long expected = -1;
-                    try (Cursor cursor = getContentResolver().query(source,
-                            new String[]{android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE}, null,null,null)) {
-                        if (cursor != null && cursor.moveToFirst()) {
-                            if (!cursor.isNull(0)) name=cursor.getString(0);
-                            if (!cursor.isNull(1)) expected=cursor.getLong(1);
-                        }
-                    } catch (Exception ignored) {}
-                    if (name == null || name.trim().isEmpty()) name="allegato";
-                    name=name.replaceAll("[\\\\/\\p{Cntrl}]", "_");
-                    if (name.equals(".") || name.equals("..")) name="allegato";
-                    if (name.length()>160) name=name.substring(0,120)+name.substring(name.length()-30);
-                    if (name.indexOf('.')<0) {
-                        String mime=getContentResolver().getType(source);
-                        String extension=android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime == null ? "" : mime);
-                        if(extension!=null) name+="."+extension;
-                    }
-                    File folder=new File(root,java.util.UUID.randomUUID().toString());
-                    if(!folder.mkdir())throw new java.io.IOException("Impossibile preparare il documento");
-                    File target=new File(folder,name);
-                    copied.add(target);
-                    long available=Math.max(0L,root.getUsableSpace()-8L*1024*1024);
-                    if(expected>available)throw new java.io.IOException("Spazio di archiviazione insufficiente per la copia temporanea");
-                    try(InputStream input=getContentResolver().openInputStream(source)) {
-                        if(input==null)throw new java.io.IOException("Il selettore non ha reso leggibile il file");
-                        DanAttachmentCopy.copy(input,target,available);
-                    }
-                    ready[i]=androidx.core.content.FileProvider.getUriForFile(this,
-                            getPackageName()+".attachments",target,name);
-                }
-                runOnUiThread(() -> {
-                    if (isDestroyed() || isFinishing() || generation != attachmentGeneration || filePathCallback != callback) {
-                        for(File file:copied){file.delete();file.getParentFile().delete();}return;
-                    }
-                    filePathCallback=null;
-                    callback.onReceiveValue(ready);
-                    statusText.setText("File consegnati alla pagina · attendo il caricamento");
-                });
-            } catch (Exception error) {
-                for(File file:copied){file.delete();file.getParentFile().delete();}
-                android.util.Log.w("DanFileUpload","Attachment preparation failed",error);
-                runOnUiThread(() -> {
-                    if(generation!=attachmentGeneration || filePathCallback!=callback)return;
-                    filePathCallback=null;callback.onReceiveValue(null);
-                    if(!isDestroyed()){
-                        statusText.setText("Allegato non preparato: "+error.getMessage());
-                        Toast.makeText(this,"Allegato non preparato: "+error.getMessage(),Toast.LENGTH_LONG).show();
-                    }
-                });
+    private void recordAttachmentPhase(String phase, boolean newAttempt) {
+        SharedPreferences.Editor edit = getSharedPreferences("dan_upload_diagnostics", MODE_PRIVATE).edit();
+        edit.putString("phase", phase).putLong("phaseTime", System.currentTimeMillis());
+        if (newAttempt) edit.putLong("attemptTime", System.currentTimeMillis());
+        edit.commit(); // Persist the last boundary even if Android terminates the process.
+    }
+
+    private void deliverSystemDocuments(Uri[] selected, Intent data) {
+        ValueCallback<Uri[]> callback = filePathCallback;
+        filePathCallback = null;
+        java.util.ArrayList<Uri> valid = new java.util.ArrayList<>();
+        for (Uri uri : selected) {
+            if (uri == null || !("content".equals(uri.getScheme()) || "file".equals(uri.getScheme()))) continue;
+            int flags = data == null ? 0 : data.getFlags();
+            if ("content".equals(uri.getScheme()) && (flags & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0
+                    && (flags & Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); }
+                catch (SecurityException ignored) { /* Temporary read grants remain valid. */ }
             }
-        });
+            if (!valid.contains(uri)) valid.add(uri);
+        }
+        if (valid.isEmpty()) {
+            recordAttachmentPhase("Il selettore non ha restituito un documento valido", false);
+            statusText.setText("Documento non disponibile dal selettore");
+            callback.onReceiveValue(null);
+            return;
+        }
+        final int generation = attachmentGeneration;
+        recordAttachmentPhase("Consegna diretta al WebView: " + valid.size() + " documenti", false);
+        try {
+            callback.onReceiveValue(valid.toArray(new Uri[0]));
+            recordAttachmentPhase("Callback WebView completata", false);
+            statusText.setText("Documento consegnato alla pagina · attendo il caricamento");
+            if (webView != null) webView.postDelayed(() -> {
+                if (isDestroyed() || generation != attachmentGeneration || webView == null) return;
+                webView.evaluateJavascript("JSON.stringify(Array.from(document.querySelectorAll('input[type=file]')).map(e=>({count:e.files?e.files.length:0,connected:e.isConnected})))", value -> {
+                    if (generation == attachmentGeneration) recordAttachmentPhase("Callback completata; campi file della pagina: " + value, false);
+                });
+            }, 1200L);
+        } catch (RuntimeException error) {
+            recordAttachmentPhase("Errore callback WebView: " + error.getClass().getSimpleName(), false);
+            statusText.setText("La pagina non ha acquisito il documento");
+        }
+    }
+
+    private void showAttachmentDiagnostics() {
+        SharedPreferences prefs = getSharedPreferences("dan_upload_diagnostics", MODE_PRIVATE);
+        StringBuilder report = new StringBuilder("Dan Heiwa ").append(BuildConfig.VERSION_NAME)
+                .append("\nAndroid ").append(Build.VERSION.RELEASE)
+                .append(" · ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+                .append("\nUltimo passaggio: ").append(prefs.getString("phase", "Nessun tentativo registrato"));
+        try {
+            android.content.pm.PackageInfo engine = WebView.getCurrentWebViewPackage();
+            if (engine != null) report.append("\nWebView: ").append(engine.packageName).append(' ').append(engine.versionName);
+        } catch (Exception ignored) {}
+        if (Build.VERSION.SDK_INT >= 30) try {
+            android.app.ActivityManager manager = getSystemService(android.app.ActivityManager.class);
+            for (android.app.ApplicationExitInfo exit : manager.getHistoricalProcessExitReasons(getPackageName(), 0, 5)) {
+                if (!getPackageName().equals(exit.getProcessName()) || exit.getTimestamp() < prefs.getLong("attemptTime", Long.MAX_VALUE) - 5000L) continue;
+                String cause;
+                switch (exit.getReason()) {
+                    case android.app.ApplicationExitInfo.REASON_LOW_MEMORY: cause="Memoria RAM insufficiente";break;
+                    case android.app.ApplicationExitInfo.REASON_CRASH: cause="Errore dell’app";break;
+                    case android.app.ApplicationExitInfo.REASON_CRASH_NATIVE: cause="Errore nativo";break;
+                    case android.app.ApplicationExitInfo.REASON_ANR: cause="App non risponde";break;
+                    default: cause="Chiusura Android, codice " + exit.getReason();
+                }
+                report.append("\nUltima chiusura: ").append(cause);break;
+            }
+        } catch (Exception ignored) {}
+        final String text = report.toString();
+        new AlertDialog.Builder(this).setTitle("Diagnostica allegati")
+                .setMessage(text).setPositiveButton("Copia", (dialog, which) -> {
+                    android.content.ClipboardManager clipboard = (android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Diagnostica allegati", text));
+                }).setNegativeButton("Chiudi", null).show();
     }
 
     private class NativeBridge {
@@ -6734,7 +6746,6 @@ public class MainActivity extends Activity {
         }
 
         attachmentGeneration++;
-        attachmentExecutor.shutdownNow();
         if (filePathCallback != null) {
             filePathCallback.onReceiveValue(null);
             filePathCallback = null;
