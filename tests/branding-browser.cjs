@@ -6,7 +6,7 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await page.goto('https://chatgpt.com/');
  await page.addScriptTag({content:fs.readFileSync('app/src/main/assets/dan-branding.js','utf8')});
  const cover=page.locator('#dan-hewa-sidebar-cover');
- await cover.waitFor({state:'visible'});assert.equal(await cover.innerText(),'Eiwa');
+ await cover.waitFor({state:'visible'});assert.equal(await cover.innerText(),'Heiwa');
  let rect=await cover.boundingBox();assert(rect.x<=10&&rect.y<=14);assert(await cover.evaluate(e=>parseFloat(getComputedStyle(e).fontSize))>=32);
  assert.equal(await page.locator('#title').innerText(),'ChatGPT');
  assert.equal(await page.locator('#chat').innerText(),'ChatGPT');assert.equal(await page.locator('main').innerText(),'ChatGPT');

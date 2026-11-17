@@ -4,7 +4,7 @@
  // Cover only the visible sidebar title, without rewriting React-owned text nodes.
  const overlay = document.createElement('span');
  overlay.id = 'dan-hewa-sidebar-cover';
- overlay.textContent = 'Eiwa';
+ overlay.textContent = 'Heiwa';
  overlay.setAttribute('aria-hidden', 'true');
  overlay.style.cssText = 'position:fixed!important;z-index:2147483646!important;pointer-events:none!important;display:none;box-sizing:border-box!important;overflow:hidden!important;white-space:nowrap!important;background:#030d1a!important;color:#00c8ff!important;';
  let current = null;
@@ -135,7 +135,7 @@
   if (!title) { overlay.style.display = 'none'; current = null; return; }
   current = title.element;
   const {rect,style} = title;
-  overlay.textContent = /^(?:ChatGPT|Hewa|Heiwa)$/.test(title.label) ? 'Eiwa' : title.label.replace(/Hewa|Heiwa/g,'Eiwa');
+  overlay.textContent = /^(?:ChatGPT|Hewa|Heiwa)$/.test(title.label) ? 'Heiwa' : title.label.replace(/Hewa|Eiwa/g,'Heiwa');
   const fontSize = Math.max(32, Math.min(36, parseFloat(style.fontSize) * 1.8 || 34));
   const lineHeight = Math.ceil(fontSize * 1.25);
   overlay.style.setProperty('left', `${Math.max(0, rect.left - 1)}px`, 'important');

@@ -13,7 +13,7 @@ android {
         versionCode 166
         versionName "1.155.5"
         // DAN 1.108: ripristino del comportamento della 1.106.
-        resValue "string", "dan_launcher_label", "DAN EIWA 1.155.5"
+        resValue "string", "dan_launcher_label", "DAN HEIWA 1.155.5"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
