@@ -5701,11 +5701,11 @@ public class MainActivity extends Activity {
                     copyingChat = false;
                     if (result.has("error")) { Toast.makeText(this, result.getString("error"), Toast.LENGTH_LONG).show(); return; }
                     final String text = result.getString("text");
-                    final String title = result.optString("title", "Chat Dan Hewa");
+                    final String title = result.optString("title", "Chat Dan Heiwa");
                     final int count = result.optInt("count");
                     if (text.getBytes(StandardCharsets.UTF_8).length > 650000) {
                         new AlertDialog.Builder(this).setTitle("Chat troppo grande per gli appunti")
-                            .setMessage("Per evitare il limite degli appunti Android, usa l’esportazione Word di Dan Hewa Diari oppure copia la chat in parti.")
+                            .setMessage("Per evitare il limite degli appunti Android, usa l’esportazione Word di Dan Heiwa Diari oppure copia la chat in parti.")
                             .setPositiveButton("OK", null).show(); return;
                     }
                     Runnable copy = () -> {
@@ -5869,8 +5869,8 @@ public class MainActivity extends Activity {
                 + "(function(){"
                 + "if(window.__danComposerLabel1552)return;"
                 + "window.__danComposerLabel1552=true;"
-                + "const exact=/^\\s*chiedi\\s+a\\s+chatgpt\\s*$/i;"
-                + "const partial=/chiedi\\s+a\\s+chatgpt/ig;"
+                + "const exact=/^\\s*chiedi\\s+a(?:\\s+chatgpt)?\\s*$/i;"
+                + "const partial=/chiedi\\s+a(?:\\s+chatgpt)?/ig;"
                 + "function fix(){"
                 + " const ed=document.querySelector('#prompt-textarea,[data-testid=\"prompt-textarea\"],[contenteditable=\"true\"][data-testid*=\"composer\"]');"
                 + " if(!ed)return;"
