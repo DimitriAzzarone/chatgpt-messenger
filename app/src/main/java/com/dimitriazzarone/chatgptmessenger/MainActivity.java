@@ -5865,24 +5865,27 @@ public class MainActivity extends Activity {
 
 
     // DAN 155.1: osserva anche i nodi di testo ripristinati durante il primo caricamento.
+    // DAN 155.2: sostituisce il suggerimento anche quando viene ricreato fuori dal form.
     private void injectDanComposerLabel() {
         if (webView == null || webView.getUrl() == null ||
                 !webView.getUrl().startsWith("https://chatgpt.com/")) return;
-        String script =
-                "(function(){"
-                + "if(window.__danComposerLabel1551)return;"
-                + "window.__danComposerLabel1551=true;"
-                + "const original=/chiedi\\s+a\\s+chatgpt/i;"
-                + "const exact=/^\\s*chiedi\\s+a\\s+chatgpt\\s*$/i;"
+        String script = ""
+                + "(function(){"
+                + "if(window.__danComposerLabel1552)return;"
+                + "window.__danComposerLabel1552=true;"
+                + "const exact=/^\\\\s*chiedi\\\\s+a\\\\s+chatgpt\\\\s*$/i;"
+                + "const partial=/chiedi\\\\s+a\\\\s+chatgpt/ig;"
                 + "function fix(){"
-                + " const ed=document.querySelector('#prompt-textarea,[data-testid=prompt-textarea]');"
+                + " const ed=document.querySelector('#prompt-textarea,[data-testid=\"prompt-textarea\"],[contenteditable=\"true\"][data-testid*=\"composer\"]');"
                 + " if(!ed)return;"
-                + " const scope=ed.closest('form')||ed.parentElement?.parentElement||ed.parentElement;"
-                + " if(!scope)return;"
-                + " for(const el of [ed,...scope.querySelectorAll('[placeholder],[data-placeholder],[aria-placeholder]')]){"
+                + " let scope=ed;"
+                + " for(let i=0;i<4&&scope.parentElement;i++)scope=scope.parentElement;"
+                + " for(const el of scope.querySelectorAll('[placeholder],[data-placeholder],[aria-placeholder]')){"
+                + "  if(el.closest('[data-message-author-role],article'))continue;"
                 + "  for(const attr of ['placeholder','data-placeholder','aria-placeholder']){"
                 + "   const v=el.getAttribute(attr);"
-                + "   if(v&&original.test(v))el.setAttribute(attr,v.replace(original,'Chiedi a DAN'));"
+                + "   if(v&&partial.test(v)){partial.lastIndex=0;el.setAttribute(attr,v.replace(partial,'Chiedi a DAN'));}"
+                + "   partial.lastIndex=0;"
                 + "  }"
                 + " }"
                 + " const walker=document.createTreeWalker(scope,NodeFilter.SHOW_TEXT);"
@@ -5890,15 +5893,13 @@ public class MainActivity extends Activity {
                 + " while((node=walker.nextNode())){"
                 + "  if(!exact.test(node.nodeValue||''))continue;"
                 + "  const p=node.parentElement;"
-                + "  if(!p||p.closest('[contenteditable=true],textarea,[role=textbox]'))continue;"
+                + "  if(!p||p.closest('[data-message-author-role],article,[contenteditable=\"true\"],textarea,[role=\"textbox\"]'))continue;"
                 + "  node.nodeValue='Chiedi a DAN';"
                 + " }"
                 + "}"
                 + "let busy=false;"
                 + "function refresh(){if(busy)return;busy=true;try{fix();}finally{busy=false;}}"
-                + "new MutationObserver(refresh).observe(document.documentElement,"
-                + "{childList:true,subtree:true,characterData:true,attributes:true,"
-                + "attributeFilter:['placeholder','data-placeholder','aria-placeholder']});"
+                + "new MutationObserver(refresh).observe(document.documentElement,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['placeholder','data-placeholder','aria-placeholder']});"
                 + "refresh();"
                 + "setInterval(refresh,500);"
                 + "})();";
