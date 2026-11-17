@@ -349,7 +349,7 @@ public class MainActivity extends Activity {
         createWebView();
         createLuminexWebView();
 
-        webView.loadUrl(HOME);
+        webView.loadUrl(attachmentStartupUrl());
 
         if (handsFreeEnabled) {
             autoButton.setText("LIVE");
@@ -4811,8 +4811,16 @@ public class MainActivity extends Activity {
                 }
 
                 attachmentGeneration++;
-                recordAttachmentPhase("Selettore documenti aperto", true);
                 MainActivity.this.filePathCallback = filePathCallback;
+                Uri[] recovered = recoveredDocumentsFor(webView.getUrl());
+                if (recovered != null && recovered.length > 0) {
+                    recordAttachmentPhase("Recupero del documento dopo riapertura", true);
+                    deliverSystemDocuments(recovered, null);
+                    return true;
+                }
+                getSharedPreferences("dan_upload_recovery", MODE_PRIVATE).edit()
+                        .putString("target", webView.getUrl()).putBoolean("pickerPending", true).remove("documents").commit();
+                recordAttachmentPhase("Selettore documenti aperto", true);
 
                 try {
                     // Respect the file types and multiple-selection mode requested by ChatGPT.
@@ -4842,6 +4850,7 @@ public class MainActivity extends Activity {
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
                     filePathCallback.onReceiveValue(null);
+                    getSharedPreferences("dan_upload_recovery", MODE_PRIVATE).edit().putBoolean("pickerPending", false).commit();
                     recordAttachmentPhase("Errore apertura selettore: " + e.getClass().getSimpleName(), false);
                     android.util.Log.e("DanFileUpload", "File picker failed", e);
                     Toast.makeText(MainActivity.this,
@@ -5265,8 +5274,6 @@ public class MainActivity extends Activity {
         }
 
         if (requestCode == REQ_FILE_CHOOSER) {
-            if (filePathCallback == null) return;
-
             Uri[] results = null;
 
             if (resultCode == RESULT_OK && data != null) {
@@ -5288,10 +5295,65 @@ public class MainActivity extends Activity {
                 filePathCallback = null;
                 recordAttachmentPhase("Selezione annullata o senza documento", false);
                 statusText.setText("Nessun documento selezionato");
-                callback.onReceiveValue(null);
-            } else deliverSystemDocuments(results, data);
+                getSharedPreferences("dan_upload_recovery", MODE_PRIVATE).edit().putBoolean("pickerPending", false).commit();
+                if (callback != null) callback.onReceiveValue(null);
+            } else {
+                rememberSystemDocuments(results, data);
+                if (filePathCallback == null) {
+                    recordAttachmentPhase("Documento recuperato; riaprire Allega nella stessa chat", false);
+                    updateAttachmentRecoveryStatus();
+                    Toast.makeText(this, "Documento recuperato: nella stessa chat premi di nuovo Allega", Toast.LENGTH_LONG).show();
+                } else deliverSystemDocuments(results, data);
+            }
 
         }
+    }
+
+    private String attachmentStartupUrl() {
+        SharedPreferences prefs=getSharedPreferences("dan_upload_recovery",MODE_PRIVATE);
+        String target=prefs.getString("target",null);
+        if (DanAttachmentRecovery.allowedPage(target) && (prefs.getBoolean("pickerPending",false)
+                || !"[]".equals(prefs.getString("documents","[]")))) return target;
+        return HOME;
+    }
+
+    private void rememberSystemDocuments(Uri[] selected, Intent data) {
+        java.util.ArrayList<String> source=new java.util.ArrayList<>();
+        for(Uri uri:selected){
+            if(uri==null)continue;
+            int flags=data==null?0:data.getFlags();
+            if("content".equals(uri.getScheme()) && (flags&Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)!=0
+                    && (flags&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0) {
+                try{getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);}
+                catch(SecurityException ignored){}
+            }
+            source.add(uri.toString());
+        }
+        org.json.JSONArray saved=new org.json.JSONArray(DanAttachmentRecovery.documents(source));
+        getSharedPreferences("dan_upload_recovery",MODE_PRIVATE).edit()
+                .putBoolean("pickerPending",false).putString("documents",saved.toString()).commit();
+    }
+
+    private Uri[] recoveredDocumentsFor(String current) {
+        SharedPreferences prefs=getSharedPreferences("dan_upload_recovery",MODE_PRIVATE);
+        if(!DanAttachmentRecovery.samePage(prefs.getString("target",null),current))return null;
+        try{
+            org.json.JSONArray saved=new org.json.JSONArray(prefs.getString("documents","[]"));
+            java.util.ArrayList<String> source=new java.util.ArrayList<>();
+            for(int i=0;i<saved.length();i++)source.add(saved.getString(i));
+            java.util.List<String> valid=DanAttachmentRecovery.documents(source);
+            Uri[] result=new Uri[valid.size()];
+            for(int i=0;i<result.length;i++)result[i]=Uri.parse(valid.get(i));
+            return result;
+        }catch(Exception ignored){return null;}
+    }
+
+    private void updateAttachmentRecoveryStatus() {
+        SharedPreferences prefs=getSharedPreferences("dan_upload_recovery",MODE_PRIVATE);
+        if(!"[]".equals(prefs.getString("documents","[]")))
+            statusText.setText("Documento recuperato · nella stessa chat premi di nuovo Allega");
+        else if(prefs.getBoolean("pickerPending",false))
+            statusText.setText("Selezione interrotta · puoi riaprire Allega nella chat");
     }
 
     private void recordAttachmentPhase(String phase, boolean newAttempt) {
@@ -5303,6 +5365,7 @@ public class MainActivity extends Activity {
 
     private void deliverSystemDocuments(Uri[] selected, Intent data) {
         ValueCallback<Uri[]> callback = filePathCallback;
+        if (callback == null) { rememberSystemDocuments(selected, data); updateAttachmentRecoveryStatus(); return; }
         filePathCallback = null;
         java.util.ArrayList<Uri> valid = new java.util.ArrayList<>();
         for (Uri uri : selected) {
@@ -5325,6 +5388,8 @@ public class MainActivity extends Activity {
         recordAttachmentPhase("Consegna diretta al WebView: " + valid.size() + " documenti", false);
         try {
             callback.onReceiveValue(valid.toArray(new Uri[0]));
+            getSharedPreferences("dan_upload_recovery",MODE_PRIVATE).edit()
+                    .remove("documents").putBoolean("pickerPending",false).commit();
             recordAttachmentPhase("Callback WebView completata", false);
             statusText.setText("Documento consegnato alla pagina · attendo il caricamento");
             if (webView != null) webView.postDelayed(() -> {
@@ -5355,6 +5420,7 @@ public class MainActivity extends Activity {
                 if (!getPackageName().equals(exit.getProcessName()) || exit.getTimestamp() < prefs.getLong("attemptTime", Long.MAX_VALUE) - 5000L) continue;
                 String cause;
                 switch (exit.getReason()) {
+                    case android.app.ApplicationExitInfo.REASON_SIGNALED: cause="Processo terminato dal segnale " + exit.getStatus();break;
                     case android.app.ApplicationExitInfo.REASON_LOW_MEMORY: cause="Memoria RAM insufficiente";break;
                     case android.app.ApplicationExitInfo.REASON_CRASH: cause="Errore dell’app";break;
                     case android.app.ApplicationExitInfo.REASON_CRASH_NATIVE: cause="Errore nativo";break;
@@ -6646,6 +6712,7 @@ public class MainActivity extends Activity {
         if (handsFreeEnabled && !manualCapture && !headsetRecording && !ttsSpeaking) {
             scheduleHandsFreeRestart(250L);
         }
+        updateAttachmentRecoveryStatus();
     }
 
     @Override

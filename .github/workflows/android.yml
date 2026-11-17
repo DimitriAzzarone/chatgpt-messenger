@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.7-recover-documents
       - dan-v1.155.6-system-documents
       - dan-v1.155.5-lenovo-attachments
       - dan-v1.155.3-upload-fix
@@ -151,6 +152,12 @@ jobs:
           node --check app/src/main/assets/dan-web-voice.js
           node tests/web-voice.test.cjs
           node tests/diary-export.test.cjs
+
+      - name: Check recovered document boundaries
+        run: |
+          mkdir -p /tmp/dan-recovery-test
+          javac -d /tmp/dan-recovery-test app/src/main/java/com/dimitriazzarone/chatgptmessenger/DanAttachmentRecovery.java tests/AttachmentRecoveryTest.java
+          java -cp /tmp/dan-recovery-test AttachmentRecoveryTest
 
       - name: Build Dan Luminex AI Integration
         env:
