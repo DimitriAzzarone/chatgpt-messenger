@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.2-composer-label-fix
       - dan-v1.155.1-composer-stability
       - dan-v1.155-composer-label-fix
       - dan-v1.154-initial-composer
