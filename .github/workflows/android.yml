@@ -1,5 +1,5 @@
 name: Build Dan APK
-run-name: Dan ${{ github.ref_name }}
+run-name: Dan Heiwa ${{ github.ref_name }}
 
 on:
   workflow_dispatch:
@@ -167,11 +167,11 @@ jobs:
         run: gradle assembleRelease --stacktrace -PDAN_VERSION_NAME="$DAN_VERSION_NAME" -PDAN_VERSION_CODE="$DAN_VERSION_CODE"
 
       - name: Rename APK
-        run: cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Dan-${DAN_VERSION_NAME}.apk"
+        run: cp app/build/outputs/apk/release/app-release.apk "app/build/outputs/apk/release/Dan-Heiwa-${DAN_VERSION_NAME}.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Dan-APK-${{ env.DAN_VERSION_NAME }}
-          path: app/build/outputs/apk/release/Dan-${{ env.DAN_VERSION_NAME }}.apk
+          name: Dan-Heiwa-APK-${{ env.DAN_VERSION_NAME }}
+          path: app/build/outputs/apk/release/Dan-Heiwa-${{ env.DAN_VERSION_NAME }}.apk
           if-no-files-found: error
