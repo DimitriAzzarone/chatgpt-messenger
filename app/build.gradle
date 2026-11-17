@@ -10,10 +10,10 @@ android {
         applicationId "com.dimitriazzarone.danluminexai"
         minSdk 24
         targetSdk 35
-        versionCode 165
-        versionName "1.155.4"
+        versionCode 166
+        versionName "1.155.5"
         // DAN 1.108: ripristino del comportamento della 1.106.
-        resValue "string", "dan_launcher_label", "DAN HEIWA 1.155.4"
+        resValue "string", "dan_launcher_label", "DAN EIWA 1.155.5"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }
@@ -42,6 +42,7 @@ android {
 
 
 dependencies {
+    implementation "androidx.core:core:1.15.0"
     implementation "androidx.webkit:webkit:1.17.0"
     implementation "com.tom-roush:pdfbox-android:2.0.27.0"
 }

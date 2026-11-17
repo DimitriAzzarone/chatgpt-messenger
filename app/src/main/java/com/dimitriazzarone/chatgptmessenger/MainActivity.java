@@ -317,6 +317,9 @@ public class MainActivity extends Activity {
     private String lastSpokenText = "";
 
     private ValueCallback<Uri[]> filePathCallback;
+    private final java.util.concurrent.ExecutorService attachmentExecutor = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private volatile int attachmentGeneration;
+
     private String pendingDownloadName = null;
     private long pendingDownloadNameAt = 0L;
     private long lastDownloadId = -1L;
@@ -4807,6 +4810,7 @@ public class MainActivity extends Activity {
                     MainActivity.this.filePathCallback.onReceiveValue(null);
                 }
 
+                attachmentGeneration++;
                 MainActivity.this.filePathCallback = filePathCallback;
 
                 try {
@@ -4815,6 +4819,7 @@ public class MainActivity extends Activity {
                             ? fileChooserParams.createIntent()
                             : new Intent(Intent.ACTION_GET_CONTENT);
                     if (intent == null) intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setAction(Intent.ACTION_OPEN_DOCUMENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                     if (intent.getType() == null || intent.getType().trim().isEmpty()) {
@@ -4824,7 +4829,12 @@ public class MainActivity extends Activity {
                         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,
                                 fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
                     }
-                    startActivityForResult(intent, REQ_FILE_CHOOSER);
+                    try {
+                        startActivityForResult(intent, REQ_FILE_CHOOSER);
+                    } catch (android.content.ActivityNotFoundException missingDocuments) {
+                        intent.setAction(Intent.ACTION_GET_CONTENT);
+                        startActivityForResult(intent, REQ_FILE_CHOOSER);
+                    }
                     return true;
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
@@ -5263,25 +5273,91 @@ public class MainActivity extends Activity {
                 }
             }
 
-            // Grant WebView read access to the selected document URIs.
-            if (results != null) {
-                for (Uri selected : results) {
-                    if (selected != null) {
-                        try (InputStream check = getContentResolver().openInputStream(selected)) {
-                            if (check == null) throw new java.io.IOException("File non leggibile");
-                        } catch (Exception e) {
-                            android.util.Log.e("DanFileUpload", "Cannot read selected file: " + selected, e);
-                            Toast.makeText(this, "File non leggibile: scegli un altro file",
-                                    Toast.LENGTH_LONG).show();
-                            results = null;
-                            break;
-                        }
+            if (results == null || results.length == 0) {
+                ValueCallback<Uri[]> callback = filePathCallback;
+                filePathCallback = null;
+                callback.onReceiveValue(null);
+            } else prepareAttachmentFiles(results);
+
+        }
+    }
+
+    private void prepareAttachmentFiles(Uri[] selected) {
+        final ValueCallback<Uri[]> callback = filePathCallback;
+        final int generation = attachmentGeneration;
+        statusText.setText("Preparo " + selected.length + " allegati…");
+        attachmentExecutor.execute(() -> {
+            java.util.ArrayList<File> copied = new java.util.ArrayList<>();
+            try {
+                File root = new File(getCacheDir(), "attachments");
+                if (!root.isDirectory() && !root.mkdirs()) throw new java.io.IOException("Cartella temporanea non disponibile");
+                // Expire only old temporary copies, never the user's source documents.
+                File[] old = root.listFiles();
+                if (old != null) for (File dir : old) {
+                    if (dir.isDirectory() && System.currentTimeMillis() - dir.lastModified() > 86400000L) {
+                        File[] files = dir.listFiles();
+                        if (files != null) for (File file : files) file.delete();
+                        dir.delete();
                     }
                 }
+                Uri[] ready = new Uri[selected.length];
+                for (int i=0; i<selected.length; i++) {
+                    if (generation != attachmentGeneration || Thread.currentThread().isInterrupted()) throw new java.io.InterruptedIOException("Selezione annullata");
+                    Uri source = selected[i];
+                    if (source == null || !("content".equals(source.getScheme()) || "file".equals(source.getScheme())))
+                        throw new java.io.IOException("Documento selezionato non valido");
+                    String name = "allegato";
+                    long expected = -1;
+                    try (Cursor cursor = getContentResolver().query(source,
+                            new String[]{android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE}, null,null,null)) {
+                        if (cursor != null && cursor.moveToFirst()) {
+                            if (!cursor.isNull(0)) name=cursor.getString(0);
+                            if (!cursor.isNull(1)) expected=cursor.getLong(1);
+                        }
+                    } catch (Exception ignored) {}
+                    if (name == null || name.trim().isEmpty()) name="allegato";
+                    name=name.replaceAll("[\\\\/\\p{Cntrl}]", "_");
+                    if (name.equals(".") || name.equals("..")) name="allegato";
+                    if (name.length()>160) name=name.substring(0,120)+name.substring(name.length()-30);
+                    if (name.indexOf('.')<0) {
+                        String mime=getContentResolver().getType(source);
+                        String extension=android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime == null ? "" : mime);
+                        if(extension!=null) name+="."+extension;
+                    }
+                    File folder=new File(root,java.util.UUID.randomUUID().toString());
+                    if(!folder.mkdir())throw new java.io.IOException("Impossibile preparare il documento");
+                    File target=new File(folder,name);
+                    copied.add(target);
+                    long available=Math.max(0L,root.getUsableSpace()-8L*1024*1024);
+                    if(expected>available)throw new java.io.IOException("Spazio di archiviazione insufficiente per la copia temporanea");
+                    try(InputStream input=getContentResolver().openInputStream(source)) {
+                        if(input==null)throw new java.io.IOException("Il selettore non ha reso leggibile il file");
+                        DanAttachmentCopy.copy(input,target,available);
+                    }
+                    ready[i]=androidx.core.content.FileProvider.getUriForFile(this,
+                            getPackageName()+".attachments",target,name);
+                }
+                runOnUiThread(() -> {
+                    if (isDestroyed() || isFinishing() || generation != attachmentGeneration || filePathCallback != callback) {
+                        for(File file:copied){file.delete();file.getParentFile().delete();}return;
+                    }
+                    filePathCallback=null;
+                    callback.onReceiveValue(ready);
+                    statusText.setText("File consegnati alla pagina · attendo il caricamento");
+                });
+            } catch (Exception error) {
+                for(File file:copied){file.delete();file.getParentFile().delete();}
+                android.util.Log.w("DanFileUpload","Attachment preparation failed",error);
+                runOnUiThread(() -> {
+                    if(generation!=attachmentGeneration || filePathCallback!=callback)return;
+                    filePathCallback=null;callback.onReceiveValue(null);
+                    if(!isDestroyed()){
+                        statusText.setText("Allegato non preparato: "+error.getMessage());
+                        Toast.makeText(this,"Allegato non preparato: "+error.getMessage(),Toast.LENGTH_LONG).show();
+                    }
+                });
             }
-            filePathCallback.onReceiveValue(results);
-            filePathCallback = null;
-        }
+        });
     }
 
     private class NativeBridge {
@@ -5701,11 +5777,11 @@ public class MainActivity extends Activity {
                     copyingChat = false;
                     if (result.has("error")) { Toast.makeText(this, result.getString("error"), Toast.LENGTH_LONG).show(); return; }
                     final String text = result.getString("text");
-                    final String title = result.optString("title", "Chat Dan Heiwa");
+                    final String title = result.optString("title", "Chat Dan Eiwa");
                     final int count = result.optInt("count");
                     if (text.getBytes(StandardCharsets.UTF_8).length > 650000) {
                         new AlertDialog.Builder(this).setTitle("Chat troppo grande per gli appunti")
-                            .setMessage("Per evitare il limite degli appunti Android, usa l’esportazione Word di Dan Heiwa Diari oppure copia la chat in parti.")
+                            .setMessage("Per evitare il limite degli appunti Android, usa l’esportazione Word di Dan Eiwa Diari oppure copia la chat in parti.")
                             .setPositiveButton("OK", null).show(); return;
                     }
                     Runnable copy = () -> {
@@ -6657,6 +6733,8 @@ public class MainActivity extends Activity {
             tts = null;
         }
 
+        attachmentGeneration++;
+        attachmentExecutor.shutdownNow();
         if (filePathCallback != null) {
             filePathCallback.onReceiveValue(null);
             filePathCallback = null;
