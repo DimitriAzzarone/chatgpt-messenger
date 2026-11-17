@@ -5346,7 +5346,7 @@ public class MainActivity extends Activity {
                 .append(" · ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
                 .append("\nUltimo passaggio: ").append(prefs.getString("phase", "Nessun tentativo registrato"));
         try {
-            android.content.pm.PackageInfo engine = WebView.getCurrentWebViewPackage();
+            android.content.pm.PackageInfo engine = androidx.webkit.WebViewCompat.getCurrentWebViewPackage(this);
             if (engine != null) report.append("\nWebView: ").append(engine.packageName).append(' ').append(engine.versionName);
         } catch (Exception ignored) {}
         if (Build.VERSION.SDK_INT >= 30) try {
