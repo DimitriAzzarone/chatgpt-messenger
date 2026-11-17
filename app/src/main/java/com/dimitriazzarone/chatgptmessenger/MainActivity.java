@@ -4810,49 +4810,29 @@ public class MainActivity extends Activity {
                 MainActivity.this.filePathCallback = filePathCallback;
 
                 try {
-                    Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                    // Respect the file types and multiple-selection mode requested by ChatGPT.
+                    Intent intent = fileChooserParams != null
+                            ? fileChooserParams.createIntent()
+                            : new Intent(Intent.ACTION_GET_CONTENT);
+                    if (intent == null) intent = new Intent(Intent.ACTION_GET_CONTENT);
                     intent.addCategory(Intent.CATEGORY_OPENABLE);
-
-                    String[] acceptTypes = fileChooserParams != null
-                            ? fileChooserParams.getAcceptTypes()
-                            : null;
-
-                    String mime = "*/*";
-                    ArrayList<String> validTypes = new ArrayList<>();
-
-                    if (acceptTypes != null) {
-                        for (String type : acceptTypes) {
-                            if (type != null && !type.trim().isEmpty()) {
-                                validTypes.add(type.trim());
-                            }
-                        }
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    if (intent.getType() == null || intent.getType().trim().isEmpty()) {
+                        intent.setType("*/*");
                     }
-
-                    if (validTypes.size() == 1) {
-                        mime = validTypes.get(0);
-                    } else if (validTypes.size() > 1) {
-                        intent.putExtra(
-                                Intent.EXTRA_MIME_TYPES,
-                                validTypes.toArray(new String[0])
-                        );
+                    if (fileChooserParams != null) {
+                        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,
+                                fileChooserParams.getMode() == FileChooserParams.MODE_OPEN_MULTIPLE);
                     }
-
-                    intent.setType(mime);
-                    intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-
                     startActivityForResult(intent, REQ_FILE_CHOOSER);
                     return true;
-
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
-
-                    Toast.makeText(
-                            MainActivity.this,
-                            "Impossibile aprire il selettore file",
-                            Toast.LENGTH_LONG
-                    ).show();
-
-                    return false;
+                    filePathCallback.onReceiveValue(null);
+                    android.util.Log.e("DanFileUpload", "File picker failed", e);
+                    Toast.makeText(MainActivity.this,
+                            "Impossibile aprire il selettore file", Toast.LENGTH_LONG).show();
+                    return true;
                 }
             }
         });
@@ -5283,6 +5263,22 @@ public class MainActivity extends Activity {
                 }
             }
 
+            // Grant WebView read access to the selected document URIs.
+            if (results != null) {
+                for (Uri selected : results) {
+                    if (selected != null) {
+                        try (InputStream check = getContentResolver().openInputStream(selected)) {
+                            if (check == null) throw new java.io.IOException("File non leggibile");
+                        } catch (Exception e) {
+                            android.util.Log.e("DanFileUpload", "Cannot read selected file: " + selected, e);
+                            Toast.makeText(this, "File non leggibile: scegli un altro file",
+                                    Toast.LENGTH_LONG).show();
+                            results = null;
+                            break;
+                        }
+                    }
+                }
+            }
             filePathCallback.onReceiveValue(results);
             filePathCallback = null;
         }
