@@ -4615,6 +4615,8 @@ public class MainActivity extends Activity {
         try {
             WebViewCompat.addDocumentStartJavaScript(webView, voiceAsset("dan-web-voice.js"),
                     Collections.singleton("https://chatgpt.com"));
+            WebViewCompat.addDocumentStartJavaScript(webView, voiceAsset("dan-composer-hint.js"),
+                    Collections.singleton("https://chatgpt.com"));
         } catch (Exception ignored) {}
     }
 
@@ -5967,6 +5969,7 @@ public class MainActivity extends Activity {
         if (webView == null || !trustedVoiceOrigin(webView.getUrl())) return;
         // Brand only the sidebar home control; preserve conversation and account content.
         webView.evaluateJavascript(voiceAsset("dan-branding.js"), null);
+        webView.evaluateJavascript(voiceAsset("dan-composer-hint.js"), null);
         webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), null);
     }
 

@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.13-owned-hint
       - dan-v1.155.12-enter-unified
       - dan-v1.155.11-picker-session
       - dan-v1.155.10-composer-branding
@@ -157,6 +158,7 @@ jobs:
           node --check app/src/main/assets/dan-web-voice.js
           node tests/web-voice.test.cjs
           node tests/enter-send.test.cjs
+          node --check app/src/main/assets/dan-composer-hint.js
           node tests/diary-export.test.cjs
 
       - name: Check recovered document boundaries
