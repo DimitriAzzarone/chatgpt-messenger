@@ -5937,6 +5937,7 @@ public class MainActivity extends Activity {
         if (webView == null || !trustedVoiceOrigin(webView.getUrl())) return;
         // Brand only the sidebar home control; preserve conversation and account content.
         webView.evaluateJavascript(voiceAsset("dan-branding.js"), null);
+        webView.evaluateJavascript(voiceAsset("dan-enter-send.js"), null);
         webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), null);
     }
 

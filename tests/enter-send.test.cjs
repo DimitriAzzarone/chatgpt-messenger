@@ -1,0 +1,17 @@
+const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:assert/strict');
+const source = fs.readFileSync('app/src/main/assets/dan-enter-send.js','utf8');
+let clicks=0, prevented=0;const handlers={};
+const button={disabled:false,getAttribute:k=>k==='data-testid'?'send-button':null,getClientRects:()=>[{}],click:()=>clicks++};
+const scope={matches:()=>false,querySelectorAll:()=>[button]};
+const editor={id:'prompt-textarea',disabled:false,getAttribute:()=>null,getClientRects:()=>[{}],closest:s=>s==='form'?scope:null};
+const target={closest:()=>editor};
+const context={location:{origin:'https://chatgpt.com'},window:{},document:{addEventListener:(n,f)=>handlers[n]=f},getComputedStyle:()=>({visibility:'visible'})};
+vm.runInNewContext(source,context);
+const enter=extra=>handlers.keydown({key:'Enter',target,preventDefault:()=>prevented++,stopImmediatePropagation(){},...extra});
+enter({});assert.equal(clicks,1);assert.equal(prevented,1);
+for(const extra of [{shiftKey:true},{ctrlKey:true},{isComposing:true},{keyCode:229},{repeat:true}])enter(extra);
+assert.equal(clicks,1);
+handlers.compositionstart();enter({});assert.equal(clicks,1);handlers.compositionend();
+button.disabled=true;enter({});assert.equal(clicks,1);button.disabled=false;
+editor.id='search';enter({});assert.equal(clicks,1);
+console.log('Enter: sends once, preserves Shift/Ctrl/IME, ignores disabled send and unrelated fields.');
