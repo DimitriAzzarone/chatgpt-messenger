@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.8-codex
       - dan-v1.155.7-recover-documents
       - dan-v1.155.6-system-documents
       - dan-v1.155.5-lenovo-attachments

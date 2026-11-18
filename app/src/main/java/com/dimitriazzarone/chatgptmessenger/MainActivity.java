@@ -535,6 +535,15 @@ public class MainActivity extends Activity {
         });
         engineButton.setOnLongClickListener(v -> { showEngineMenu(); return true; });
 
+        Button codexButton = makeButton("Codex");
+        codexButton.setAllCaps(false);
+        codexButton.setTextSize(12);
+        codexButton.setContentDescription("Apri Codex dentro Dan");
+        codexButton.setOnClickListener(v -> {
+            setLuminexVisible(false);
+            webView.loadUrl("https://chatgpt.com/codex");
+        });
+        controlsBar.addView(codexButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         Button copyChatButton = makeButton("Copia chat");
         copyChatButton.setAllCaps(false);
@@ -4896,6 +4905,9 @@ public class MainActivity extends Activity {
                     RenderProcessGoneDetail detail
             ) {
                 attachmentGeneration++;
+                getSharedPreferences("dan_upload_diagnostics", MODE_PRIVATE).edit()
+                        .putString("rendererExit", "crash=" + detail.didCrash() + "; priorità=" + detail.rendererPriorityAtExit())
+                        .putLong("rendererTime", System.currentTimeMillis()).commit();
                 recordAttachmentPhase("WebView terminato: " + (detail.didCrash() ? "crash" : "processo chiuso da Android"), false);
                 if (filePathCallback != null) {
                     ValueCallback<Uri[]> pending = filePathCallback;filePathCallback=null;
@@ -5300,9 +5312,9 @@ public class MainActivity extends Activity {
             } else {
                 rememberSystemDocuments(results, data);
                 if (filePathCallback == null) {
-                    recordAttachmentPhase("Documento recuperato; riaprire Allega nella stessa chat", false);
+                    recordAttachmentPhase("Selezione conservata; allegato non ancora caricato", false);
                     updateAttachmentRecoveryStatus();
-                    Toast.makeText(this, "Documento recuperato: nella stessa chat premi di nuovo Allega", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Selezione conservata, file non ancora allegato: nella stessa chat premi Allega", Toast.LENGTH_LONG).show();
                 } else deliverSystemDocuments(results, data);
             }
 
@@ -5351,14 +5363,37 @@ public class MainActivity extends Activity {
     private void updateAttachmentRecoveryStatus() {
         SharedPreferences prefs=getSharedPreferences("dan_upload_recovery",MODE_PRIVATE);
         if(!"[]".equals(prefs.getString("documents","[]")))
-            statusText.setText("Documento recuperato · nella stessa chat premi di nuovo Allega");
+            statusText.setText("File non ancora allegato · premi Allega nella stessa chat");
         else if(prefs.getBoolean("pickerPending",false))
             statusText.setText("Selezione interrotta · puoi riaprire Allega nella chat");
     }
 
+    private String attachmentMemorySnapshot() {
+        try {
+            android.app.ActivityManager manager = getSystemService(android.app.ActivityManager.class);
+            android.app.ActivityManager.MemoryInfo info = new android.app.ActivityManager.MemoryInfo();
+            manager.getMemoryInfo(info);
+            Runtime runtime = Runtime.getRuntime();
+            return "RAM libera " + (info.availMem / 1048576L) + " MB / "
+                    + (info.totalMem / 1048576L) + " MB; soglia " + (info.threshold / 1048576L)
+                    + " MB; pressione memoria " + info.lowMemory
+                    + "; heap Java " + ((runtime.totalMemory()-runtime.freeMemory()) / 1048576L)
+                    + "/" + (runtime.maxMemory() / 1048576L) + " MB";
+        } catch (RuntimeException error) { return "Dati memoria non disponibili"; }
+    }
+
+    @Override public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        getSharedPreferences("dan_upload_diagnostics", MODE_PRIVATE).edit()
+                .putInt("trimLevel", level).putLong("trimTime", System.currentTimeMillis())
+                .putString("trimMemory", attachmentMemorySnapshot()).commit();
+    }
+
     private void recordAttachmentPhase(String phase, boolean newAttempt) {
         SharedPreferences.Editor edit = getSharedPreferences("dan_upload_diagnostics", MODE_PRIVATE).edit();
-        edit.putString("phase", phase).putLong("phaseTime", System.currentTimeMillis());
+        edit.putString("phase", phase).putLong("phaseTime", System.currentTimeMillis())
+                .putString("phaseMemory", attachmentMemorySnapshot());
+        if (newAttempt) edit.putString("attemptMemory", attachmentMemorySnapshot());
         if (newAttempt) edit.putLong("attemptTime", System.currentTimeMillis());
         edit.commit(); // Persist the last boundary even if Android terminates the process.
     }
@@ -5410,6 +5445,17 @@ public class MainActivity extends Activity {
                 .append("\nAndroid ").append(Build.VERSION.RELEASE)
                 .append(" · ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
                 .append("\nUltimo passaggio: ").append(prefs.getString("phase", "Nessun tentativo registrato"));
+        report.append("\nOra: ").append(attachmentMemorySnapshot())
+                .append("\nPrima della selezione: ").append(prefs.getString("attemptMemory", "non registrata"))
+                .append("\nAll’ultimo passaggio: ").append(prefs.getString("phaseMemory", "non registrata"));
+        if (prefs.contains("trimLevel")) report.append("\nUltimo avviso Android: livello ")
+                .append(prefs.getInt("trimLevel", 0)).append(" a ")
+                .append(new java.util.Date(prefs.getLong("trimTime", 0)))
+                .append("\n").append(prefs.getString("trimMemory", ""));
+        if (prefs.contains("rendererExit")) report.append("\nUltimo arresto WebView: ")
+                .append(prefs.getString("rendererExit", "")).append(" a ")
+                .append(new java.util.Date(prefs.getLong("rendererTime", 0)));
+        report.append("\nI dati storici possono riferirsi a tentativi precedenti; il segnale da solo non prova la causa.");
         try {
             android.content.pm.PackageInfo engine = androidx.webkit.WebViewCompat.getCurrentWebViewPackage(this);
             if (engine != null) report.append("\nWebView: ").append(engine.packageName).append(' ').append(engine.versionName);
@@ -5427,7 +5473,11 @@ public class MainActivity extends Activity {
                     case android.app.ApplicationExitInfo.REASON_ANR: cause="App non risponde";break;
                     default: cause="Chiusura Android, codice " + exit.getReason();
                 }
-                report.append("\nUltima chiusura: ").append(cause);break;
+                report.append("\nUltima chiusura: ").append(cause)
+                        .append("; a ").append(new java.util.Date(exit.getTimestamp()))
+                        .append("; importanza ").append(exit.getImportance())
+                        .append("; PSS ").append(exit.getPss()).append(" KB; RSS ").append(exit.getRss()).append(" KB");
+                break;
             }
         } catch (Exception ignored) {}
         final String text = report.toString();
