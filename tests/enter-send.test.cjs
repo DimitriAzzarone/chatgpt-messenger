@@ -2,8 +2,8 @@ const vm = require('node:vm'), fs = require('node:fs'), assert = require('node:a
 const source = fs.readFileSync('app/src/main/assets/dan-enter-send.js','utf8');
 let clicks=0, prevented=0;const handlers={};
 const button={disabled:false,getAttribute:k=>k==='data-testid'?'send-button':null,getClientRects:()=>[{}],click:()=>clicks++};
-const scope={matches:()=>false,querySelectorAll:()=>[button]};
-const editor={id:'prompt-textarea',disabled:false,getAttribute:()=>null,getClientRects:()=>[{}],closest:s=>s==='form'?scope:null};
+const scope={matches:()=>false,querySelectorAll:s=>s.startsWith("textarea")?[editor]:[button]};
+const editor={id:'prompt-textarea',disabled:false,getAttribute:()=>null,getClientRects:()=>[{}],contains:()=>false,closest:s=>s==='form'?scope:null};
 const target={closest:()=>editor};
 const context={location:{origin:'https://chatgpt.com'},window:{},document:{addEventListener:(n,f)=>handlers[n]=f},getComputedStyle:()=>({visibility:'visible'})};
 vm.runInNewContext(source,context);

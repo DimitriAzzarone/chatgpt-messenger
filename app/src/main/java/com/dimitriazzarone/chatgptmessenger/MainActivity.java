@@ -5967,7 +5967,6 @@ public class MainActivity extends Activity {
         if (webView == null || !trustedVoiceOrigin(webView.getUrl())) return;
         // Brand only the sidebar home control; preserve conversation and account content.
         webView.evaluateJavascript(voiceAsset("dan-branding.js"), null);
-        webView.evaluateJavascript(voiceAsset("dan-enter-send.js"), null);
         webView.evaluateJavascript(voiceAsset("dan-web-voice.js"), null);
     }
 
@@ -6250,89 +6249,8 @@ public class MainActivity extends Activity {
     }
 
     private void injectEnterToSend() {
-        if (webView == null) return;
-
-        String script =
-                "(function(){"
-                + " if(window.__radioEnterInstalledV2)return;"
-                + " window.__radioEnterInstalledV2=true;"
-
-                + " function editorFromTarget(target){"
-                + "  if(!target)return null;"
-                + "  if(target.matches&&target.matches("
-                + "   '#prompt-textarea,textarea,[contenteditable=\"true\"],[role=\"textbox\"]'"
-                + "  ))return target;"
-                + "  return target.closest"
-                + "   ? target.closest('#prompt-textarea,textarea,[contenteditable=\"true\"],[role=\"textbox\"]')"
-                + "   : null;"
-                + " }"
-
-                + " function looksLikeComposer(ed){"
-                + "  if(!ed)return false;"
-                + "  if(ed.id==='prompt-textarea')return true;"
-                + "  const tid=(ed.getAttribute('data-testid')||'').toLowerCase();"
-                + "  if(tid.includes('prompt'))return true;"
-                + "  const ph=((ed.getAttribute('placeholder')||'')+' '+"
-                + "            (ed.getAttribute('aria-label')||'')).toLowerCase();"
-                + "  if(ph.includes('message')||ph.includes('messaggio')||"
-                + "     ph.includes('chiedi')||ph.includes('ask'))return true;"
-                + "  return !!ed.closest('form');"
-                + " }"
-
-                + " function findSend(ed){"
-                + "  const form=ed&&ed.closest?ed.closest('form'):null;"
-                + "  const scopes=[form,document].filter(Boolean);"
-
-                + "  for(const scope of scopes){"
-                + "   const direct="
-                + "    scope.querySelector(\"button[data-testid='send-button']\") ||"
-                + "    scope.querySelector(\"button[data-testid*='send']\") ||"
-                + "    scope.querySelector(\"button[aria-label*='Send' i]\") ||"
-                + "    scope.querySelector(\"button[aria-label*='Invia' i]\");"
-                + "   if(direct)return direct;"
-
-                + "   const buttons=Array.from(scope.querySelectorAll('button'));"
-                + "   const named=buttons.find(b=>{"
-                + "    const a=("
-                + "     (b.getAttribute('aria-label')||'')+' '+"
-                + "     (b.getAttribute('title')||'')+' '+"
-                + "     (b.getAttribute('data-testid')||'')"
-                + "    ).toLowerCase();"
-                + "    return a.includes('send')||a.includes('invia');"
-                + "   });"
-                + "   if(named)return named;"
-
-                + "   const submit=buttons.find(b=>"
-                + "    (b.getAttribute('type')||'').toLowerCase()==='submit'"
-                + "   );"
-                + "   if(submit)return submit;"
-                + "  }"
-
-                + "  return null;"
-                + " }"
-
-                + " document.addEventListener('keydown',function(e){"
-                + "  if(e.key!=='Enter'||e.shiftKey||e.isComposing)return;"
-
-                + "  const ed=editorFromTarget(e.target);"
-                + "  if(!looksLikeComposer(ed))return;"
-
-                + "  const send=findSend(ed);"
-
-                + "  if(send&&!send.disabled){"
-                + "   e.preventDefault();"
-                + "   e.stopImmediatePropagation();"
-                + "   send.click();"
-                + "   return;"
-                + "  }"
-
-                // IMPORTANTISSIMO:
-                // se Dan non riconosce il nuovo pulsante,
-                // NON blocca Enter. Lo lascia gestire a ChatGPT.
-                + " },true);"
-                + "})();";
-
-        webView.evaluateJavascript(script, null);
+        if (webView != null && trustedVoiceOrigin(webView.getUrl()))
+            webView.evaluateJavascript(voiceAsset("dan-enter-send.js"), null);
     }
 
     private void injectDownloadNameCapture() {

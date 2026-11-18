@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.12-enter-unified
       - dan-v1.155.11-picker-session
       - dan-v1.155.10-composer-branding
       - dan-v1.155.9-enter-send
