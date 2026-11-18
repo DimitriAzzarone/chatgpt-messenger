@@ -4830,6 +4830,7 @@ public class MainActivity extends Activity {
                 getSharedPreferences("dan_upload_recovery", MODE_PRIVATE).edit()
                         .putString("target", webView.getUrl()).putBoolean("pickerPending", true).remove("documents").commit();
                 recordAttachmentPhase("Selettore documenti aperto", true);
+                startAttachmentProtection();
 
                 try {
                     // Respect the file types and multiple-selection mode requested by ChatGPT.
@@ -4860,6 +4861,7 @@ public class MainActivity extends Activity {
                     MainActivity.this.filePathCallback = null;
                     filePathCallback.onReceiveValue(null);
                     getSharedPreferences("dan_upload_recovery", MODE_PRIVATE).edit().putBoolean("pickerPending", false).commit();
+                    stopAttachmentProtection();
                     recordAttachmentPhase("Errore apertura selettore: " + e.getClass().getSimpleName(), false);
                     android.util.Log.e("DanFileUpload", "File picker failed", e);
                     Toast.makeText(MainActivity.this,
@@ -5286,6 +5288,9 @@ public class MainActivity extends Activity {
         }
 
         if (requestCode == REQ_FILE_CHOOSER) {
+            stopAttachmentProtection();
+            recordAttachmentPhase("Ritorno selettore: risultato " + resultCode
+                    + "; callback " + (filePathCallback != null), false);
             Uri[] results = null;
 
             if (resultCode == RESULT_OK && data != null) {
@@ -5368,6 +5373,25 @@ public class MainActivity extends Activity {
             statusText.setText("Selezione interrotta · puoi riaprire Allega nella chat");
     }
 
+    private void startAttachmentProtection() {
+        try {
+            Intent session = new Intent(this, DanAttachmentSessionService.class);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(session);
+            else startService(session);
+        } catch (RuntimeException error) {
+            getSharedPreferences("dan_upload_diagnostics", MODE_PRIVATE).edit()
+                    .putString("pickerProtection", "Avvio non disponibile: " + error.getClass().getSimpleName())
+                    .putLong("pickerProtectionTime", System.currentTimeMillis()).commit();
+        }
+    }
+
+    private void stopAttachmentProtection() {
+        stopService(new Intent(this, DanAttachmentSessionService.class));
+        getSharedPreferences("dan_upload_diagnostics", MODE_PRIVATE).edit()
+                .putString("pickerProtection", "Terminata al ritorno dal selettore")
+                .putLong("pickerProtectionTime", System.currentTimeMillis()).commit();
+    }
+
     private String attachmentMemorySnapshot() {
         try {
             android.app.ActivityManager manager = getSystemService(android.app.ActivityManager.class);
@@ -5445,6 +5469,12 @@ public class MainActivity extends Activity {
                 .append("\nAndroid ").append(Build.VERSION.RELEASE)
                 .append(" · ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
                 .append("\nUltimo passaggio: ").append(prefs.getString("phase", "Nessun tentativo registrato"));
+        report.append("\nProcesso attuale: PID ").append(android.os.Process.myPid());
+        if (prefs.contains("pickerProtection")) report.append("\nProtezione selettore: ")
+                .append(prefs.getString("pickerProtection", "")).append(" a ")
+                .append(new java.util.Date(prefs.getLong("pickerProtectionTime", 0)));
+        report.append("\nAndroid chiude attività in background: ").append(
+                Settings.Global.getInt(getContentResolver(), Settings.Global.ALWAYS_FINISH_ACTIVITIES, 0) == 1);
         report.append("\nOra: ").append(attachmentMemorySnapshot())
                 .append("\nPrima della selezione: ").append(prefs.getString("attemptMemory", "non registrata"))
                 .append("\nAll’ultimo passaggio: ").append(prefs.getString("phaseMemory", "non registrata"));
