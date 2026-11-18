@@ -16,6 +16,11 @@ const {chromium}=require('playwright'),fs=require('fs'),assert=require('node:ass
  await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='none');await page.waitForTimeout(250);assert.equal(await cover.isVisible(),false);
  await page.locator('#unknown-sidebar-header').evaluate(e=>e.style.display='block');await cover.waitFor({state:'visible'});
  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(250);assert.equal(await cover.isVisible(),true);
+ // Both Italian placeholder variants rebrand without changing message text.
+ await page.evaluate(()=>document.body.insertAdjacentHTML('beforeend','<textarea id="chiedo-variant" placeholder="Chiedo a ChatGPT"></textarea><article id="keep-request">Chiedo a ChatGPT</article>'));
+ await page.waitForTimeout(250);
+ assert.equal(await page.locator('#chiedo-variant').getAttribute('placeholder'),'Chiedi a Dan');
+ assert.equal(await page.locator('#keep-request').innerText(),'Chiedo a ChatGPT');
  // Attribute-only updates preserve typed content and work even without a visible sidebar.
  await page.evaluate(()=>{document.body.insertAdjacentHTML('beforeend','<textarea id="plain" placeholder="Chiedi a ChatGPT">Messaggio Chiedi a ChatGPT</textarea><div id="prompt-textarea" contenteditable="true"><p data-placeholder="Chiedi a ChatGPT"><br></p></div><input id="search" placeholder="Cerca ChatGPT">');});
  await page.waitForTimeout(250);

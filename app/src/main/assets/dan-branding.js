@@ -63,7 +63,7 @@
   editor.dispatchEvent(new win.Event('change',{bubbles:true}));
  };
  const brandComposer = () => {
-  const original = /^(?:Chiedi\s+(?:a\s+)?ChatGPT|Ask\s+ChatGPT)[.\u2026!?]?$/i;
+  const original = /^(?:Chied[io]\s+(?:a\s+)?ChatGPT|Ask\s+ChatGPT)[.\u2026!?]?$/i;
   let css=document.getElementById('dan-composer-hint-style');
   if(!css){css=document.createElement('style');css.id='dan-composer-hint-style';css.textContent='[data-dan-hint-before]::before,[data-dan-hint-after]::after{content:"Chiedi a Dan"!important}[data-dan-initial-hint][data-dan-empty]::before{content:"Chiedi a Dan"!important;position:absolute;inset-inline-start:0;top:0;pointer-events:none;color:#9ebed2}';document.head.appendChild(css);}
   for (const editor of document.querySelectorAll('textarea, #prompt-textarea, [contenteditable]:not([contenteditable="false"]), .ProseMirror')) {
