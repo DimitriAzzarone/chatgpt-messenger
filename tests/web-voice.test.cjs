@@ -1,10 +1,10 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const script=fs.readFileSync('app/src/main/assets/dan-web-voice.js','utf8');
-function setup({origin='https://chatgpt.com',deferred=false,startLabel='Start Voice mode',failure=null}={}) {
- let wantedButton=true,endedButton=false,resolve,stops=0,paused=0,closes=0;const states=[],timers=new Map();let seq=0;
+function setup({origin='https://chatgpt.com',deferred=false,startLabel='Start Voice mode',failure=null,failuresBeforeSuccess=0}={}) {
+ let wantedButton=true,endedButton=false,resolve,attempts=0,stops=0,paused=0,closes=0;const states=[],timers=new Map();let seq=0;
  const listeners={},track={readyState:'live',stop(){this.readyState='ended';stops++;},addEventListener(name,fn){listeners[name]=fn;}};
  const stream={getAudioTracks:()=>[track],getTracks:()=>[track]};
- const media={getUserMedia:()=>failure?Promise.reject(Object.assign(new Error('capture failed'),{name:failure})):deferred?new Promise(r=>resolve=r):Promise.resolve(stream)};
+ const media={getUserMedia:()=>(failure && (!failuresBeforeSuccess || attempts++<failuresBeforeSuccess))?Promise.reject(Object.assign(new Error('capture failed'),{name:failure})):deferred?new Promise(r=>resolve=r):Promise.resolve(stream)};
  const start={disabled:false,getAttribute:k=>k==='aria-label'?startLabel:null,getClientRects:()=>[{}],click(){endedButton=true;}};
  const end={disabled:false,getAttribute:k=>k==='aria-label'?'End voice chat':null,getClientRects:()=>[{}],click(){endedButton=false;}};
  const document={hidden:false,querySelectorAll:s=>(s==='button'||s==='button,[role=button]')?[...(wantedButton?[start]:[]),...(endedButton?[end]:[])]:s==='audio'?[{pause(){paused++;}}]:[],addEventListener:(n,f)=>listeners[n]=f};
@@ -56,6 +56,21 @@ function setup({origin='https://chatgpt.com',deferred=false,startLabel='Start Vo
  const pageCapture=a.c.navigator.mediaDevices.getUserMedia({audio:true});
  a.c.__danWebVoice.stop();a.resolve(a.stream);
  await assert.rejects(pageCapture,e=>e.name==='AbortError');assert.equal(a.track.readyState,'ended');
+ // Wait for Android cleanup and retry a busy recorder once, then keep normal errors.
+ a=setup({failure:'NotReadableError',failuresBeforeSuccess:1});
+ a.c.AndroidRadio.webAudioReady=()=>true;a.c.setTimeout=setTimeout;a.c.clearTimeout=clearTimeout;
+ a.c.__danWebVoice.start('release-recorder');await a.c.navigator.mediaDevices.getUserMedia({audio:true});
+ assert.equal(a.c.__danWebVoice.isActive(),true);a.c.__danWebVoice.stop();
+ // A system permission dialog may hide the document: retain intent until it resolves.
+ a=setup({deferred:true});a.c.__danWebVoice.start('permission');
+ a.c.__danWebVoice.permissionPending(true);const permitted=a.c.navigator.mediaDevices.getUserMedia({audio:true});
+ a.c.document.hidden=true;a.listeners.visibilitychange();assert.equal(a.stats.stops,0);
+ a.c.document.hidden=false;a.c.__danWebVoice.permissionPending(false);a.resolve(a.stream);await permitted;assert.equal(a.c.__danWebVoice.isActive(),true);
+ a.c.document.hidden=true;a.listeners.visibilitychange();assert.equal(a.c.__danWebVoice.isActive(),false);
+ // X still cancels a pending grant; the late track must immediately stop.
+ a=setup({deferred:true});a.c.__danWebVoice.start('pending-X');a.c.__danWebVoice.permissionPending(true);
+ const late=a.c.navigator.mediaDevices.getUserMedia({audio:true});a.c.__danWebVoice.stop();a.resolve(a.stream);
+ await assert.rejects(late,e=>e.name==='AbortError');assert.equal(a.track.readyState,'ended');
  const css=fs.readFileSync('app/src/main/assets/dan-hud.css','utf8');assert.ok(css.includes('--text-primary:#e0f4ff!important'));assert.ok(css.includes('-webkit-text-fill-color:#e0f4ff!important'));
  console.log('Web voice: origin, capture confirmation, X cleanup, peer closure, late permission race, background and track-end checks passed.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

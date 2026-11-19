@@ -101,6 +101,7 @@ public class MainActivity extends Activity {
     private static final long LUMINEX_POLL_MS = 1000L;
     private static final long LUMINEX_SNAPSHOT_MS = 4000L;
     private static final int REQ_AUDIO = 3001;
+    private static final int REQ_WEB_AUDIO = 3002;
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final int REQ_MEMORY_EXPORT = 4002;
     private static final int REQ_MEMORY_BACKUP = 4003;
@@ -298,11 +299,15 @@ public class MainActivity extends Activity {
     private TextToSpeech tts;
     private TextView liveCaption;
     private boolean liveEnabled;
-    private boolean webVoiceRequested, webVoiceActive, pendingWebVoicePermission;
+    private volatile boolean webVoiceRequested;
+    private boolean webVoiceActive, pendingWebVoicePermission, requestingPageAudioPermission;
+    private PermissionRequest pendingPageAudioPermission;
+    private volatile long webAudioReadyAt;
+    private String lastWebVoiceState="Nessun tentativo";
     private long lastWebVoiceTouch = 0L;
     private long webVoiceGeneration;
-    private String webVoicePage;
-    private String webVoiceToken = "";
+    private volatile String webVoicePage;
+    private volatile String webVoiceToken = "";
     private Button webVoiceClose;
     private boolean suppressAutoRead;
     private boolean liveWaiting;
@@ -611,8 +616,9 @@ public class MainActivity extends Activity {
 
         autoButton.setText("LIVE");
         autoButton.setContentDescription("Avvia o ferma la conversazione automatica a turni");
-        autoButton.setOnClickListener(v -> toggleLiveMode());
-        autoButton.setOnLongClickListener(v -> { recoverMicrophoneAccess(); return true; });
+        autoButton.setOnClickListener(v -> toggleWebVoice());
+        autoButton.setContentDescription("Avvia live ufficiale ChatGPT");
+        autoButton.setOnLongClickListener(v -> { showDanVoiceModes(); return true; });
         luminexButton.setOnClickListener(v -> toggleLuminexView());
         privateButton.setOnClickListener(v -> togglePrivateSession());
 
@@ -631,7 +637,13 @@ public class MainActivity extends Activity {
         playSpeechButton.setOnClickListener(v -> replayLastSpeech());
         stopSpeechButton.setOnClickListener(v -> stopAllSpeech());
 
-        micButton.setOnClickListener(v -> toggleLiveMode());
+        micButton.setContentDescription("Avvia o ferma la voce; tieni premuto per scegliere ChatGPT o voce automatica");
+        micButton.setOnLongClickListener(v->{showDanVoiceModes();return true;});
+        micButton.setOnClickListener(v -> {
+            if(webVoiceRequested){stopWebVoice("Voce ChatGPT chiusa");return;}
+            if(liveEnabled){stopLiveMode("Voce automatica chiusa");return;}
+            if("auto".equals(getSharedPreferences(PREFS,MODE_PRIVATE).getString("dan_voice_mode","web")))toggleLiveMode();else toggleWebVoice();
+        });
     }
 
     private boolean pendingManualPermission;
@@ -693,6 +705,74 @@ public class MainActivity extends Activity {
         } catch (Exception e) { return false; }
     }
 
+    private void showDanVoiceModes(){
+        new AlertDialog.Builder(this,R.style.HeiwaDialogTheme).setTitle("Voce in Dan")
+                .setItems(new String[]{"Voce ufficiale ChatGPT","Conversazione automatica Dan","Diagnostica voce","Permessi microfono Android"},(dialog,which)->{
+                    if(which<2){getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("dan_voice_mode",which==0?"web":"auto").apply();if(which==0)toggleWebVoice();else toggleLiveMode();}
+                    else if(which==2)showWebVoiceDiagnostics();else openMicrophoneAppSettings();
+                }).show();
+    }
+    private void showWebVoiceDiagnostics(){
+        StringBuilder report=new StringBuilder("Dan Heiwa ").append(BuildConfig.VERSION_NAME)
+                .append("\nPermesso Android microfono: ").append(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED)
+                .append("\nVoce web richiesta: ").append(webVoiceRequested).append("; cattura attiva: ").append(webVoiceActive)
+                .append("\nPermesso pagina in attesa: ").append(pendingPageAudioPermission!=null)
+                .append("\nRiconoscitore nativo in ascolto: ").append(recognizerSessionActive)
+                .append("\nUltimo stato web: ").append(lastWebVoiceState);
+        AudioManager manager=(AudioManager)getSystemService(AUDIO_SERVICE);
+        if(manager!=null)try{report.append("\nMicrofono silenziato dal sistema: ").append(manager.isMicrophoneMute())
+                .append("\nModalità audio Android: ").append(manager.getMode())
+                .append("\nCatture audio rilevate: ").append(manager.getActiveRecordingConfigurations().size());}catch(RuntimeException ignored){}
+        final String text=report.toString();new AlertDialog.Builder(this,R.style.HeiwaDialogTheme).setTitle("Diagnostica voce").setMessage(text)
+                .setPositiveButton("Copia",(d,w)->{android.content.ClipboardManager clipboard=(android.content.ClipboardManager)getSystemService(CLIPBOARD_SERVICE);clipboard.setPrimaryClip(ClipData.newPlainText("Voce Dan",text));}).setNegativeButton("Chiudi",null).show();
+    }
+
+    private void setPageAudioPending(boolean value) {
+        if(webView!=null&&trustedVoiceOrigin(webView.getUrl()))try{webView.evaluateJavascript("window.__danWebVoice && window.__danWebVoice.permissionPending("+value+")",null);}catch(RuntimeException ignored){}
+    }
+    private void clearPendingPageAudio(){
+        PermissionRequest request=pendingPageAudioPermission;pendingPageAudioPermission=null;
+        if(request!=null)try{request.deny();}catch(RuntimeException ignored){}
+        setPageAudioPending(false);
+    }
+    private void releaseNativeMicrophone(){
+        if(liveEnabled)stopLiveMode("Passaggio alla voce ChatGPT");
+        SpeechRecognizer previous=speechRecognizer;speechRecognizer=null;
+        if(previous!=null){try{previous.cancel();}catch(RuntimeException ignored){}try{previous.destroy();}catch(RuntimeException ignored){}}
+        handsFreeEnabled=false;recognizerSessionActive=false;listening=false;manualCapture=false;
+        recordingLocked=false;headsetRecording=false;pressToTalkRequested=false;manualStopPending=false;
+        if(tts!=null)try{tts.stop();}catch(RuntimeException ignored){}ttsSpeaking=false;
+    }
+    private void handlePageAudioPermission(PermissionRequest request){
+        long elapsed=android.os.SystemClock.uptimeMillis()-lastWebVoiceTouch;
+        boolean intent=webVoiceRequested||(lastWebVoiceTouch!=0L&&elapsed>=0L&&elapsed<=30000L);
+        boolean audio=java.util.Arrays.asList(request.getResources()).contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
+        boolean trusted=foreground&&intent&&webView!=null&&trustedVoiceOrigin(webView.getUrl())&&trustedVoiceOrigin(request.getOrigin().toString());
+        if(!trusted||!audio){request.deny();return;}
+        releaseNativeMicrophone();
+        if(checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED){request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});return;}
+        if(pendingPageAudioPermission!=null&&pendingPageAudioPermission!=request)try{pendingPageAudioPermission.deny();}catch(RuntimeException ignored){}
+        pendingPageAudioPermission=request;statusText.setText("Consenti il microfono nella richiesta Android");
+        Runnable ask=()->{if(pendingPageAudioPermission!=request||requestingPageAudioPermission||isFinishing())return;requestingPageAudioPermission=true;requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO},REQ_WEB_AUDIO);};
+        try{webView.evaluateJavascript("window.__danWebVoice && window.__danWebVoice.permissionPending(true)",result->ask.run());}
+        catch(RuntimeException ignored){ask.run();}
+        statusText.postDelayed(ask,300L);
+    }
+    private void completePageAudioPermission(boolean granted){
+        requestingPageAudioPermission=false;
+        statusText.postDelayed(()->{
+            PermissionRequest request=pendingPageAudioPermission;pendingPageAudioPermission=null;
+            if(request==null){setPageAudioPending(false);return;}
+            boolean allowed=granted&&foreground&&!isFinishing()&&webView!=null&&trustedVoiceOrigin(webView.getUrl())&&trustedVoiceOrigin(request.getOrigin().toString())
+                    &&checkSelfPermission(Manifest.permission.RECORD_AUDIO)==PackageManager.PERMISSION_GRANTED;
+            try{if(allowed){request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});statusText.setText("Microfono consentito alla pagina ChatGPT");}
+                else{request.deny();statusText.setText("Microfono non consentito · autorizzazioni Android di Dan");}}
+            catch(RuntimeException ignored){}
+            setPageAudioPending(false);
+            if(allowed){long generation=webVoiceGeneration;statusText.postDelayed(()->{if(webVoiceRequested&&generation==webVoiceGeneration&&!webVoiceActive)stopWebVoice("Voce ChatGPT non avviata: riprova il pulsante vocale nella pagina");},30000L);}
+        },350L);
+    }
+
     private void toggleWebVoice() {
         beginWebVoice(null);
     }
@@ -702,20 +782,13 @@ public class MainActivity extends Activity {
         if (webView == null || !trustedVoiceOrigin(webView.getUrl()) || luminexVisible) {
             statusText.setText("Apri la chat desiderata prima di LIVE"); return;
         }
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (pageToken == null && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             pendingWebVoicePermission = true;
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO); return;
         }
-        if (liveEnabled) stopLiveMode("Passaggio alla voce continua");
-        handsFreeEnabled = false;
-        if (speechRecognizer != null) {
-            try { speechRecognizer.cancel(); speechRecognizer.destroy(); } catch (Exception ignored) {}
-            speechRecognizer = null;
-        }
-        recognizerSessionActive = false; listening = false; manualCapture = false;
-        headsetRecording = false; manualStopPending = false;
-        if (tts != null) { try { tts.stop(); } catch (Exception ignored) {} }
+        releaseNativeMicrophone();
         ttsSpeaking = false; suppressAutoRead = true;
+        webAudioReadyAt = android.os.SystemClock.uptimeMillis() + 350L;
         webVoiceRequested = true; webVoiceActive = false; webVoicePage = webView.getUrl();
         final long generation = ++webVoiceGeneration;
         webVoiceToken = pageToken == null ? Long.toString(generation) : pageToken;
@@ -729,12 +802,13 @@ public class MainActivity extends Activity {
                     + JSONObject.quote(webVoiceToken) + ") : 'unsupported'", null);
         });
         statusText.postDelayed(() -> {
-            if (webVoiceRequested && generation == webVoiceGeneration && !webVoiceActive)
+            if (webVoiceRequested && generation == webVoiceGeneration && !webVoiceActive && pendingPageAudioPermission == null)
                 stopWebVoice("Voce continua non avviata · verifica la disponibilità nella tua sessione web");
         }, 30000L);
     }
 
     private void stopWebVoice(String reason) {
+        clearPendingPageAudio();
         boolean requested = webVoiceRequested;
         webVoiceRequested = false; webVoiceActive = false; pendingWebVoicePermission = false;
         webVoiceGeneration++;
@@ -3022,6 +3096,7 @@ public class MainActivity extends Activity {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 
+        if(requestCode==REQ_WEB_AUDIO){completePageAudioPermission(grantResults.length>0&&grantResults[0]==PackageManager.PERMISSION_GRANTED);return;}
         if (requestCode == REQ_AUDIO) {
             if (pendingManualPermission) {
                 pendingManualPermission = false;
@@ -4684,39 +4759,10 @@ public class MainActivity extends Activity {
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override public void onPermissionRequest(PermissionRequest request) {
-                runOnUiThread(() -> {
-                    long sinceTouch = android.os.SystemClock.uptimeMillis() - lastWebVoiceTouch;
-                    boolean explicitPageTap = lastWebVoiceTouch != 0L && sinceTouch >= 0L && sinceTouch <= 5000L;
-                    boolean allowed = foreground && (webVoiceRequested || explicitPageTap) && webView != null
-                            && trustedVoiceOrigin(webView.getUrl())
-                            && trustedVoiceOrigin(request.getOrigin().toString())
-                            && checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-                    boolean asksAudio = java.util.Arrays.asList(request.getResources()).contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE);
-                    if (allowed && asksAudio) {
-                        if (!webVoiceRequested) {
-                            if (liveEnabled) stopLiveMode("LIVE chiuso · dettatura della pagina");
-                            SpeechRecognizer previous = speechRecognizer;
-                            speechRecognizer = null;
-                            if (previous != null) {
-                                try { previous.cancel(); } catch (Exception ignored) {}
-                                try { previous.destroy(); } catch (Exception ignored) {}
-                            }
-                            handsFreeEnabled = false;
-                            recognizerSessionActive = false;
-                            listening = false;
-                            manualCapture = false;
-                            recordingLocked = false;
-                            headsetRecording = false;
-                            pressToTalkRequested = false;
-                            manualStopPending = false;
-                            if (tts != null) tts.stop();
-                            ttsSpeaking = false;
-                            applyMicStyle(false);
-                        }
-                        request.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
-                    }
-                    else request.deny();
-                });
+                runOnUiThread(() -> handlePageAudioPermission(request));
+            }
+            @Override public void onPermissionRequestCanceled(PermissionRequest request) {
+                runOnUiThread(() -> {if(pendingPageAudioPermission==request){pendingPageAudioPermission=null;setPageAudioPending(false);stopWebVoice("Richiesta microfono annullata dalla pagina");}});
             }
 
             @Override
@@ -5530,6 +5576,10 @@ public class MainActivity extends Activity {
     }
 
     private class NativeBridge {
+        @JavascriptInterface public boolean webAudioReady(String url,String token){
+            return webVoiceRequested&&webVoiceToken.equals(token)&&webVoicePage!=null&&webVoicePage.equals(url)&&trustedVoiceOrigin(url)
+                    &&android.os.SystemClock.uptimeMillis()>=webAudioReadyAt;
+        }
         @JavascriptInterface public void startWebVoiceFromPage(String url, String token) {
             runOnUiThread(() -> {
                 long elapsed = android.os.SystemClock.uptimeMillis() - lastWebVoiceTouch;
@@ -5545,13 +5595,14 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 if (!webVoiceRequested || !webVoiceToken.equals(token)
                         || webView == null || !trustedVoiceOrigin(url) || !sameVoicePage(url, webView.getUrl())) return;
-                if (!foreground) { stopWebVoice("LIVE chiuso · app in background"); return; }
+                if (!foreground && pendingPageAudioPermission==null) { stopWebVoice("LIVE chiuso · app in background"); return; }
+                lastWebVoiceState=state;
                 if ("active".equals(state)) {
                     webVoiceActive = true;
                     statusText.setText("LIVE · microfono aperto · parla liberamente · X per chiudere");
                 } else if ("closed".equals(state)) stopWebVoice("LIVE chiuso");
                 else if ("capture-denied".equals(state)) stopWebVoice("Microfono negato · controlla Permessi → Microfono nelle impostazioni Android");
-                else if ("capture-busy".equals(state)) stopWebVoice("Microfono non accessibile · controlla privacy Android e altre app");
+                else if ("capture-busy".equals(state)) stopWebVoice("Microfono occupato o non leggibile · chiudi altre sessioni vocali e riprova");
                 else if ("capture-missing".equals(state)) stopWebVoice("Nessun microfono disponibile sul dispositivo");
                 else if ("capture-error".equals(state)) stopWebVoice("Microfono web non disponibile · controlla il permesso e riprova");
                 else if ("unsupported".equals(state) || "unavailable".equals(state))
@@ -6688,7 +6739,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         foreground = false;
-        if (webVoiceRequested) stopWebVoice("LIVE chiuso · app in background");
+        if (webVoiceRequested && pendingPageAudioPermission==null) stopWebVoice("LIVE chiuso · app in background");
         if (liveEnabled) stopLiveMode("Live fermato · app in background");
         stopChatLiveRefresh();
 

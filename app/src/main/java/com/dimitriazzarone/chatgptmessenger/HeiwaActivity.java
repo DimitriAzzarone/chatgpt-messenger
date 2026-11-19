@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Independent native HEIWA chat. Never scrapes or replaces the authenticated web chat. */
 public final class HeiwaActivity extends Activity {
-    private static final int IMPORT_MODEL=5150, IMPORT_MEMORY=5151;
+    private static final int IMPORT_MODEL=5150, IMPORT_MEMORY=5151, AUDIO_PERMISSION=5152;
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private final AtomicBoolean canceled=new AtomicBoolean();
     private final HeiwaGroq groq=new HeiwaGroq();
@@ -39,7 +39,9 @@ public final class HeiwaActivity extends Activity {
     private TextView status,modeLabel,memorySources;
     private EditText composer;
     private Spinner provider;
-    private Button send,stop,menuButton;
+    private Button send,stop,menuButton,voiceButton;
+    private HeiwaVoiceController voice;
+    private boolean voiceWriting,pendingVoicePermission,voiceForeground;
     private ProgressBar activityProgress;
     private Markwon markdown;
     private static final int BG=0xff030d1a,PANEL=0xff071428,CYAN=0xff00c8ff,TEXT=0xffe0f4ff,MUTED=0xff8fa8bf;
@@ -57,6 +59,7 @@ public final class HeiwaActivity extends Activity {
     private LinearLayout.LayoutParams row(int width,int height){LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(width,height);p.gravity=Gravity.CENTER_HORIZONTAL;return p;}
     private void gap(LinearLayout parent,int height){Space space=new Space(this);parent.addView(space,new LinearLayout.LayoutParams(1,dp(height)));}
     private void showOptions(){
+        if(voice!=null&&voice.active())voice.stop("Voce in pausa · impostazioni aperte");
         LinearLayout options=new LinearLayout(this);options.setOrientation(LinearLayout.VERTICAL);options.setPadding(dp(16),dp(8),dp(16),dp(12));
         TextView title=label("Il tuo spazio HEIWA",20);title.setTypeface(null,Typeface.BOLD);options.addView(title);
         TextView detail=label(online()?"Groq online · "+prefs.getString("groqModel","llama-3.1-8b-instant"):"Qwen 3 · elaborazione sul dispositivo",13);detail.setTextColor(MUTED);options.addView(detail);gap(options,12);
@@ -102,10 +105,11 @@ public final class HeiwaActivity extends Activity {
         activityProgress=new ProgressBar(this,null,android.R.attr.progressBarStyleSmall);activityProgress.setIndeterminateTintList(ColorStateList.valueOf(CYAN));activityProgress.setVisibility(View.GONE);LinearLayout.LayoutParams progressLp=new LinearLayout.LayoutParams(dp(16),dp(16));progressLp.rightMargin=dp(10);statusRow.addView(activityProgress,progressLp);
         status=label("",12);status.setTextColor(MUTED);status.setMaxLines(3);statusRow.addView(status,new LinearLayout.LayoutParams(0,-2,1));root.addView(statusRow,row(-1,-2));centered.add(statusRow);
         LinearLayout dock=new LinearLayout(this);dock.setGravity(Gravity.CENTER_VERTICAL);dock.setPadding(dp(8),dp(6),dp(8),dp(6));dock.setBackground(surface(PANEL,0xff235167,24));
+        voiceButton=button("🎙");voiceButton.setTextSize(20);voiceButton.setPadding(0,0,0,0);voiceButton.setContentDescription("Avvia conversazione vocale HEIWA");voiceButton.setOnClickListener(v->toggleHeiwaVoice());dock.addView(voiceButton,new LinearLayout.LayoutParams(dp(44),dp(48)));
         composer=edit("Scrivi a HEIWA…");composer.setContentDescription("Messaggio a HEIWA");composer.setBackground(null);composer.setPadding(dp(10),dp(10),dp(10),dp(10));composer.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE|InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         composer.setMinLines(1);composer.setMaxLines(4);composer.setImeOptions(EditorInfo.IME_ACTION_SEND);composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(1200)});dock.addView(composer,new LinearLayout.LayoutParams(0,-2,1));
         FrameLayout submit=new FrameLayout(this);send=button("↑");send.setTextSize(26);send.setTextColor(BG);send.setBackground(surface(CYAN,0,24));send.setContentDescription("Invia messaggio a HEIWA");stop=button("■");stop.setTextSize(20);stop.setContentDescription("Interrompi risposta o importazione");stop.setVisibility(View.GONE);stop.setEnabled(false);
-        send.setOnClickListener(v->send());stop.setOnClickListener(v->cancelWork());submit.addView(send,new FrameLayout.LayoutParams(-1,-1));submit.addView(stop,new FrameLayout.LayoutParams(-1,-1));dock.addView(submit,new LinearLayout.LayoutParams(dp(48),dp(48)));root.addView(dock,row(-1,-2));centered.add(dock);
+        send.setOnClickListener(v->send());stop.setOnClickListener(v->interruptHeiwa());submit.addView(send,new FrameLayout.LayoutParams(-1,-1));submit.addView(stop,new FrameLayout.LayoutParams(-1,-1));dock.addView(submit,new LinearLayout.LayoutParams(dp(48),dp(48)));root.addView(dock,row(-1,-2));centered.add(dock);
         root.addOnLayoutChangeListener((v,l,t,r,b,ol,ot,or,ob)->{int width=Math.max(0,Math.min(root.getWidth()-root.getPaddingLeft()-root.getPaddingRight(),dp(900)));if(width==0)return;for(View child:centered){LinearLayout.LayoutParams p=(LinearLayout.LayoutParams)child.getLayoutParams();if(p.width!=width){p.width=width;p.gravity=Gravity.CENTER_HORIZONTAL;child.setLayoutParams(p);}}});
         setContentView(root);
         composer.setOnEditorActionListener((v,action,event)->{if(action==EditorInfo.IME_ACTION_SEND){send();return true;}return false;});
@@ -121,6 +125,7 @@ public final class HeiwaActivity extends Activity {
             }
             lastProvider=at;prefs.edit().putInt("provider",at).apply();mode();
         }});
+        composer.addTextChangedListener(new android.text.TextWatcher(){public void beforeTextChanged(CharSequence t,int start,int count,int after){}public void onTextChanged(CharSequence t,int start,int before,int count){}public void afterTextChanged(android.text.Editable text){if(!voiceWriting&&voice!=null&&voice.active()&&text.length()>0)voice.stop("Voce in pausa · bozza aperta");}});
         loadTurns();render();mode();
     }
     private void mode(){
@@ -128,7 +133,44 @@ public final class HeiwaActivity extends Activity {
         else modeLabel.setText(model.ready()?"Sul dispositivo\nModello pronto":"Sul dispositivo\nModello da preparare");
         if(!busy){status.setText(online()?"Groq online · accesso configurabile dal menu":"Qwen locale · i messaggi restano sul dispositivo");if(turns.isEmpty())render();}
     }
-    private void setBusy(boolean value,String text){busy=value;send.setEnabled(!value);send.setVisibility(value?View.GONE:View.VISIBLE);stop.setEnabled(value);stop.setVisibility(value?View.VISIBLE:View.GONE);activityProgress.setVisibility(value?View.VISIBLE:View.GONE);provider.setEnabled(!value);menuButton.setEnabled(!value);menuButton.setAlpha(value?.4f:1f);status.setText(text);}
+    private void setBusy(boolean value,String text){busy=value;activityProgress.setVisibility(value?View.VISIBLE:View.GONE);provider.setEnabled(!value);menuButton.setEnabled(!value);menuButton.setAlpha(value?.4f:1f);status.setText(text);updateVoiceControls();}
+    private void updateVoiceControls(){
+        boolean active=voice!=null&&voice.active(),speaking=voice!=null&&voice.speaking();
+        send.setEnabled(!busy);send.setVisibility(busy||speaking?View.GONE:View.VISIBLE);stop.setEnabled(busy||speaking);stop.setVisibility(busy||speaking?View.VISIBLE:View.GONE);
+        voiceButton.setText(active?"×":"🎙");voiceButton.setTextColor(active?BG:CYAN);voiceButton.setBackground(surface(active?CYAN:PANEL,active?0:0xff16374d,22));voiceButton.setContentDescription(active?"Chiudi conversazione vocale HEIWA":"Avvia conversazione vocale HEIWA");
+    }
+    private void toggleHeiwaVoice(){
+        if(voice!=null&&voice.active()){cancelWork();status.setText("Voce HEIWA chiusa");return;}
+        if(busy)return;
+        if(!composer.getText().toString().trim().isEmpty()){status.setText("Invia o svuota la bozza prima di avviare la voce");return;}
+        if(!online()&&!model.ready()){modelMenu();return;}
+        if(checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){pendingVoicePermission=true;voiceButton.setEnabled(false);requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},AUDIO_PERMISSION);return;}
+        if(voice==null)voice=new HeiwaVoiceController(this,new HeiwaVoiceController.Listener(){
+            public void text(String text){
+                if(!voiceForeground||busy||!composer.getText().toString().trim().isEmpty()){if(voice!=null)voice.stop("Voce in pausa");return;}
+                voiceWriting=true;try{composer.setText(HeiwaPrompt.clip(text,1200));send();}finally{voiceWriting=false;}
+            }
+            public void state(boolean active,boolean speaking,String text){
+                if(destroyed)return;status.setText(text);updateVoiceControls();
+                if(active)getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else if(!busy)getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        });
+        voice.start();updateVoiceControls();
+    }
+    private void interruptHeiwa(){
+        if(voice!=null&&voice.active()){
+            if(voice.speaking()){voice.interrupt();return;}
+            if(busy){canceled.set(true);groq.cancel();DanNativeQwen.cancel();status.setText("Interrompo la risposta, poi ti ascolto…");return;}
+        }
+        cancelWork();
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request==AUDIO_PERMISSION){boolean wanted=pendingVoicePermission;pendingVoicePermission=false;voiceButton.setEnabled(true);
+            if(wanted&&results.length>0&&results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED)new Handler(Looper.getMainLooper()).postDelayed(()->{if(voiceForeground&&!destroyed&&!isFinishing())toggleHeiwaVoice();},350);
+            else status.setText("Microfono negato · abilitalo nelle autorizzazioni Android di Dan");
+        }
+    }
     private void suggestion(String heading,String detail,String draft){
         LinearLayout card=new LinearLayout(this);card.setOrientation(LinearLayout.VERTICAL);card.setPadding(dp(16),dp(10),dp(16),dp(10));card.setBackground(surface(PANEL,0xff173548,18));card.setClickable(true);card.setFocusable(true);card.setContentDescription(heading);card.setOnClickListener(v->{composer.setText(draft);composer.setSelection(composer.length());composer.requestFocus();((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).showSoftInput(composer,android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);});
         TextView top=label(heading,15);top.setTypeface(null,Typeface.BOLD);card.addView(top);TextView sub=label(detail,12);sub.setTextColor(MUTED);card.addView(sub);LinearLayout.LayoutParams p=row(-1,-2);p.bottomMargin=dp(9);messages.addView(card,p);
@@ -192,12 +234,12 @@ public final class HeiwaActivity extends Activity {
                 if(cloud)answer=groq.answer(secrets.read(),selected,snapshot,memory.toString(),share||shareJson);
                 else answer=DanNativeQwen.answer(model.file().getAbsolutePath(),HeiwaPrompt.local(snapshot,memory.toString()),canceled::get);
                 if(canceled.get())throw new CancellationException();
-                ui(()->{turns.add(new HeiwaPrompt.Turn("assistant",answer));saveTurns();render();setBusy(false,cloud?"Risposta Groq online":"Risposta Qwen · elaborata sul dispositivo");});
-            }catch(Exception|LinkageError error){ui(()->setBusy(false,canceled.get()?"Operazione interrotta":errorMessage(error)));}
+                ui(()->{if(canceled.get()){setBusy(false,"Risposta interrotta");if(voice!=null&&voice.active())voice.resume();return;}turns.add(new HeiwaPrompt.Turn("assistant",answer));saveTurns();render();setBusy(false,cloud?"Risposta Groq online":"Risposta Qwen · elaborata sul dispositivo");if(voice!=null&&voice.active())voice.answer(answer);});
+            }catch(Exception|LinkageError error){ui(()->{setBusy(false,canceled.get()?"Operazione interrotta":errorMessage(error));if(voice!=null&&voice.active()){if(canceled.get())voice.resume();else voice.stop(errorMessage(error));}});}
         });
     }
     private String errorMessage(Throwable error){String message=error.getMessage();return message==null?"Operazione non riuscita: "+error.getClass().getSimpleName():HeiwaPrompt.clip(message,350);}
-    private void cancelWork(){canceled.set(true);groq.cancel();DanNativeQwen.cancel();if(busy)status.setText("Interrompo l’operazione…");}
+    private void cancelWork(){if(voice!=null)voice.stop("Voce HEIWA chiusa");canceled.set(true);groq.cancel();DanNativeQwen.cancel();if(busy)status.setText("Interrompo l’operazione…");}
     private void memoryMenu(){
         new AlertDialog.Builder(this,R.style.HeiwaDialogTheme).setTitle("Memoria HEIWA").setItems(new String[]{"Note personali","Importa JSON/JSONL da Drive o File","Rileggi i file JSON collegati","Leggi la cartella Dan già collegata","Cerca nella memoria JSON","Cancella la copia locale dei JSON"},(dialog,which)->{
             if(which==0)memoryDialog();
@@ -308,6 +350,8 @@ public final class HeiwaActivity extends Activity {
         }
     }
 
+    @Override protected void onResume(){super.onResume();voiceForeground=true;}
+    @Override protected void onPause(){voiceForeground=false;if(voice!=null)voice.stop("Voce chiusa · app in background");super.onPause();}
     @Override protected void onStop(){super.onStop();cancelWork();if(!worker.isShutdown())worker.execute(DanNativeQwen::unload);getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
-    @Override protected void onDestroy(){destroyed=true;cancelWork();if(!worker.isShutdown()){worker.execute(DanNativeQwen::unload);worker.shutdown();}super.onDestroy();}
+    @Override protected void onDestroy(){destroyed=true;cancelWork();if(voice!=null)voice.destroy();if(!worker.isShutdown()){worker.execute(DanNativeQwen::unload);worker.shutdown();}super.onDestroy();}
 }

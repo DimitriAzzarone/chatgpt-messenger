@@ -3,11 +3,11 @@
  'use strict';
  if (location.origin !== 'https://chatgpt.com' || window.__danWebVoice) return;
  let wanted=false, active=false, sawEnd=false, missingSince=0, token='', timer=null;
- let dictationUntil=0, streamGeneration=0;
+ let dictationUntil=0, streamGeneration=0, permissionAwaited=false;
  const streams=new Set(), peers=new Set();
  const label=b=>(b.getAttribute('aria-label')||b.getAttribute('title')||b.textContent||'').trim().toLowerCase().replace(/\s+/g,' ');
  const visible=b=>b && !b.disabled && b.getAttribute('aria-disabled')!=='true' && b.getClientRects().length>0 && getComputedStyle(b).visibility!=='hidden' && getComputedStyle(b).display!=='none';
- const startLabels=new Set(['start voice mode','use voice mode','voice mode','start voice chat','use voice','enter voice mode','avvia modalità vocale','modalità vocale','usa la voce','avvia chat vocale','avvia conversazione vocale']);
+ const startLabels=new Set(['start voice mode','use voice mode','voice mode','start voice chat','start a voice conversation','voice chat','use voice','enter voice mode','avvia modalità vocale','modalità vocale','usa la voce','avvia chat vocale','avvia conversazione vocale','conversazione vocale','chat vocale']);
  const isStart=b=>startLabels.has(label(b)) || (!/dictat|dettat|read aloud|leggi ad alta/.test(label(b)) && (/^(?:start|use|enter|open|enable) (?:the )?voice(?: mode| chat| conversation)?$/.test(label(b)) || /^(?:avvia|inizia|apri|attiva|usa) (?:la |una )?(?:modalit[aà] vocale|chat vocale|conversazione vocale|voce)$/.test(label(b)) || ['composer-speech-button','voice-mode-button','composer-voice-button'].includes(b.getAttribute('data-testid'))));
  const endLabels=new Set(['end voice chat','end voice mode','exit voice mode','close voice mode','close voice chat','end conversation','termina chat vocale','termina conversazione vocale','esci dalla modalità vocale','chiudi modalità vocale','termina conversazione']);
  function button(kind) {
@@ -21,7 +21,7 @@
  }
  function stop(report=true) {
   const wasWanted=wanted;wanted=false;active=false;
-  dictationUntil=0;streamGeneration++;
+  dictationUntil=0;streamGeneration++;permissionAwaited=false;
   if(wasWanted) {try{button('end')?.click();}catch(_){} }
   release();
   if(wasWanted)document.querySelectorAll('audio').forEach(a=>{try{a.pause();}catch(_){}});
@@ -55,7 +55,23 @@
    const capture=wanted?token:null;
    const generation=streamGeneration;
    let stream;
-   try {stream=await original(constraints);}catch(e){if(capture && wanted && capture===token) {notify(e.name==='NotAllowedError'?'capture-denied':e.name==='NotFoundError'?'capture-missing':e.name==='NotReadableError'?'capture-busy':'capture-error');stop(false);}throw e;}
+   if(capture && window.AndroidRadio?.webAudioReady) {
+    let prepared=false;
+    for(let attempt=0;attempt<25;attempt++){
+     if(!wanted||token!==capture)throw new DOMException('Sessione vocale chiusa','AbortError');
+     if(window.AndroidRadio.webAudioReady(location.href,capture)){prepared=true;break;}
+     await new Promise(resolve=>setTimeout(resolve,80));
+    }
+    if(!prepared){notify('capture-busy');stop(false);throw new DOMException('Microfono Android non rilasciato','NotReadableError');}
+   }
+   try {
+    try {stream=await original(constraints);}catch(first){
+     if(first.name!=='NotReadableError'||!capture||!window.AndroidRadio?.webAudioReady||!wanted||token!==capture)throw first;
+     await new Promise(resolve=>setTimeout(resolve,500));
+     if(!wanted||token!==capture)throw new DOMException('Sessione vocale chiusa','AbortError');
+     stream=await original(constraints);
+    }
+   }catch(e){if(capture && wanted && capture===token) {notify(e.name==='NotAllowedError'?'capture-denied':e.name==='NotFoundError'?'capture-missing':e.name==='NotReadableError'?'capture-busy':'capture-error');stop(false);}throw e;}
    if(pageDictation) {
     if(generation!==streamGeneration){stream.getTracks().forEach(t=>t.stop());throw new DOMException('Dettatura chiusa','AbortError');}
     streams.add(stream);
@@ -97,9 +113,10 @@
    watch();
    return 'connecting';
   },
+  permissionPending:value=>{permissionAwaited=!!value;},
   stop:()=>stop(),
   isActive:()=>wanted && active
  };
  window.addEventListener('pagehide',()=>stop());
- document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
+ document.addEventListener('visibilitychange',()=>{if(document.hidden && !permissionAwaited)stop();});
 })();

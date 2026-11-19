@@ -17,10 +17,10 @@ android {
                     '-DGGML_CPU_ALL_VARIANTS=OFF', '-DGGML_BACKEND_DL=OFF',
                     '-DGGML_CPU_KLEIDIAI=OFF', '-DLLAMA_CURL=OFF' }
         }
-        versionCode 178
-        versionName "1.155.17"
+        versionCode 179
+        versionName "1.155.18"
         // DAN 1.108: ripristino del comportamento della 1.106.
-        resValue "string", "dan_launcher_label", "DAN HEIWA 1.155.17"
+        resValue "string", "dan_launcher_label", "DAN HEIWA 1.155.18"
         buildConfigField "String", "LUMINEX_DEVICE_TOKEN",
                 "\"${System.getenv('LUMINEX_DEVICE_TOKEN') ?: ''}\""
     }

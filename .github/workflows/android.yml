@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.18-dual-voice
       - dan-v1.155.17-heiwa-design
       - dan-v1.155.16-json-memory
       - dan-v1.155.15-heiwa
@@ -177,6 +178,12 @@ jobs:
           mkdir -p /tmp/heiwa-tests
           javac -d /tmp/heiwa-tests app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaPrompt.java tests/HeiwaPromptTest.java
           java -cp /tmp/heiwa-tests com.dimitriazzarone.chatgptmessenger.HeiwaPromptTest
+
+      - name: Check foreground voice loop
+        run: |
+          mkdir -p /tmp/heiwa-voice-tests
+          javac -d /tmp/heiwa-voice-tests app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaPrompt.java app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaVoiceSession.java tests/HeiwaVoiceSessionTest.java
+          java -cp /tmp/heiwa-voice-tests com.dimitriazzarone.chatgptmessenger.HeiwaVoiceSessionTest
 
       - name: Check JSON memory parser and SQLite index
         run: |
