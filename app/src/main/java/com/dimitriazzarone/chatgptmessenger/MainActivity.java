@@ -102,6 +102,7 @@ public class MainActivity extends Activity {
     private static final long LUMINEX_SNAPSHOT_MS = 4000L;
     private static final int REQ_AUDIO = 3001;
     private static final int REQ_WEB_AUDIO = 3002;
+    private static final int REQ_TERMUX_FILES = 4012;
     private static final int REQ_FILE_CHOOSER = 4001;
     private static final int REQ_MEMORY_EXPORT = 4002;
     private static final int REQ_MEMORY_BACKUP = 4003;
@@ -559,6 +560,10 @@ public class MainActivity extends Activity {
         controlsBar.addView(heiwaButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(codexButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
+        Button filesButton=makeButton("File");filesButton.setAllCaps(false);filesButton.setTextSize(12);
+        filesButton.setContentDescription("Archivio Drive e kit Termux integrato");
+        filesButton.setOnClickListener(v->startActivityForResult(new Intent(this,DanFilesActivity.class),REQ_TERMUX_FILES));
+        controlsBar.addView(filesButton,new LinearLayout.LayoutParams(0,dp(42),1));
         Button copyChatButton = makeButton("Copia chat");
         copyChatButton.setAllCaps(false);
         copyChatButton.setTextSize(12);
@@ -5223,6 +5228,7 @@ public class MainActivity extends Activity {
             Intent data
     ) {
         super.onActivityResult(requestCode, resultCode, data);
+        if(requestCode==REQ_TERMUX_FILES){if(resultCode==RESULT_OK){executeLuminexCommand("new-tab",null,"MAIN",1);executeLuminexCommand("open",DanTermuxKit.URL,null,0);}return;}
         if (requestCode == REQ_UPLOAD_FOLDER) {
             if (resultCode == RESULT_OK && data != null && data.getData() != null)
                 prepareFolderForDrive(data.getData());

@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.20-integrated-files
       - dan-v1.155.19-continuous-mic
       - dan-v1.155.18-dual-voice
       - dan-v1.155.17-heiwa-design
@@ -191,6 +192,8 @@ jobs:
           mkdir -p /tmp/dan-echo-tests
           javac -d /tmp/dan-echo-tests app/src/main/java/com/dimitriazzarone/chatgptmessenger/DanVoiceBargeIn.java tests/DanVoiceBargeInTest.java
           java -cp /tmp/dan-echo-tests com.dimitriazzarone.chatgptmessenger.DanVoiceBargeInTest
+      - name: Check bundled Termux archive
+        run: python3 -m unittest discover -s tests -p 'test_termux_archive.py' -v
       - name: Check JSON memory parser and SQLite index
         run: |
           curl --fail --location --output /tmp/heiwa-json.jar https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar
