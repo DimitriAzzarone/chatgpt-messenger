@@ -3066,6 +3066,12 @@ public class MainActivity extends Activity {
 
     private void configureDownloads(WebView source) {
         source.addJavascriptInterface(blobDownload, "DanFileDownload");
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            try {
+                WebViewCompat.addDocumentStartJavaScript(source, voiceAsset("dan-file-download.js"),
+                        Collections.singleton("*"));
+            } catch (RuntimeException ignored) { /* Existing fetch path remains available. */ }
+        }
         source.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
             if (url == null || url.trim().isEmpty()) {
                 Toast.makeText(
@@ -3137,16 +3143,10 @@ public class MainActivity extends Activity {
         final String filename = sanitizeFilename(name);
         final String contentType = TextUtils.isEmpty(mime) ? "application/octet-stream" : mime;
         statusText.setText("Preparazione del file da salvare…");
-        String js = "(async function(){const token=" + JSONObject.quote(token)
-                + ";try{const r=await fetch(" + JSONObject.quote(url) + ");"
-                + "if(!r.ok)throw new Error('HTTP '+r.status);const b=await r.blob();"
-                + "for(let i=0;i<b.size;i+=49152){const data=await new Promise((ok,no)=>{"
-                + "const f=new FileReader();f.onload=()=>ok(String(f.result).split(',')[1]||'');"
-                + "f.onerror=()=>no(new Error('Lettura file'));f.readAsDataURL(b.slice(i,i+49152));});"
-                + "if(!window.DanFileDownload.append(token,data))throw new Error('Scrittura file');}"
-                + "window.DanFileDownload.finish(token,b.size," + JSONObject.quote(filename)
-                + "," + JSONObject.quote(contentType) + ");"
-                + "}catch(e){window.DanFileDownload.fail(token,String(e));}})();";
+        String js = voiceAsset("dan-file-download.js")
+                + ";window.__danFileDownloads.save(" + JSONObject.quote(url) + ","
+                + JSONObject.quote(token) + "," + JSONObject.quote(filename) + ","
+                + JSONObject.quote(contentType) + ");";
         source.evaluateJavascript(js, null);
     }
 
@@ -3186,8 +3186,10 @@ public class MainActivity extends Activity {
                     save.addCategory(Intent.CATEGORY_OPENABLE);
                     save.setType(TextUtils.isEmpty(mime) ? "application/octet-stream" : mime);
                     save.putExtra(Intent.EXTRA_TITLE, sanitizeFilename(name));
+                    startAttachmentProtection();
                     startActivityForResult(save, REQ_BLOB_SAVE);
                 } catch (Exception e) {
+                    stopAttachmentProtection();
                     ready.delete(); blobSaveFile = null;
                     statusText.setText("Impossibile aprire il salvataggio del file");
                 }
@@ -5136,6 +5138,7 @@ public class MainActivity extends Activity {
             return;
         }
         if (requestCode == REQ_BLOB_SAVE) {
+            stopAttachmentProtection();
             final File ready = blobSaveFile;
             blobSaveFile = null;
             if (ready == null) return;

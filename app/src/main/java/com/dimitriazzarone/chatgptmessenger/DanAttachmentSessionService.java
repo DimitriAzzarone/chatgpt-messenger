@@ -33,7 +33,7 @@ public final class DanAttachmentSessionService extends Service {
             builder = new Notification.Builder(this, CHANNEL);
         } else builder = new Notification.Builder(this);
         Notification notification = builder.setSmallIcon(android.R.drawable.ic_menu_upload)
-                .setContentTitle("Dan · scelta allegato in corso")
+                .setContentTitle("Dan · scelta file in corso")
                 .setContentText("Protezione temporanea durante la scelta del file")
                 .setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false)
                 .setCategory(Notification.CATEGORY_SERVICE).setPriority(Notification.PRIORITY_LOW).build();
