@@ -193,7 +193,7 @@ jobs:
           javac -d /tmp/dan-echo-tests app/src/main/java/com/dimitriazzarone/chatgptmessenger/DanVoiceBargeIn.java tests/DanVoiceBargeInTest.java
           java -cp /tmp/dan-echo-tests com.dimitriazzarone.chatgptmessenger.DanVoiceBargeInTest
       - name: Check bundled Termux archive
-        run: python3 -m unittest discover -s tests -p 'test_termux_archive.py' -v
+        run: python3 -B -m unittest discover -s tests -p 'test_termux_archive.py' -v
       - name: Check JSON memory parser and SQLite index
         run: |
           curl --fail --location --output /tmp/heiwa-json.jar https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar

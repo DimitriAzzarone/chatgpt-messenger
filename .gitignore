@@ -11,3 +11,6 @@ local.properties
 
 vendor/
 .cxx/
+
+__pycache__/
+*.pyc
