@@ -30,18 +30,20 @@ public class WebAudioPermissionTest {
     private MainActivity setup(){
         // Do not resume MainActivity: no real Luminex polling/network jobs in tests.
         controller=Robolectric.buildActivity(MainActivity.class).create();MainActivity activity=controller.get();
-        ReflectionHelpers.setField(activity,"foreground",true);ReflectionHelpers.setField(activity,"webVoiceRequested",true);
-        WebView web=ReflectionHelpers.getField(activity,"webView");web.loadUrl("https://chatgpt.com/c/test");return activity;
+        WebView web=ReflectionHelpers.getField(activity,"webView");web.loadUrl("https://chatgpt.com/c/test");
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1000));
+        ReflectionHelpers.setField(activity,"foreground",true);ReflectionHelpers.setField(activity,"webVoiceRequested",true);return activity;
     }
     @After public void destroy(){if(controller!=null)controller.destroy();}
     @Test public void missingAndroidPermissionStaysPendingThenGrantsAudio(){
         MainActivity activity=setup();Application app=RuntimeEnvironment.getApplication();shadowOf(app).denyPermissions(Manifest.permission.RECORD_AUDIO);
         WebView web=ReflectionHelpers.getField(activity,"webView");Request request=new Request("https://chatgpt.com");web.getWebChromeClient().onPermissionRequest(request);
         assertFalse(request.denied);assertNull(request.granted);assertSame(request,ReflectionHelpers.getField(activity,"pendingPageAudioPermission"));
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(350));
         shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO);
         activity.onRequestPermissionsResult(3002,new String[]{Manifest.permission.RECORD_AUDIO},new int[]{PackageManager.PERMISSION_GRANTED});
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
-        assertFalse(request.denied);assertArrayEquals(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE},request.granted);
+        assertFalse("Permission denied; url="+web.getUrl()+"; foreground="+ReflectionHelpers.getField(activity,"foreground")+"; status="+((android.widget.TextView)ReflectionHelpers.getField(activity,"statusText")).getText(),request.denied);assertArrayEquals(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE},request.granted);
     }
     @Test public void unrelatedOriginAndBackgroundCannotAcquireMicrophone(){
         MainActivity activity=setup();shadowOf(RuntimeEnvironment.getApplication()).grantPermissions(Manifest.permission.RECORD_AUDIO);

@@ -759,8 +759,8 @@ public class MainActivity extends Activity {
         statusText.postDelayed(ask,300L);
     }
     private void completePageAudioPermission(boolean granted){
-        requestingPageAudioPermission=false;
         statusText.postDelayed(()->{
+            requestingPageAudioPermission=false;
             PermissionRequest request=pendingPageAudioPermission;pendingPageAudioPermission=null;
             if(request==null){setPageAudioPending(false);return;}
             boolean allowed=granted&&foreground&&!isFinishing()&&webView!=null&&trustedVoiceOrigin(webView.getUrl())&&trustedVoiceOrigin(request.getOrigin().toString())
