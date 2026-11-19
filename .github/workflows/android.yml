@@ -214,6 +214,13 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle assembleRelease testDebugUnitTest --stacktrace -PDAN_VERSION_NAME="$DAN_VERSION_NAME" -PDAN_VERSION_CODE="$DAN_VERSION_CODE"
 
+      - name: Upload Android test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-tests-${{ env.DAN_VERSION_NAME }}
+          path: app/build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: ignore
       - name: Upload HEIWA UI previews
         uses: actions/upload-artifact@v4
         with:
