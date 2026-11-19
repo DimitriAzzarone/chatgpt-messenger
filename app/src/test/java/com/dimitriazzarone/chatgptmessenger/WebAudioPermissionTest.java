@@ -29,7 +29,7 @@ public class WebAudioPermissionTest {
     }
     private MainActivity setup(){
         // Do not resume MainActivity: no real Luminex polling/network jobs in tests.
-        controller=Robolectric.buildActivity(MainActivity.class).create();MainActivity activity=controller.get();
+        controller=Robolectric.buildActivity(MainActivity.class).create().start().visible();MainActivity activity=controller.get();
         WebView web=ReflectionHelpers.getField(activity,"webView");web.loadUrl("https://chatgpt.com/c/test");
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(1000));
         ReflectionHelpers.setField(activity,"foreground",true);ReflectionHelpers.setField(activity,"webVoiceRequested",true);return activity;
@@ -40,6 +40,7 @@ public class WebAudioPermissionTest {
         WebView web=ReflectionHelpers.getField(activity,"webView");Request request=new Request("https://chatgpt.com");web.getWebChromeClient().onPermissionRequest(request);
         assertFalse(request.denied);assertNull(request.granted);assertSame(request,ReflectionHelpers.getField(activity,"pendingPageAudioPermission"));
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(350));
+        assertTrue("Runtime permission prompt must run on the attached window",(Boolean)ReflectionHelpers.getField(activity,"requestingPageAudioPermission"));
         shadowOf(app).grantPermissions(Manifest.permission.RECORD_AUDIO);
         activity.onRequestPermissionsResult(3002,new String[]{Manifest.permission.RECORD_AUDIO},new int[]{PackageManager.PERMISSION_GRANTED});
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(400));
