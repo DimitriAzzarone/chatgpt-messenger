@@ -299,6 +299,9 @@ public class MainActivity extends Activity {
     private TextToSpeech tts;
     private TextView liveCaption;
     private boolean liveEnabled;
+    private final DanVoiceBargeIn liveEcho = new DanVoiceBargeIn();
+    private final java.util.Map<String,String> liveSpokenChunks = new java.util.HashMap<>();
+    private int liveCaptureErrors;
     private volatile boolean webVoiceRequested;
     private boolean webVoiceActive, pendingWebVoicePermission, requestingPageAudioPermission;
     private PermissionRequest pendingPageAudioPermission;
@@ -707,7 +710,7 @@ public class MainActivity extends Activity {
 
     private void showDanVoiceModes(){
         new AlertDialog.Builder(this,R.style.HeiwaDialogTheme).setTitle("Voce in Dan")
-                .setItems(new String[]{"Voce ufficiale ChatGPT","Conversazione automatica Dan","Diagnostica voce","Permessi microfono Android"},(dialog,which)->{
+                .setItems(new String[]{"Voce ufficiale ChatGPT","Dan · ascolto continuo e interruzione vocale","Diagnostica voce","Permessi microfono Android"},(dialog,which)->{
                     if(which<2){getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString("dan_voice_mode",which==0?"web":"auto").apply();if(which==0)toggleWebVoice();else toggleLiveMode();}
                     else if(which==2)showWebVoiceDiagnostics();else openMicrophoneAppSettings();
                 }).show();
@@ -861,6 +864,7 @@ public class MainActivity extends Activity {
         headsetRecording = false;
         suppressAutoRead = false;
         liveEnabled = true;
+        liveCaptureErrors = 0; liveEcho.clear(); liveSpokenChunks.clear();
         liveWaiting = false;
         liveSendConfirmed = false;
         liveGeneration++;
@@ -878,6 +882,7 @@ public class MainActivity extends Activity {
 
     private void stopLiveMode(String reason) {
         liveEnabled = false;
+        liveEcho.clear(); liveSpokenChunks.clear(); liveCaptureErrors=0;
         suppressAutoRead = true;
         liveWaiting = false;
         liveSendConfirmed = false;
@@ -915,15 +920,44 @@ public class MainActivity extends Activity {
         final long generation = liveGeneration;
         statusText.postDelayed(() -> {
             if (!liveEnabled || generation != liveGeneration || !foreground || liveWaiting
-                    || ttsSpeaking || recognizerSessionActive || manualCapture || headsetRecording) return;
+                    || recognizerSessionActive || manualCapture || headsetRecording) return;
             if (webView == null || !sameVoicePage(livePage, webView.getUrl()) || luminexVisible) {
                 stopLiveMode("Chat cambiata · riavvia LIVE nella chat desiderata");
                 return;
             }
             statusText.setText("LIVE · ti ascolto…");
             if (liveCaption != null) liveCaption.setText("TI ASCOLTO · pausa per inviare");
+            if(speechRecognizer==null)createSpeechRecognizer();
             startListening();
         }, delay);
+    }
+
+    private void interruptLiveReading() {
+        if(!liveEnabled||!ttsSpeaking)return;
+        // Reject all queued TTS callbacks from the interrupted answer.
+        liveGeneration++;ttsSpeaking=false;liveEcho.finished(android.os.SystemClock.uptimeMillis());
+        liveSpokenChunks.clear();if(tts!=null)try{tts.stop();}catch(RuntimeException ignored){}
+        statusText.setText("DAN · ti ascolto, risposta interrotta");
+    }
+
+    private void acceptLiveRecognition(String text) {
+        if(!liveEnabled||liveWaiting)return;
+        long now=android.os.SystemClock.uptimeMillis();
+        if(!liveEcho.accepts(text,now)){scheduleLiveListen(450L);return;}
+        interruptLiveReading();liveCaptureErrors=0;sendLiveTurn(text);
+    }
+
+    private void recoverLiveCapture(int error) {
+        if(!liveEnabled)return;
+        boolean silence=error==SpeechRecognizer.ERROR_NO_MATCH||error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
+        if(silence)liveCaptureErrors=0;
+        if(error==SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS||error==SpeechRecognizer.ERROR_AUDIO
+                || (!silence&&++liveCaptureErrors>3)){
+            stopLiveMode("Microfono non disponibile (codice "+error+") · controlla il servizio vocale Android");return;
+        }
+        SpeechRecognizer old=speechRecognizer;speechRecognizer=null;recognizerSessionActive=false;listening=false;
+        if(old!=null){try{old.cancel();}catch(RuntimeException ignored){}try{old.destroy();}catch(RuntimeException ignored){}}
+        scheduleLiveListen(error==SpeechRecognizer.ERROR_NO_MATCH||error==SpeechRecognizer.ERROR_SPEECH_TIMEOUT?450L:900L);
     }
 
     private void sendLiveTurn(String text) {
@@ -2053,10 +2087,17 @@ public class MainActivity extends Activity {
                                 || (utteranceId != null && utteranceId.startsWith("chatgpt_")
                                 && !utteranceId.contains("_g" + liveGeneration + "_"))) return;
                         ttsSpeaking = true;
-                        if (speechRecognizer != null && recognizerSessionActive) {
-                            try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+                        if(liveEnabled){
+                            String spoken=liveSpokenChunks.get(utteranceId);
+                            if(spoken!=null)liveEcho.playback(spoken);
+                            scheduleLiveListen(250L);
+                            statusText.setText("DAN · leggo e ti ascolto · parla per interrompere");
+                        }else{
+                            if (speechRecognizer != null && recognizerSessionActive) {
+                                try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+                            }
+                            statusText.setText("🔊 Lettura risposta…");
                         }
-                        statusText.setText("🔊 Lettura risposta…");
                     });
                 }
 
@@ -2076,9 +2117,9 @@ public class MainActivity extends Activity {
                                 && !utteranceId.contains("_g" + liveGeneration + "_"))) return;
                         ttsSpeaking = false;
                         if (liveEnabled) {
-                            recognizerSessionActive = false;
-                            listening = false;
-                            scheduleLiveListen(650L);
+                            liveEcho.finished(android.os.SystemClock.uptimeMillis());liveSpokenChunks.clear();
+                            scheduleLiveListen(350L);
+                            statusText.setText("DAN · ti ascolto…");return;
                         }
                         playReadingFinishedSound();
                         statusText.setText(handsFreeEnabled
@@ -2463,6 +2504,7 @@ public class MainActivity extends Activity {
                             + i
                             + (last ? "_last" : "");
 
+            if(liveEnabled)liveSpokenChunks.put(utteranceId,chunks.get(i));
             int queued = tts.speak(
                     chunks.get(i),
                     i == 0
@@ -2737,11 +2779,7 @@ public class MainActivity extends Activity {
                 applyMicStyle(false);
 
                 if (liveEnabled) {
-                    if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
-                        scheduleLiveListen(650L);
-                    } else {
-                        stopLiveMode("Riconoscimento interrotto · verifica rete e permesso microfono");
-                    }
+                    recoverLiveCapture(error);
                     return;
                 }
 
@@ -2799,7 +2837,7 @@ public class MainActivity extends Activity {
                     ArrayList<String> finals = results == null ? null :
                             results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                     text = finals == null || finals.isEmpty() || finals.get(0) == null ? "" : finals.get(0).trim();
-                    sendLiveTurn(text);
+                    acceptLiveRecognition(text);
                     return;
                 }
 
@@ -2837,8 +2875,9 @@ public class MainActivity extends Activity {
                 if (partials == null || partials.isEmpty()) return;
 
                 String candidate = partials.get(0) == null ? "" : partials.get(0).trim();
-                if (liveEnabled && liveCaption != null && !candidate.isEmpty()) {
-                    liveCaption.setText(candidate);
+                if (liveEnabled && !liveWaiting && !candidate.isEmpty()) {
+                    if(ttsSpeaking&&liveEcho.interrupts(candidate,android.os.SystemClock.uptimeMillis()))interruptLiveReading();
+                    if(liveEcho.accepts(candidate,android.os.SystemClock.uptimeMillis())&&liveCaption!=null)liveCaption.setText(candidate);
                 }
                 if (!candidate.isEmpty() && candidate.length() >= lastPartialText.length()) {
                     lastPartialText = candidate;
@@ -3028,7 +3067,7 @@ public class MainActivity extends Activity {
                 statusText.postDelayed(() -> {
                     if (liveEnabled && generation == liveGeneration && capture == liveListenGeneration
                             && speechRecognizer == startedRecognizer && recognizerSessionActive && !liveWaiting)
-                        stopLiveMode("Il microfono non ha concluso · riavvia LIVE");
+                        recoverLiveCapture(SpeechRecognizer.ERROR_SPEECH_TIMEOUT);
                 }, 65000L);
             }
         } catch (Exception e) {

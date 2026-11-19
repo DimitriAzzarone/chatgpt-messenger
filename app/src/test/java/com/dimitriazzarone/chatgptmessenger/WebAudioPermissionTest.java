@@ -51,4 +51,27 @@ public class WebAudioPermissionTest {
         WebView web=ReflectionHelpers.getField(activity,"webView");Request foreign=new Request("https://example.com");web.getWebChromeClient().onPermissionRequest(foreign);assertTrue(foreign.denied);
         ReflectionHelpers.setField(activity,"foreground",false);Request background=new Request("https://chatgpt.com");web.getWebChromeClient().onPermissionRequest(background);assertTrue(background.denied);
     }
+    @Test public void nativeInterruptionPreservesTheOpenRecognizer(){
+        MainActivity activity=setup();ReflectionHelpers.setField(activity,"webVoiceRequested",false);
+        ReflectionHelpers.setField(activity,"liveEnabled",true);ReflectionHelpers.setField(activity,"ttsSpeaking",true);
+        ReflectionHelpers.setField(activity,"recognizerSessionActive",true);ReflectionHelpers.setField(activity,"listening",true);
+        long generation=ReflectionHelpers.getField(activity,"liveGeneration");
+        ReflectionHelpers.callInstanceMethod(activity,"interruptLiveReading");
+        assertTrue((Boolean)ReflectionHelpers.getField(activity,"liveEnabled"));
+        assertTrue((Boolean)ReflectionHelpers.getField(activity,"recognizerSessionActive"));
+        assertTrue((Boolean)ReflectionHelpers.getField(activity,"listening"));
+        assertFalse((Boolean)ReflectionHelpers.getField(activity,"ttsSpeaking"));
+        assertEquals(generation+1,(long)ReflectionHelpers.getField(activity,"liveGeneration"));
+    }
+    @Test public void recognizedPlaybackDoesNotSendOrInterrupt(){
+        MainActivity activity=setup();ReflectionHelpers.setField(activity,"webVoiceRequested",false);
+        ReflectionHelpers.setField(activity,"liveEnabled",true);ReflectionHelpers.setField(activity,"ttsSpeaking",true);
+        DanVoiceBargeIn echo=ReflectionHelpers.getField(activity,"liveEcho");echo.playback("La memoria conserva i documenti sul dispositivo");
+        long generation=ReflectionHelpers.getField(activity,"voiceSendGeneration");
+        ReflectionHelpers.callInstanceMethod(activity,"acceptLiveRecognition",ReflectionHelpers.ClassParameter.from(String.class,"la memoria conserva i documenti"));
+        assertTrue((Boolean)ReflectionHelpers.getField(activity,"ttsSpeaking"));
+        assertFalse((Boolean)ReflectionHelpers.getField(activity,"liveWaiting"));
+        assertEquals(generation,(long)ReflectionHelpers.getField(activity,"voiceSendGeneration"));
+    }
+
 }
