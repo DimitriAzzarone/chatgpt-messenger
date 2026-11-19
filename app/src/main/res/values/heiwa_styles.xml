@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="HeiwaDialogTheme" parent="android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorAccent">#00C8FF</item>
+        <item name="android:colorBackground">#0A192C</item>
+        <item name="android:textColorPrimary">#E0F4FF</item>
+        <item name="android:textColorSecondary">#9EB3C9</item>
+        <item name="android:windowBackground">@drawable/heiwa_dialog_panel</item>
+        <item name="android:windowMinWidthMajor">62%</item>
+        <item name="android:windowMinWidthMinor">92%</item>
+        <item name="android:fontFamily">sans</item>
+    </style>
+</resources>
