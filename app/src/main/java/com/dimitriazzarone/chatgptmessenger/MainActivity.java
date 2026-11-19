@@ -543,6 +543,12 @@ public class MainActivity extends Activity {
             setLuminexVisible(false);
             webView.loadUrl("https://chatgpt.com/codex");
         });
+        Button heiwaButton = makeButton("HEIWA");
+        heiwaButton.setAllCaps(false);
+        heiwaButton.setTextSize(12);
+        heiwaButton.setContentDescription("Apri HEIWA con Qwen locale o Groq online");
+        heiwaButton.setOnClickListener(v -> startActivity(new Intent(this, HeiwaActivity.class)));
+        controlsBar.addView(heiwaButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(codexButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         controlsBar.addView(engineButton, new LinearLayout.LayoutParams(0, dp(42), 1));
         Button copyChatButton = makeButton("Copia chat");

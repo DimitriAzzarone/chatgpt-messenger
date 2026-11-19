@@ -5,11 +5,14 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <atomic>
 
 static std::mutex engine_lock;
 static llama_model * model = nullptr;
 static llama_context * context = nullptr;
 static bool backend_initialized = false;
+static std::atomic<bool> canceled{false};
+static bool abort_generation(void *) { return canceled.load(); }
 
 static void throw_java(JNIEnv *env, const std::string &text) {
     jclass type = env->FindClass("java/lang/IllegalStateException");
@@ -34,42 +37,46 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeLoad(JNIEnv *env, 
     env->ReleaseStringUTFChars(file, path);
     if (!model) return JNI_FALSE;
     auto cp = llama_context_default_params();
-    cp.n_ctx = 4096;
-    cp.n_batch = 256;
-    cp.n_ubatch = 256;
+    cp.n_ctx = 2048;
+    cp.n_batch = 128;
+    cp.n_ubatch = 64;
     cp.n_threads = 2;
     cp.n_threads_batch = 2;
+    cp.abort_callback = abort_generation;
+    cp.abort_callback_data = nullptr;
     context = llama_init_from_model(model, cp);
     if (!context) { unload(); return JNI_FALSE; }
     return JNI_TRUE;
 }
 
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *env, jclass, jstring input, jint max_tokens, jboolean faithful) {
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *env, jclass, jbyteArray input, jint max_tokens, jboolean faithful) {
     std::lock_guard<std::mutex> lock(engine_lock);
     if (!context || !model) { throw_java(env, "Motore Qwen non caricato"); return nullptr; }
-    const char *utf = env->GetStringUTFChars(input, nullptr);
-    if (!utf) return nullptr;
-    std::string prompt(utf);
-    env->ReleaseStringUTFChars(input, utf);
+    if (canceled.load()) { throw_java(env,"Generazione interrotta"); return nullptr; }
+    const jsize input_size = env->GetArrayLength(input);
+    if (input_size > 32768) { throw_java(env,"Messaggio troppo lungo"); return nullptr; }
+    std::string prompt(input_size, '\0');
+    env->GetByteArrayRegion(input, 0, input_size, reinterpret_cast<jbyte *>(&prompt[0]));
+    if (env->ExceptionCheck()) return nullptr;
 
     const llama_vocab * vocab = llama_model_get_vocab(model);
-    std::vector<llama_token> tokens(4096);
+    std::vector<llama_token> tokens(2048);
     const int needed = llama_tokenize(vocab, prompt.data(), (int32_t)prompt.size(),
                                       tokens.data(), (int32_t)tokens.size(), true, true);
-    if (needed <= 0 || needed > 4096) {
+    if (needed <= 0 || needed > 2048) {
         throw_java(env, "Prompt troppo lungo o non tokenizzabile"); return nullptr;
     }
     tokens.resize(needed);
     max_tokens = std::max(1, std::min((int)max_tokens, 256));
-    if ((int)tokens.size() + max_tokens + 1 > 4096) {
+    if ((int)tokens.size() + max_tokens + 1 > 2048) {
         throw_java(env, "Contesto Qwen esaurito: riduci i messaggi o la memoria"); return nullptr;
     }
     llama_memory_clear(llama_get_memory(context), false);
-    llama_batch batch = llama_batch_init(256, 0, 1);
+    llama_batch batch = llama_batch_init(128, 0, 1);
     bool ok = true;
-    for (int start = 0; start < (int) tokens.size(); start += 256) {
-        const int n = std::min(256, (int)tokens.size() - start);
+    for (int start = 0; start < (int) tokens.size(); start += 128) {
+        const int n = std::min(128, (int)tokens.size() - start);
         batch.n_tokens = n;
         for (int i = 0; i < n; i++) {
             batch.token[i] = tokens[start+i];
@@ -96,7 +103,7 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *e
         llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     }
     std::string output;
-    for (int i = 0; i < max_tokens; i++) {
+    for (int i = 0; i < max_tokens && !canceled.load(); i++) {
         llama_token token = llama_sampler_sample(sampler, context, -1);
         // llama_sampler_sample already accepts this token in the pinned runtime.
         if (llama_vocab_is_eog(vocab, token)) break;
@@ -114,7 +121,9 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeGenerate(JNIEnv *e
     llama_sampler_free(sampler);
     llama_batch_free(batch);
     if (!ok) { throw_java(env,"Errore generazione risposta"); return nullptr; }
-    return env->NewStringUTF(output.c_str());
+    jbyteArray bytes = env->NewByteArray(output.size());
+    if (bytes) env->SetByteArrayRegion(bytes, 0, output.size(), reinterpret_cast<const jbyte *>(output.data()));
+    return bytes;
 }
 
 extern "C" JNIEXPORT void JNICALL
@@ -122,3 +131,8 @@ Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeUnload(JNIEnv *, j
     std::lock_guard<std::mutex> lock(engine_lock);
     unload();
 }
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeCancel(JNIEnv *, jclass) { canceled.store(true); }
+extern "C" JNIEXPORT void JNICALL
+Java_com_dimitriazzarone_chatgptmessenger_DanNativeQwen_nativeResetCancel(JNIEnv *, jclass) { canceled.store(false); }

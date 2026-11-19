@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.15-heiwa
       - dan-v1.155.14-generated-downloads
       - dan-v1.155.13-owned-hint
       - dan-v1.155.12-enter-unified
@@ -169,6 +170,24 @@ jobs:
           javac -d /tmp/dan-recovery-test app/src/main/java/com/dimitriazzarone/chatgptmessenger/DanAttachmentRecovery.java tests/AttachmentRecoveryTest.java
           java -cp /tmp/dan-recovery-test AttachmentRecoveryTest
 
+      - name: Check HEIWA context boundaries
+        run: |
+          mkdir -p /tmp/heiwa-tests
+          javac -d /tmp/heiwa-tests app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaPrompt.java tests/HeiwaPromptTest.java
+          java -cp /tmp/heiwa-tests com.dimitriazzarone.chatgptmessenger.HeiwaPromptTest
+
+      - name: Install native Android toolchain
+        run: sdkmanager --install "ndk;29.0.13113456" "cmake;3.31.6"
+
+      - name: Fetch pinned llama.cpp source
+        run: |
+          mkdir -p vendor/llama.cpp
+          git -C vendor/llama.cpp init
+          git -C vendor/llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C vendor/llama.cpp fetch --depth=1 origin de7fa0a3c6a2e1b4cd9f22eb8d6bf5b12dbdb63b
+          git -C vendor/llama.cpp checkout --detach FETCH_HEAD
+          test "$(git -C vendor/llama.cpp rev-parse HEAD)" = "de7fa0a3c6a2e1b4cd9f22eb8d6bf5b12dbdb63b"
+
       - name: Build Dan Luminex AI Integration
         env:
           LUMINEX_DEVICE_TOKEN: ${{ secrets.DEVICE_TOKEN }}
@@ -187,3 +206,32 @@ jobs:
           name: Dan-Heiwa-APK-${{ env.DAN_VERSION_NAME }}
           path: app/build/outputs/apk/release/Dan-Heiwa-${{ env.DAN_VERSION_NAME }}.apk
           if-no-files-found: error
+
+  heiwa-native-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Fetch pinned runtime
+        run: |
+          git init vendor/llama.cpp
+          git -C vendor/llama.cpp remote add origin https://github.com/ggml-org/llama.cpp.git
+          git -C vendor/llama.cpp fetch --depth=1 origin de7fa0a3c6a2e1b4cd9f22eb8d6bf5b12dbdb63b
+          git -C vendor/llama.cpp checkout --detach FETCH_HEAD
+      - name: Build host JNI for actual model test
+        run: |
+          cmake -S app/src/main/cpp -B /tmp/heiwa-native -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF
+          cmake --build /tmp/heiwa-native --target dan_qwen -j 2
+      - name: Download and verify the exact model offered in the app
+        run: |
+          curl --fail --location --retry 2 --output /tmp/qwen3.gguf 'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/50968a4468ef4233ed78cd7c3de230dd1d61a56b/Qwen3-0.6B-Q4_K_M.gguf'
+          echo 'ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a  /tmp/qwen3.gguf' | sha256sum -c -
+      - name: Exercise real native generation and cancellation
+        timeout-minutes: 5
+        run: |
+          mkdir -p /tmp/heiwa-classes
+          javac -d /tmp/heiwa-classes app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaPrompt.java app/src/main/java/com/dimitriazzarone/chatgptmessenger/DanNativeQwen.java tests/HeiwaNativeSmoke.java
+          java -Djava.library.path=/tmp/heiwa-native -cp /tmp/heiwa-classes com.dimitriazzarone.chatgptmessenger.HeiwaNativeSmoke /tmp/qwen3.gguf

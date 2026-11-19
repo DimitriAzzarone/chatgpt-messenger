@@ -16,6 +16,8 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
         android:allowBackup="true"
+        android:fullBackupContent="@xml/dan_backup_rules"
+        android:dataExtractionRules="@xml/dan_data_extraction_rules"
         android:label="@string/dan_launcher_label"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar"
@@ -25,6 +27,10 @@
 
         <service android:name=".DanAttachmentSessionService"
             android:exported="false" android:foregroundServiceType="shortService" />
+
+        <activity android:name=".HeiwaActivity" android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode"
+            android:windowSoftInputMode="adjustResize" />
 
         <activity
             android:name=".MainActivity"

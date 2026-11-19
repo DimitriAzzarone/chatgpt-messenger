@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="heiwa-qwen3-0.6b-q4_k_m.gguf" />
+        <exclude domain="file" path="heiwa-model.partial" />
+        <exclude domain="sharedpref" path="heiwa_secrets.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="heiwa-qwen3-0.6b-q4_k_m.gguf" />
+        <exclude domain="file" path="heiwa-model.partial" />
+        <exclude domain="sharedpref" path="heiwa_secrets.xml" />
+    </device-transfer>
+</data-extraction-rules>

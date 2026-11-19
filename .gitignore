@@ -8,3 +8,6 @@ local.properties
 # Signing keys - non committare
 *.jks
 *.keystore
+
+vendor/
+.cxx/
