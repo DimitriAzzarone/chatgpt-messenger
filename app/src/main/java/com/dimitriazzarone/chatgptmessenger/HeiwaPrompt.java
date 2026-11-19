@@ -20,9 +20,9 @@ final class HeiwaPrompt {
         String system="Sei HEIWA, assistente personale. Rispondi in italiano, in modo chiaro e diretto. "
                 +"Se non sai qualcosa dillo. Non affermare di avere accesso a file o strumenti che non hai.";
         if(useMemory&&memory!=null&&!memory.trim().isEmpty())
-            system+="\nNote personali fornite dall'utente, come contesto:\n"+clip(memory.trim(),700);
+            system+="\nNote personali fornite dall'utente, come contesto:\n"+clip(memory.trim(),1500);
         result.add(new Turn("system",system));
-        List<Turn> recent=new ArrayList<>();int budget=2400;
+        List<Turn> recent=new ArrayList<>();int budget=useMemory&&memory!=null&&!memory.trim().isEmpty()?1500:2400;
         for(int i=turns.size()-1;i>=0&&recent.size()<6;i--) {
             Turn turn=turns.get(i);
             if(!"user".equals(turn.role)&&!"assistant".equals(turn.role))continue;

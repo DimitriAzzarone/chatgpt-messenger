@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - dan-v1.155.16-json-memory
       - dan-v1.155.15-heiwa
       - dan-v1.155.14-generated-downloads
       - dan-v1.155.13-owned-hint
@@ -175,6 +176,14 @@ jobs:
           mkdir -p /tmp/heiwa-tests
           javac -d /tmp/heiwa-tests app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaPrompt.java tests/HeiwaPromptTest.java
           java -cp /tmp/heiwa-tests com.dimitriazzarone.chatgptmessenger.HeiwaPromptTest
+
+      - name: Check JSON memory parser and SQLite index
+        run: |
+          curl --fail --location --output /tmp/heiwa-json.jar https://repo.maven.apache.org/maven2/org/json/json/20240303/json-20240303.jar
+          mkdir -p /tmp/heiwa-json-tests
+          javac -cp /tmp/heiwa-json.jar -d /tmp/heiwa-json-tests app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaPrompt.java app/src/main/java/com/dimitriazzarone/chatgptmessenger/HeiwaJsonReader.java tests/HeiwaJsonReaderTest.java
+          java -cp /tmp/heiwa-json-tests:/tmp/heiwa-json.jar com.dimitriazzarone.chatgptmessenger.HeiwaJsonReaderTest
+          python3 tests/heiwa-memory-schema.py
 
       - name: Install native Android toolchain
         run: sdkmanager --install "ndk;29.0.13113456" "cmake;3.31.6"
